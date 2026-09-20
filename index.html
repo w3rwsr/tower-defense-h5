@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>卡通塔防 H5（Phaser 3）</title>
-  <link rel="stylesheet" href="style.css?v=20260920c" />
+  <link rel="stylesheet" href="style.css?v=20260920d" />
   <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js） -->
-  <script src="vendor/phaser.min.js?v=20260920c"></script>
+  <script src="vendor/phaser.min.js?v=20260920d"></script>
 </head>
 <body>
   <div id="app">
@@ -67,23 +67,26 @@
       </div>
     </div>
 
-    <!-- 竖屏提示（横屏优先） -->
+    <!-- 竖屏旋转提示遮罩：强制横屏模式，竖屏下覆盖整屏提示用户旋转 -->
     <div id="orientation-hint">
-      <div class="rotate-icon">📱↻</div>
-      <p>请旋转设备至横屏游玩</p>
+      <div class="rotate-inner">
+        <div class="rotate-icon">📱↻</div>
+        <h2>请旋转设备至横屏</h2>
+        <p>本游戏仅支持横屏模式，请将手机横放后继续游玩</p>
+      </div>
     </div>
   </div>
 
   <!-- ===== 脚本按依赖顺序加载 ===== -->
-  <script src="js/config.js?v=20260920c"></script>
-  <script src="js/storage.js?v=20260920c"></script>
-  <script src="js/attackModule.js?v=20260920c"></script>
-  <script src="js/objects/Enemy.js?v=20260920c"></script>
-  <script src="js/objects/Projectile.js?v=20260920c"></script>
-  <script src="js/objects/Tower.js?v=20260920c"></script>
-  <script src="js/scenes/BootScene.js?v=20260920c"></script>
-  <script src="js/scenes/LevelSelectScene.js?v=20260920c"></script>
-  <script src="js/scenes/GameScene.js?v=20260920c"></script>
-  <script src="js/main.js?v=20260920c"></script>
+  <script src="js/config.js?v=20260920d"></script>
+  <script src="js/storage.js?v=20260920d"></script>
+  <script src="js/attackModule.js?v=20260920d"></script>
+  <script src="js/objects/Enemy.js?v=20260920d"></script>
+  <script src="js/objects/Projectile.js?v=20260920d"></script>
+  <script src="js/objects/Tower.js?v=20260920d"></script>
+  <script src="js/scenes/BootScene.js?v=20260920d"></script>
+  <script src="js/scenes/LevelSelectScene.js?v=20260920d"></script>
+  <script src="js/scenes/GameScene.js?v=20260920d"></script>
+  <script src="js/main.js?v=20260920d"></script>
 </body>
 </html>
