@@ -7,16 +7,19 @@
 
 html, body {
   width: 100%;
+  /* 移动端：100dvh 会随浏览器地址栏显示/收起动态调整，
+     避免横屏时画布被地址栏遮挡或出现黑边；100% 作为旧浏览器回退 */
   height: 100%;
+  height: 100dvh;
+  min-height: 100%;
   overflow: hidden;
   background: #2f6b3d;
   /* 与游戏内 TD_FONT_STACK 保持一致：优先系统高清无衬线字体，零字体下载 */
   font-family: Inter, Roboto, "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
-  line-height: 1.45;   /* 正文行高 1.4-1.5，多行文本清晰透气 */
+  line-height: 1.45;
   -webkit-tap-highlight-color: transparent;
   -webkit-user-select: none;
   user-select: none;
-  /* —— 字体清晰度优化：抗锯齿 + 子像素渲染 + 字距 —— */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -28,6 +31,10 @@ html, body {
 #app {
   position: fixed;
   inset: 0;
+  /* 用 dvh 保证 #app 始终等于动态视口高度，横屏切换无黑边/截断 */
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
