@@ -241,67 +241,52 @@ html, body {
   to   { transform: scale(1);   opacity: 1; }  /* scale(1) 不触发光栅化模糊 */
 }
 
-/* ---------------- 竖屏提示（已不再强制横屏，此元素永久隐藏） ---------------- */
-#orientation-hint { display: none; }
-
 /* ============================================================
-   竖屏适配：HUD 改为上下排列，画布居中，触控目标不缩小
+   强制横屏模式：竖屏下显示旋转提示遮罩，HUD 始终用横屏布局
    ============================================================ */
+
+/* 旋转提示遮罩：横屏下隐藏 */
+#orientation-hint {
+  display: none;
+}
+
+/* 竖屏下：遮罩覆盖整屏，强制用户旋转设备 */
 @media (orientation: portrait) {
-  #app {
-    flex-direction: column;
-    align-items: stretch;
-    justify-content: flex-start;
-  }
-
-  /* DOM 顺序为 game-container → hud-top → hud-bottom，
-     竖屏 column 布局必须用 order 改为：顶部HUD → 画布 → 底部HUD，
-     否则 flex:1 的容器先占位，两组 HUD 会被挤到屏幕底部堆叠。 */
-  #hud-top { order: 1; }
-  #game-container { order: 2; }
-  #hud-bottom { order: 3; }
-
-  /* 顶部 HUD：进入正常流，不再悬浮于画布之上 */
-  #hud-top {
-    position: relative;
-    top: auto; left: auto; right: auto;
-    width: 100%;
-    flex-shrink: 0;
-    padding: calc(8px + env(safe-area-inset-top)) 10px 6px;
-    gap: 6px;
-  }
-  #hud-top .stats { gap: 6px; }
-  #hud-top .controls { gap: 6px; }
-
-  /* 画布容器：占据剩余中间空间。
-     注意：不要在这里加 display:flex/align-items 居中——Phaser FIT + CENTER_BOTH
-     已通过 canvas 的 marginTop/marginLeft 完成居中，再叠加 flex 居中会双重偏移，
-     导致画布被推到屏幕下半部。 */
-  #game-container {
-    flex: 1 1 auto;
-    width: 100%;
-    min-height: 0;
-    position: relative;
-    overflow: hidden;
-  }
-
-  /* 底部 HUD：居中排列，允许换行 */
-  #hud-bottom {
-    position: relative;
-    left: auto; right: auto; bottom: auto;
-    width: 100%;
-    flex-shrink: 0;
-    flex-wrap: wrap;
+  #orientation-hint {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 6px 10px calc(10px + env(safe-area-inset-bottom));
+    text-align: center;
+    padding: 24px;
+    color: #fff;
   }
-  #wave-box { align-items: center; }
-  #shop { justify-content: center; }
-
-  /* 结算/暂停遮罩仍覆盖全屏 */
-  .overlay { inset: 0; }
+  #orientation-hint .rotate-inner {
+    max-width: 320px;
+  }
+  #orientation-hint .rotate-icon {
+    font-size: 64px;
+    margin-bottom: 16px;
+    animation: rotatePhone 1.6s ease-in-out infinite;
+  }
+  #orientation-hint h2 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    color: #ffd66b;
+  }
+  #orientation-hint p {
+    font-size: 14px;
+    opacity: .85;
+    line-height: 1.6;
+  }
+  @keyframes rotatePhone {
+    0%, 100% { transform: rotate(0deg); }
+    50%      { transform: rotate(90deg); }
+  }
 }
 
 /* ---------------- 窄横屏手机：压缩内边距，保证全部 HUD 可见 ---------------- */
@@ -309,11 +294,4 @@ html, body {
   .chip { padding: 5px 10px; font-size: clamp(11px, 2vmin, 15px); }
   .btn-tower { min-height: 48px; }
   .btn-ctrl { min-height: 40px; padding: 6px 10px; }
-}
-
-/* ---------------- 超窄竖屏（< 360px）进一步收紧 ---------------- */
-@media (orientation: portrait) and (max-width: 360px) {
-  .chip { padding: 6px 9px; font-size: clamp(11px, 3.4vmin, 14px); }
-  .btn-ctrl { min-height: 42px; padding: 6px 9px; font-size: clamp(12px, 3vmin, 15px); }
-  .btn-tower { width: clamp(66px, 22vw, 86px); min-height: 56px; }
 }
