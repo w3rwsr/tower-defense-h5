@@ -20,62 +20,98 @@
    *   2. window.orientation        —— 旧 API，iOS Safari / 老 Android 广泛支持
    *   3. innerWidth > innerHeight  —— 视口比例兜底
    *
-   * 检测结果通过给 <html> 切换 is-landscape / is-portrait class 同步给 CSS，
-   * 保证检测与样式解耦、跨浏览器一致。
+   * 三重保障，保证任何设备/浏览器/旋转锁定状态下都能实时检测：
+   *   a. 事件驱动：orientationchange / resize / screen.orientation.change /
+   *      matchMedia / visibilitychange(pageshow) / visualViewport.resize
+   *   b. 去抖复核：状态变化后 120ms 复核，兼容事件先于视口更新的浏览器
+   *   c. 轮询兜底：每 500ms 轮询一次，即使所有事件都不触发
+   *      （例如系统旋转锁定开启、某些 webview 不派发事件）
+   *      —— 注意：系统级旋转锁定是 OS 行为，浏览器无法绕过，
+   *      只要事件不触发，轮询也会读到真实方向并刷新。
+   *
+   * 检测结果通过给 <html> 切换 is-landscape / is-portrait class 同步给 CSS。
+   * 打开 URL 追加 #dbg 可在真机看到诊断面板（三路信号 + 最终判定）。
    * ============================================================ */
   const Orientation = (function () {
     const html = document.documentElement;
-    let current = null;   // 'landscape' | 'portrait'
+    let current = null;    // 'landscape' | 'portrait'
     let timer = null;
+    let lastSource = null; // 最近一次生效的信号源：'so' | 'wo' | 'vw'
+    let eventCount = 0;    // 事件驱动触发次数
+    let pollCount = 0;     // 轮询触发次数
+    let lastUpdate = 0;    // 最近一次状态变化时间戳
 
-    /** 判断是否横屏（融合三路信号） */
-    const detectLandscape = () => {
+    /** 判断是否横屏，并记录生效的信号源 */
+    const detect = () => {
       // 信号 1：现代 Screen Orientation API
-      const so = (window.screen && screen.orientation) ? screen.orientation : null;
+      let so = null;
+      try { so = (window.screen && screen.orientation) ? screen.orientation : null; } catch (e) {}
       if (so && so.type) {
-        if (so.type.indexOf('landscape') === 0) return true;
-        if (so.type.indexOf('portrait') === 0) return false;
+        if (so.type.indexOf('landscape') === 0) { lastSource = 'so'; return true; }
+        if (so.type.indexOf('portrait') === 0) { lastSource = 'so'; return false; }
       }
-      // 信号 2：旧版 window.orientation（0/180=竖屏，90/270=横屏）
+      // 信号 2：旧版 window.orientation（0/180=竖屏，90/±270=横屏）
       if (typeof window.orientation === 'number') {
-        const o = Math.abs(window.orientation);
-        if (o === 90 || o === 270) return true;
-        if (o === 0 || o === 180) return false;
+        const o = Math.abs(window.orientation) % 360;
+        if (o === 90 || o === 270) { lastSource = 'wo'; return true; }
+        if (o === 0 || o === 180) { lastSource = 'wo'; return false; }
       }
       // 信号 3：视口宽高比兜底
+      lastSource = 'vw';
       return window.innerWidth > window.innerHeight;
+    };
+
+    /** 更新诊断面板（仅 #dbg 模式可见） */
+    const updateDebug = (state) => {
+      const panel = document.getElementById('dbg-panel');
+      if (!panel) return;
+      let soType = '-';
+      try { soType = (screen.orientation && screen.orientation.type) || '-'; } catch (e) {}
+      const wo = (typeof window.orientation === 'number') ? String(window.orientation) : '-';
+      const src = { so: 'screen.orientation', wo: 'window.orientation', vw: '视口比例' }[lastSource] || lastSource;
+      panel.textContent =
+        '方向诊断 | so.type=' + soType +
+        ' | win.orient=' + wo +
+        ' | 视口=' + window.innerWidth + 'x' + window.innerHeight +
+        ' | 判定=' + state +
+        ' | 信号源=' + src +
+        ' | 事件=' + eventCount + ' 轮询=' + pollCount +
+        ' | 更新=' + lastUpdate;
     };
 
     /** 应用方向状态到 DOM class */
     const apply = () => {
-      const landscape = detectLandscape();
+      const landscape = detect();
       const state = landscape ? 'landscape' : 'portrait';
-      if (state === current) return;
-      current = state;
-      if (landscape) {
-        html.classList.remove('is-portrait');
-        html.classList.add('is-landscape');
-      } else {
-        html.classList.remove('is-landscape');
-        html.classList.add('is-portrait');
+      if (state !== current) {
+        current = state;
+        lastUpdate = Date.now() % 100000;
+        if (landscape) {
+          html.classList.remove('is-portrait');
+          html.classList.add('is-landscape');
+        } else {
+          html.classList.remove('is-landscape');
+          html.classList.add('is-portrait');
+        }
+        // 对外暴露，便于调试 / 场景读取
+        window.__deviceOrientation = state;
+        window.__deviceOrientationSource = lastSource;
       }
-      // 对外暴露，便于调试 / 场景读取
-      window.__deviceOrientation = state;
+      updateDebug(state);
     };
 
-    /** 去抖刷新（地址栏动画会连续触发 resize，去抖避免闪烁） */
+    /** 事件驱动刷新（立即应用 + 120ms 复核，兼容视口滞后） */
     const schedule = () => {
+      eventCount++;
       clearTimeout(timer);
-      // 立即应用一次，再延迟 100ms 复核（兼容 orientationchange 后视口滞后）
       apply();
       timer = setTimeout(apply, 120);
     };
 
-    // 监听所有方向相关事件
+    // ---- 事件监听（覆盖所有方向相关信号源） ----
     window.addEventListener('orientationchange', schedule);
     window.addEventListener('resize', schedule);
     if (window.matchMedia) {
-      // CSS 媒体查询作为补充信号源
       try {
         const mq = window.matchMedia('(orientation: landscape)');
         const handler = () => schedule();
@@ -83,16 +119,47 @@
         else if (mq.addListener) mq.addListener(handler);
       } catch (e) { /* 忽略 */ }
     }
-    // Screen Orientation API 的 change 事件
     try {
-      const so2 = (window.screen && screen.orientation) ? screen.orientation : null;
-      if (so2 && so2.addEventListener) so2.addEventListener('change', schedule);
+      const so = (window.screen && screen.orientation) ? screen.orientation : null;
+      if (so && so.addEventListener) so.addEventListener('change', schedule);
+    } catch (e) { /* 忽略 */ }
+    // 应用切换返回 / bfcache 恢复：Android 切后台再回来时方向可能已变
+    try {
+      document.addEventListener('visibilitychange', schedule);
+      window.addEventListener('pageshow', schedule);
+    } catch (e) { /* 忽略 */ }
+    // iOS 动态地址栏（visualViewport 变化）
+    try {
+      if (window.visualViewport && visualViewport.addEventListener) {
+        visualViewport.addEventListener('resize', schedule);
+      }
     } catch (e) { /* 忽略 */ }
 
-    // 初始检测
-    schedule();
+    // ---- 轮询兜底：即使所有事件都不触发也能检测方向变化 ----
+    setInterval(() => { pollCount++; apply(); }, 500);
 
-    return { get isLandscape() { return detectLandscape(); } };
+    // 初始检测
+    apply();
+
+    return {
+      get isLandscape() { return detect(); },
+      get state() { return current; }
+    };
+  })();
+
+  /* ============================================================
+   * 诊断模式：URL 追加 #dbg（如 https://…/?…&#dbg）
+   * 给 <html> 加 has-dbg class，CSS 显示诊断面板。
+   * ============================================================ */
+  (function enableDebug() {
+    try {
+      const want = location.hash.indexOf('dbg') !== -1;
+      if (want) {
+        document.documentElement.classList.add('has-dbg');
+        const panel = document.getElementById('dbg-panel');
+        if (panel) panel.hidden = false;
+      }
+    } catch (e) { /* 忽略 */ }
   })();
 
   const world = TD_CONFIG.world;
