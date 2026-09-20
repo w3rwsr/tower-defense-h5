@@ -8,7 +8,7 @@
 
   const world = TD_CONFIG.world;
 
-  new Phaser.Game({
+  const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: 'game-container',
     backgroundColor: '#7cc24e',
@@ -16,15 +16,39 @@
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
       width: world.width,
-      height: world.height
+      height: world.height,
+      /* 立即响应窗口变化，不等待默认 500ms 轮询间隔，
+         确保横竖屏切换时画布立刻重算尺寸 */
+      resizeInterval: 0
     },
     render: {
-      antialias: true,        /* 形状边缘平滑，避免锯齿 */
-      roundPixels: true,      /* 文字/精灵坐标对齐整像素，杜绝亚像素模糊 */
-      pixelArt: false         /* 非像素风，保留矢量平滑 */
+      antialias: true,
+      roundPixels: true,
+      pixelArt: false
     },
     scene: [BootScene, LevelSelectScene, GameScene]
   });
+
+  /* ============================================================
+   * 真机横竖屏切换：移动浏览器的 orientationchange 在视口尺寸更新前触发，
+   * Phaser 自动 resize 可能读到过期的父容器尺寸，导致画布错位。
+   * 这里在方向变化后强制重排 + 延迟刷新 Phaser ScaleManager。
+   * ============================================================ */
+  let resizeTimer = null;
+  const forceRelayout = () => {
+    // 强制浏览器重排，确保 #app / #game-container 已使用新视口尺寸
+    void document.getElementById('app').offsetHeight;
+    // 延迟刷新 Phaser，等待 iOS Safari 完成动态地址栏收起后的视口更新
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      try { game.scale.refresh(); } catch (e) {}
+    }, 120);
+  };
+  window.addEventListener('orientationchange', forceRelayout);
+  window.addEventListener('resize', forceRelayout);
+  if (window.screen && screen.orientation && screen.orientation.addEventListener) {
+    screen.orientation.addEventListener('change', forceRelayout);
+  }
 
   /* 阻止双击缩放 / 手势缩放干扰（移动端） */
   document.addEventListener('gesturestart', (e) => e.preventDefault());
