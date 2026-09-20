@@ -285,22 +285,32 @@
       };
     }
     const canvas = game.canvas;
-    const ccw = htmlEl.classList.contains('td-rot-ccw');
     /* 注意：默认 transformX/Y 返回世界坐标
        （(pageXY-canvasBounds位置) × displayScale），
-       覆盖后必须同样乘 displayScale 才是游戏世界坐标。 */
-    const dsx = scale.displayScale.x, dsy = scale.displayScale.y;
-    if (ccw) {
+       覆盖后必须同样乘世界比例才是游戏世界坐标。
+       不能直接用 scale.displayScale：ScaleManager.refresh() 内部
+       displayScale = baseSize / canvasBounds，而 canvasBounds 来自
+       getBoundingClientRect——CSS 旋转 90° 后返回的是轴对齐包围盒
+       （宽高互换），该值在视觉横屏态是错误的（如 960/390）。
+       正确的等比比例 = 世界尺寸 / canvas 布局尺寸（clientWidth/
+       Height 不受 transform 影响）；FIT 等比下二者相等。
+       offset* / app 尺寸也在调用时动态读取，FIT 重算后下一次
+       触摸自动使用新比例，旋转交换坐标后映射仍准确。 */
+    const readDS = () => (canvas.clientWidth > 0 && canvas.clientHeight > 0)
+      ? { x: scale.gameSize.width / canvas.clientWidth,
+          y: scale.gameSize.height / canvas.clientHeight }
+      : scale.displayScale;
+    if (htmlEl.classList.contains('td-rot-ccw')) {
       /* 逆时针握持（听筒朝左）：正变换 (vx,vy)=(ly,lx)
          逆：lx=vy, ly=vx */
-      scale.transformX = () => (lastPointerY - canvas.offsetLeft) * dsx;
-      scale.transformY = () => (lastPointerX - canvas.offsetTop) * dsy;
+      scale.transformX = () => (lastPointerY - canvas.offsetLeft) * readDS().x;
+      scale.transformY = () => (lastPointerX - canvas.offsetTop) * readDS().y;
     } else {
       /* 顺时针握持（听筒朝右）：正变换 (vx,vy)=(VW-ly, lx)，
          VW=视口宽=app 布局高(offsetHeight)
          逆：ly=VW-vx, lx=vy */
-      scale.transformX = () => (lastPointerY - canvas.offsetLeft) * dsx;
-      scale.transformY = () => (app.offsetHeight - lastPointerX - canvas.offsetTop) * dsy;
+      scale.transformX = () => (lastPointerY - canvas.offsetLeft) * readDS().x;
+      scale.transformY = () => (app.offsetHeight - lastPointerX - canvas.offsetTop) * readDS().y;
     }
     inputRewired = true;
   };
@@ -316,20 +326,23 @@
     }, 120);
   };
 
-  /* 强制 Phaser 按正确尺寸重算画布（getParentBounds 已 patch，
-     无需再切换 transform）。resize() 触发 FIT 重算画布尺寸，
-     refresh() 重算边界。 */
+  /* 强制 Phaser 按新的父容器尺寸重算画布。
+     关键：绝不能调用 game.scale.resize(w, h)——Phaser 3.80 的
+     ScaleManager.resize 只有两个参数，会把 gameSize / baseSize /
+     canvas 缓冲全部改成传入值（第 3、4 个参数即使传入也被忽略），
+     即把设计世界 960x540 改成容器 CSS 尺寸（如 844x390）：按
+     960x540 布局的选关卡片、底部提示因此被截断，世界比例非等比
+     也会使触摸映射错位。
+     正确流程是只重走 getParentBounds + refresh：FIT 模式下
+     gameSize 始终保持 960x540，仅按父容器重算 canvas 的 CSS
+     显示尺寸（等比缩放）。视觉横屏态 getParentBounds 已 patch
+     为读 offsetWidth/Height（布局尺寸不受 rotate 影响）；切回
+     非旋转态时已还原为原版（无 transform，getBoundingClientRect
+     结果正确）。旋转态与非旋转态都调用，保证两条路径一致。 */
   const refreshPhaserUnrotated = () => {
     window.__tdRefreshCount = (window.__tdRefreshCount || 0) + 1;
-    const htmlEl = document.documentElement;
-    const app = document.getElementById('app');
-    const rotated = app && htmlEl.classList.contains('is-mobile') &&
-                    htmlEl.classList.contains('is-portrait');
     try {
-      if (rotated) {
-        const gc = document.getElementById('game-container');
-        game.scale.resize(gc.offsetWidth, gc.offsetHeight, gc.offsetWidth, gc.offsetHeight);
-      }
+      game.scale.getParentBounds();
       game.scale.refresh();
     } catch (e) { /* 忽略 */ }
   };
@@ -346,34 +359,47 @@
    * ============================================================ */
   let lastTiltState = null;
   let tiltTimer = null;
+
+  /* 握持状态的唯一应用入口（单一状态源，避免事件回调与轮询各自写 class）：
+     - 依据 window.__tdMotion（deviceorientation 回调只更新数据+时间戳）
+     - 传感器数据超过 2 秒未更新视为失效（微信 X5 WebView 切后台/锁屏/
+       权限收回时事件会停发），此时强制按「未横置」处理——
+       解决「横放后切回竖屏，提示层不恢复」的残留状态问题。
+     - 由 200ms 防抖（快速响应）和 500ms 轮询（兜底）共同驱动。 */
+  const applyHeldState = () => {
+    const m = window.__tdMotion;
+    const fresh = !!(m && (Date.now() - m.t) < 2000);
+    const heldLandscape = !!(fresh && Math.abs(m.gamma) > 45);
+    /* γ<0：听筒朝左 → 逆时针握持；γ>0：听筒朝右 → 默认方向。
+       部分微信 X5 WebView 的 beta 不可靠（竖持也报 β≈0），以 gamma 为准。 */
+    const ccw = heldLandscape && m.gamma < 0;
+    const htmlEl = document.documentElement;
+    if (htmlEl.classList.contains('is-held-landscape') !== heldLandscape) {
+      htmlEl.classList.toggle('is-held-landscape', heldLandscape);
+    }
+    if (ccw !== lastTiltState) {
+      lastTiltState = ccw;
+      htmlEl.classList.toggle('td-rot-ccw', ccw);
+      applyVisualLandscapeInput();
+    }
+  };
+
   try {
     window.addEventListener('deviceorientation', (e) => {
       const betaNum = typeof e.beta === 'number' ? e.beta : 0;
       const gammaNum = typeof e.gamma === 'number' ? e.gamma : 0;
       if (typeof e.beta !== 'number' && typeof e.gamma !== 'number') return;
-      window.__tdMotion = { beta: Math.round(betaNum), gamma: Math.round(gammaNum) };
+      window.__tdMotion = { beta: Math.round(betaNum), gamma: Math.round(gammaNum), t: Date.now() };
       clearTimeout(tiltTimer);
-      tiltTimer = setTimeout(() => {
-        /* 物理横置检测：gamma 绝对值 > 45° 表示用户已把手机横放。
-           优先使用 gamma 判定握持方向（W3C：设备顶部/听筒向左倾时 gamma 为负）。
-           部分微信 X5 WebView 的 beta 不可靠（真机实测竖持也报 β≈0），
-           因此横放态一律以 gamma 符号为准；仅在非横放且 |β|≥55 时
-           才回退用 beta 判定方向。 */
-        const heldLandscape = Math.abs(gammaNum) > 45;
-        let ccw = false;
-        if (heldLandscape) {
-          ccw = gammaNum < 0;       // γ<0：听筒朝左 → 逆时针握持
-        } else if (Math.abs(betaNum) >= 55) {
-          ccw = betaNum > 0;        // beta 回退判定（旧逻辑保留）
-        }
-        if (ccw !== lastTiltState) {
-          lastTiltState = ccw;
-          document.documentElement.classList.toggle('td-rot-ccw', ccw);
-          applyVisualLandscapeInput();
-        }
-        document.documentElement.classList.toggle('is-held-landscape', heldLandscape);
-      }, 200);
+      tiltTimer = setTimeout(applyHeldState, 200);
     });
+  } catch (e) { /* 忽略 */ }
+  /* 轮询兜底：传感器事件停发（WebView 节流/切后台返回）时，
+     靠新鲜度判定把 is-held-landscape 拉回 false，提示层恢复 */
+  setInterval(applyHeldState, 500);
+  try {
+    document.addEventListener('visibilitychange', applyHeldState);
+    window.addEventListener('pageshow', applyHeldState);
   } catch (e) { /* 忽略 */ }
   window.addEventListener('orientationchange', forceRelayout);
   window.addEventListener('resize', forceRelayout);
