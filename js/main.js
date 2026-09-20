@@ -50,6 +50,23 @@
     screen.orientation.addEventListener('change', forceRelayout);
   }
 
+  /* ============================================================
+   * 强制横屏：尝试通过 Screen Orientation API 锁定横屏。
+   * 仅在支持的环境生效（Android Chrome 全屏模式），iOS Safari 不支持，
+   * 此时由 CSS 竖屏遮罩提示用户旋转设备。
+   * ============================================================ */
+  const lockLandscape = () => {
+    try {
+      const so = screen.orientation;
+      if (so && typeof so.lock === 'function') {
+        so.lock('landscape').catch(() => { /* 静默失败，由 CSS 遮罩兜底 */ });
+      }
+    } catch (e) { /* 忽略 */ }
+  };
+  // 用户首次交互后尝试锁定（API 要求用户手势）
+  document.addEventListener('pointerdown', lockLandscape, { once: true });
+  document.addEventListener('keydown', lockLandscape, { once: true });
+
   /* 阻止双击缩放 / 手势缩放干扰（移动端） */
   document.addEventListener('gesturestart', (e) => e.preventDefault());
   document.addEventListener('dblclick', (e) => e.preventDefault());
