@@ -360,6 +360,12 @@
           document.documentElement.classList.toggle('td-rot-ccw', ccw);
           applyVisualLandscapeInput();
         }
+        /* 物理横置检测：gamma 绝对值 > 45° 表示用户已把手机横放。
+           此时视觉横屏旋转后的画面相对用户已正向，隐藏「请旋转设备」提示。
+           iOS 未授权 deviceorientation 时此事件不触发，提示保持显示——
+           不影响游戏，仅提示不会自动消失。 */
+        const heldLandscape = Math.abs(e.gamma || 0) > 45;
+        document.documentElement.classList.toggle('is-held-landscape', heldLandscape);
       }, 200);
     });
   } catch (e) { /* 忽略 */ }
