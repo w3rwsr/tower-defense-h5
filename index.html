@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>卡通塔防 H5（Phaser 3）</title>
-  <link rel="stylesheet" href="style.css?v=20260920i" />
+  <link rel="stylesheet" href="style.css?v=20260920j" />
   <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js） -->
   <script src="vendor/phaser.min.js?v=20260920h"></script>
 </head>
@@ -76,9 +76,11 @@
       </div>
     </div>
 
-    <!-- 方向检测诊断面板：URL 追加 #dbg 时显示（真机排查用） -->
-    <div id="dbg-panel" hidden>方向诊断：等待检测…</div>
   </div>
+
+  <!-- 方向检测诊断面板：放在 #app 外部，不跟随视觉横屏旋转，
+       任何握持角度下面板始终横向、完整可读（真机排查用，#dbg 时显示） -->
+  <div id="dbg-panel" hidden>方向诊断：等待检测…</div>
 
   <!-- ===== 脚本按依赖顺序加载 ===== -->
   <script src="js/config.js?v=20260920h"></script>
@@ -90,6 +92,6 @@
   <script src="js/scenes/BootScene.js?v=20260920h"></script>
   <script src="js/scenes/LevelSelectScene.js?v=20260920h"></script>
   <script src="js/scenes/GameScene.js?v=20260920h"></script>
-  <script src="js/main.js?v=20260920i"></script>
+  <script src="js/main.js?v=20260920j"></script>
 </body>
 </html>
