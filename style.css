@@ -1,0 +1,303 @@
+/* ============================================================
+   卡通塔防 H5 —— 样式表
+   横屏 / 竖屏自适应；触控热区 >= 44px；文本随视口缩放可读
+   ============================================================ */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #2f6b3d;
+  /* 与游戏内 TD_FONT_STACK 保持一致：优先系统高清无衬线字体，零字体下载 */
+  font-family: Inter, Roboto, "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  line-height: 1.45;   /* 正文行高 1.4-1.5，多行文本清晰透气 */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  /* —— 字体清晰度优化：抗锯齿 + 子像素渲染 + 字距 —— */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 切换布局时平滑过渡，避免闪烁/跳变 */
+  transition: flex-direction .15s ease;
+}
+
+#game-container,
+#game-container canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* 禁止浏览器触摸手势（滚动/缩放）干扰游戏 */
+  touch-action: none;
+  /* —— 画布渲染清晰度：高 DPR 设备保持矢量平滑，不强制像素化 —— */
+  image-rendering: auto;
+  image-rendering: -webkit-optimize-contrast;  /* Safari/Chrome 优化文字对比度 */
+}
+
+/* ---------------- 通用按钮 ---------------- */
+.btn {
+  border: none;
+  border-radius: 14px;
+  font-weight: 800;
+  color: #4a3313;
+  cursor: pointer;
+  line-height: 1.2;                 /* 整数行高，避免半像素行间距模糊 */
+  font-feature-settings: "kern" 1; /* 启用字距调整 */
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.18), inset 0 -3px 0 rgba(0, 0, 0, 0.10);
+  transition: transform .06s ease, filter .15s ease, box-shadow .06s ease;
+}
+.btn:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,.18); }
+.btn:disabled { opacity: .55; cursor: not-allowed; filter: grayscale(.35); }
+
+/* ---------------- 顶部 HUD ---------------- */
+#hud-top {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+  pointer-events: none; /* 容器穿透，按钮单独接收 */
+  z-index: 20;
+}
+.stats { display: flex; gap: 8px; flex-wrap: wrap; }
+.controls { display: flex; gap: 8px; pointer-events: auto; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: clamp(13px, 2.4vmin, 18px);
+  font-weight: 800;
+  color: #5a3d16;
+  background: rgba(255, 252, 240, 0.92);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.15);
+  white-space: nowrap;
+}
+.chip b { font-size: 1.08em; color: #2e2110; }
+
+.btn-ctrl {
+  min-width: 56px;
+  min-height: 44px;
+  padding: 8px 14px;
+  font-size: clamp(13px, 2.4vmin, 17px);
+  background: #ffe082;
+  pointer-events: auto;
+}
+#btn-pause { background: #ffd180; }
+#btn-speed.on { background: #ff9f68; color: #4a2200; }
+
+/* ---------------- 底部 HUD ---------------- */
+#hud-bottom {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
+  z-index: 20;
+  pointer-events: none;
+}
+
+#wave-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  pointer-events: auto;
+}
+#wave-info {
+  font-size: clamp(12px, 2.2vmin, 16px);
+  font-weight: 800;
+  color: #ffffff;
+  /* text-shadow 改为 1px 整像素偏移，杜绝半透明模糊晕开 */
+  text-shadow: 0 1px 0 rgba(0,0,0,.5);
+  /* 底色加深至 0.72 不透明感：白字在合成深绿上约 6:1（AA） */
+  background: rgba(38, 58, 24, 0.72);
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.btn-wave {
+  min-height: 44px;
+  padding: 10px 18px;
+  font-size: clamp(13px, 2.4vmin, 17px);
+  background: #9be86b;
+  color: #234708;
+  pointer-events: auto;
+}
+.btn-wave:disabled { background: #d9d2c0; }
+
+#shop { display: flex; gap: 8px; pointer-events: auto; }
+.btn-tower {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: clamp(74px, 13vmin, 96px);
+  min-height: 60px;
+  padding: 6px 4px;
+  background: #fff8e7;
+  border: 3px solid transparent;
+  line-height: 1.15;
+}
+.btn-tower .t-name { font-size: clamp(14px, 2.6vmin, 18px); }
+/* 描述文字：深棕色在最浅的塔C底色上 6.3:1（AA），字重 600 保持层级但不臃肿 */
+.btn-tower .t-desc { font-size: clamp(11px, 1.9vmin, 13px); font-weight: 600; color: #6b5226; }
+/* 价格文字：深金色在浅黄底上 4.9:1（AA） */
+.btn-tower .t-cost { font-size: clamp(12px, 2.1vmin, 14px); font-weight: 700; color: #8a6208; }
+
+/* 三种塔的配色（占位色，后续换贴图时保留色带即可） */
+.btn-tower.towerA { background: #dfeeff; border-color: #4a90e2; }
+.btn-tower.towerB { background: #dcfbff; border-color: #37b8c8; }
+.btn-tower.towerC { background: #fff0d4; border-color: #f5a623; }
+.btn-tower.active {
+  border-color: #ff5d5d;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 93, 93, .35), 0 4px 0 rgba(0,0,0,.18);
+}
+
+/* ---------------- 遮罩层 ---------------- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(30, 50, 25, 0.55);
+  backdrop-filter: blur(2px);
+}
+.overlay.hidden { display: none; }
+
+/* 暂停遮罩：内部「继续」按钮需可点击，整层保持默认可交互 */
+#overlay-pause { pointer-events: auto; }
+
+/* 「继续」按钮：与结算按钮同款样式，绿色主色 */
+.btn-resume {
+  min-height: 48px;
+  padding: 12px 32px;
+  font-size: clamp(16px, 3.2vmin, 22px);
+  background: #9be86b;
+  color: #234708;
+  margin-top: 8px;
+}
+.overlay-card {
+  background: #fffaf0;
+  border-radius: 24px;
+  padding: 28px 40px;
+  text-align: center;
+  color: #4a3313;
+  box-shadow: 0 10px 0 rgba(0,0,0,.18);
+  animation: pop .22s ease;
+  /* 动画结束后强制以整像素缩放，避免 transform: scale 持续触发光栅化导致文字模糊 */
+  will-change: transform, opacity;
+}
+.overlay-card h1 { font-size: clamp(26px, 6vmin, 44px); margin-bottom: 8px; }
+.overlay-card h2 { font-size: clamp(22px, 5vmin, 34px); margin-bottom: 8px; }
+.overlay-card p  { font-size: clamp(13px, 2.6vmin, 17px); margin-bottom: 16px; color: #7a5a2c; }
+.btn-restart {
+  min-height: 48px;
+  padding: 12px 28px;
+  font-size: clamp(15px, 3vmin, 20px);
+  background: #9be86b;
+  color: #234708;
+}
+.end-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.btn-to-levels {
+  min-height: 48px;
+  padding: 12px 28px;
+  font-size: clamp(15px, 3vmin, 20px);
+  background: #7ec8ff;
+  color: #0f3b66;
+}
+@keyframes pop {
+  from { transform: scale(.85); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }  /* scale(1) 不触发光栅化模糊 */
+}
+
+/* ---------------- 竖屏提示（已不再强制横屏，此元素永久隐藏） ---------------- */
+#orientation-hint { display: none; }
+
+/* ============================================================
+   竖屏适配：HUD 改为上下排列，画布居中，触控目标不缩小
+   ============================================================ */
+@media (orientation: portrait) {
+  #app {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+
+  /* 顶部 HUD：进入正常流，不再悬浮于画布之上 */
+  #hud-top {
+    position: relative;
+    top: auto; left: auto; right: auto;
+    width: 100%;
+    flex-shrink: 0;
+    padding: calc(8px + env(safe-area-inset-top)) 10px 6px;
+    gap: 6px;
+  }
+  #hud-top .stats { gap: 6px; }
+  #hud-top .controls { gap: 6px; }
+
+  /* 画布容器：占据剩余中间空间，画布内部由 Phaser FIT 等比缩放并居中 */
+  #game-container {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* 底部 HUD：居中排列，允许换行 */
+  #hud-bottom {
+    position: relative;
+    left: auto; right: auto; bottom: auto;
+    width: 100%;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 6px 10px calc(10px + env(safe-area-inset-bottom));
+  }
+  #wave-box { align-items: center; }
+  #shop { justify-content: center; }
+
+  /* 结算/暂停遮罩仍覆盖全屏 */
+  .overlay { inset: 0; }
+}
+
+/* ---------------- 窄横屏手机：压缩内边距，保证全部 HUD 可见 ---------------- */
+@media (orientation: landscape) and (max-height: 460px) {
+  .chip { padding: 5px 10px; font-size: clamp(11px, 2vmin, 15px); }
+  .btn-tower { min-height: 48px; }
+  .btn-ctrl { min-height: 40px; padding: 6px 10px; }
+}
+
+/* ---------------- 超窄竖屏（< 360px）进一步收紧 ---------------- */
+@media (orientation: portrait) and (max-width: 360px) {
+  .chip { padding: 6px 9px; font-size: clamp(11px, 3.4vmin, 14px); }
+  .btn-ctrl { min-height: 42px; padding: 6px 9px; font-size: clamp(12px, 3vmin, 15px); }
+  .btn-tower { width: clamp(66px, 22vw, 86px); min-height: 56px; }
+}
