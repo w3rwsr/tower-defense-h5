@@ -245,53 +245,51 @@ html, body {
    强制横屏模式：竖屏下显示旋转提示遮罩，HUD 始终用横屏布局
    ============================================================ */
 
-/* 旋转提示遮罩：横屏下隐藏 */
+/* 旋转提示遮罩：横屏下隐藏（由 JS 的 is-portrait class 控制，不依赖 CSS 媒体查询） */
 #orientation-hint {
   display: none;
 }
 
 /* 竖屏下：遮罩覆盖整屏，强制用户旋转设备 */
-@media (orientation: portrait) {
-  #orientation-hint {
-    display: flex;
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    padding: 24px;
-    color: #fff;
-  }
-  #orientation-hint .rotate-inner {
-    max-width: 320px;
-  }
-  #orientation-hint .rotate-icon {
-    font-size: 64px;
-    margin-bottom: 16px;
-    animation: rotatePhone 1.6s ease-in-out infinite;
-  }
-  #orientation-hint h2 {
-    font-size: 20px;
-    font-weight: 700;
-    margin-bottom: 10px;
-    color: #ffd66b;
-  }
-  #orientation-hint p {
-    font-size: 14px;
-    opacity: .85;
-    line-height: 1.6;
-  }
-  @keyframes rotatePhone {
-    0%, 100% { transform: rotate(0deg); }
-    50%      { transform: rotate(90deg); }
-  }
+html.is-portrait #orientation-hint {
+  display: flex;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  color: #fff;
+}
+html.is-portrait #orientation-hint .rotate-inner {
+  max-width: 320px;
+}
+html.is-portrait #orientation-hint .rotate-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+  animation: rotatePhone 1.6s ease-in-out infinite;
+}
+html.is-portrait #orientation-hint h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: #ffd66b;
+}
+html.is-portrait #orientation-hint p {
+  font-size: 14px;
+  opacity: .85;
+  line-height: 1.6;
+}
+@keyframes rotatePhone {
+  0%, 100% { transform: rotate(0deg); }
+  50%      { transform: rotate(90deg); }
 }
 
 /* ---------------- 窄横屏手机：压缩内边距，保证全部 HUD 可见 ---------------- */
-@media (orientation: landscape) and (max-height: 460px) {
-  .chip { padding: 5px 10px; font-size: clamp(11px, 2vmin, 15px); }
-  .btn-tower { min-height: 48px; }
-  .btn-ctrl { min-height: 40px; padding: 6px 10px; }
+@media (max-height: 460px) {
+  html.is-landscape .chip { padding: 5px 10px; font-size: clamp(11px, 2vmin, 15px); }
+  html.is-landscape .btn-tower { min-height: 48px; }
+  html.is-landscape .btn-ctrl { min-height: 40px; padding: 6px 10px; }
 }
