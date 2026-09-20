@@ -70,7 +70,7 @@ html, body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+  padding: calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 8px calc(12px + env(safe-area-inset-left));
   pointer-events: none; /* 容器穿透，按钮单独接收 */
   z-index: 20;
 }
@@ -111,7 +111,7 @@ html, body {
   align-items: flex-end;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
+  padding: 8px calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
   z-index: 20;
   pointer-events: none;
 }
@@ -247,6 +247,13 @@ html, body {
     justify-content: flex-start;
   }
 
+  /* DOM 顺序为 game-container → hud-top → hud-bottom，
+     竖屏 column 布局必须用 order 改为：顶部HUD → 画布 → 底部HUD，
+     否则 flex:1 的容器先占位，两组 HUD 会被挤到屏幕底部堆叠。 */
+  #hud-top { order: 1; }
+  #game-container { order: 2; }
+  #hud-bottom { order: 3; }
+
   /* 顶部 HUD：进入正常流，不再悬浮于画布之上 */
   #hud-top {
     position: relative;
@@ -259,14 +266,16 @@ html, body {
   #hud-top .stats { gap: 6px; }
   #hud-top .controls { gap: 6px; }
 
-  /* 画布容器：占据剩余中间空间，画布内部由 Phaser FIT 等比缩放并居中 */
+  /* 画布容器：占据剩余中间空间。
+     注意：不要在这里加 display:flex/align-items 居中——Phaser FIT + CENTER_BOTH
+     已通过 canvas 的 marginTop/marginLeft 完成居中，再叠加 flex 居中会双重偏移，
+     导致画布被推到屏幕下半部。 */
   #game-container {
     flex: 1 1 auto;
     width: 100%;
     min-height: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    position: relative;
+    overflow: hidden;
   }
 
   /* 底部 HUD：居中排列，允许换行 */
