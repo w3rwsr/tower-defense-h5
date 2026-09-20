@@ -28,15 +28,21 @@ class LevelSelectScene extends Phaser.Scene {
 
     this.buildLayout();
 
-    /* 方向/尺寸变化时重建布局（防抖，仅在方向改变时重启） */
+    /* 方向变化时重建布局。
+       关键：监听器挂在游戏级 ScaleManager 上，场景关闭不会自动移除，
+       必须在 shutdown 时手动 off —— 否则进入 GameScene 后旋转手机，
+       残留监听器会把已关闭的选关场景重新 restart，把玩家踢出游戏。 */
     this.lastPortrait = this.isPortrait();
-    this.scale.on('resize', () => {
+    this.handleResize = () => {
+      if (!this.scene.isActive()) return;
       const now = this.isPortrait();
       if (now !== this.lastPortrait) {
         this.lastPortrait = now;
         this.scene.restart();
       }
-    });
+    };
+    this.scale.on('resize', this.handleResize);
+    this.events.once('shutdown', () => this.scale.off('resize', this.handleResize));
   }
 
   /** 当前是否竖屏 */
