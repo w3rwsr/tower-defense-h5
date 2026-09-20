@@ -348,23 +348,29 @@
   let tiltTimer = null;
   try {
     window.addEventListener('deviceorientation', (e) => {
-      if (typeof e.beta !== 'number' || e.beta === null) return;
-      window.__tdMotion = { beta: Math.round(e.beta), gamma: Math.round(e.gamma) };
+      const betaNum = typeof e.beta === 'number' ? e.beta : 0;
+      const gammaNum = typeof e.gamma === 'number' ? e.gamma : 0;
+      if (typeof e.beta !== 'number' && typeof e.gamma !== 'number') return;
+      window.__tdMotion = { beta: Math.round(betaNum), gamma: Math.round(gammaNum) };
       clearTimeout(tiltTimer);
       tiltTimer = setTimeout(() => {
-        const portraitTilt = Math.abs(e.beta) < 55; // 接近竖直：竖屏拿法，无握持方向
+        /* 物理横置检测：gamma 绝对值 > 45° 表示用户已把手机横放。
+           优先使用 gamma 判定握持方向（W3C：设备顶部/听筒向左倾时 gamma 为负）。
+           部分微信 X5 WebView 的 beta 不可靠（真机实测竖持也报 β≈0），
+           因此横放态一律以 gamma 符号为准；仅在非横放且 |β|≥55 时
+           才回退用 beta 判定方向。 */
+        const heldLandscape = Math.abs(gammaNum) > 45;
         let ccw = false;
-        if (!portraitTilt) ccw = e.beta > 0; // 横放：按 beta 符号定方向（见上方注释）
+        if (heldLandscape) {
+          ccw = gammaNum < 0;       // γ<0：听筒朝左 → 逆时针握持
+        } else if (Math.abs(betaNum) >= 55) {
+          ccw = betaNum > 0;        // beta 回退判定（旧逻辑保留）
+        }
         if (ccw !== lastTiltState) {
           lastTiltState = ccw;
           document.documentElement.classList.toggle('td-rot-ccw', ccw);
           applyVisualLandscapeInput();
         }
-        /* 物理横置检测：gamma 绝对值 > 45° 表示用户已把手机横放。
-           此时视觉横屏旋转后的画面相对用户已正向，隐藏「请旋转设备」提示。
-           iOS 未授权 deviceorientation 时此事件不触发，提示保持显示——
-           不影响游戏，仅提示不会自动消失。 */
-        const heldLandscape = Math.abs(e.gamma || 0) > 45;
         document.documentElement.classList.toggle('is-held-landscape', heldLandscape);
       }, 200);
     });
