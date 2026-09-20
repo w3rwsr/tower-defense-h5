@@ -293,3 +293,23 @@ html.is-portrait #orientation-hint p {
   html.is-landscape .btn-tower { min-height: 48px; }
   html.is-landscape .btn-ctrl { min-height: 40px; padding: 6px 10px; }
 }
+
+/* ---------------- 方向检测诊断面板（URL 追加 #dbg 时显示） ---------------- */
+#dbg-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 99999;
+  max-width: 100%;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, .78);
+  color: #7CFC94;
+  font: 11px/1.5 Consolas, "Courier New", monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  pointer-events: none;
+  border-bottom-left-radius: 8px;
+}
+
+/* #dbg hash 时显示诊断面板（由 JS 写入，hidden 属性默认隐藏） */
+html.has-dbg #dbg-panel { display: block; }
