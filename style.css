@@ -42,11 +42,21 @@ html, body {
   transition: flex-direction .15s ease;
 }
 
-#game-container,
+#game-container {
+  /* 画布居中交给 flex（Phaser autoCenter 已禁用——CSS 旋转容器中
+     Phaser 的 margin 居中会按旋转后的轴对齐框计算导致偏移） */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
 #game-container canvas {
-  width: 100%;
-  height: 100%;
+  width: auto;
+  height: auto;
+  max-width: none;
   display: block;
+  /* 覆盖 Phaser 写入的 absolute，让画布参与父级 flex 居中 */
+  position: static !important;
   /* 禁止浏览器触摸手势（滚动/缩放）干扰游戏 */
   touch-action: none;
   /* —— 画布渲染清晰度：高 DPR 设备保持矢量平滑，不强制像素化 —— */
@@ -245,13 +255,13 @@ html, body {
    强制横屏模式：竖屏下显示旋转提示遮罩，HUD 始终用横屏布局
    ============================================================ */
 
-/* 旋转提示遮罩：横屏下隐藏（由 JS 的 is-portrait class 控制，不依赖 CSS 媒体查询） */
+/* 旋转提示遮罩：默认隐藏 */
 #orientation-hint {
   display: none;
 }
 
-/* 竖屏下：遮罩覆盖整屏，强制用户旋转设备 */
-html.is-portrait #orientation-hint {
+/* 非移动端（桌面窄窗）竖屏：显示旋转提示遮罩 */
+html.is-portrait:not(.is-mobile) #orientation-hint {
   display: flex;
   position: fixed;
   inset: 0;
@@ -263,21 +273,21 @@ html.is-portrait #orientation-hint {
   padding: 24px;
   color: #fff;
 }
-html.is-portrait #orientation-hint .rotate-inner {
+html.is-portrait:not(.is-mobile) #orientation-hint .rotate-inner {
   max-width: 320px;
 }
-html.is-portrait #orientation-hint .rotate-icon {
+html.is-portrait:not(.is-mobile) #orientation-hint .rotate-icon {
   font-size: 64px;
   margin-bottom: 16px;
   animation: rotatePhone 1.6s ease-in-out infinite;
 }
-html.is-portrait #orientation-hint h2 {
+html.is-portrait:not(.is-mobile) #orientation-hint h2 {
   font-size: 20px;
   font-weight: 700;
   margin-bottom: 10px;
   color: #ffd66b;
 }
-html.is-portrait #orientation-hint p {
+html.is-portrait:not(.is-mobile) #orientation-hint p {
   font-size: 14px;
   opacity: .85;
   line-height: 1.6;
@@ -285,6 +295,35 @@ html.is-portrait #orientation-hint p {
 @keyframes rotatePhone {
   0%, 100% { transform: rotate(0deg); }
   50%      { transform: rotate(90deg); }
+}
+
+/* ============================================================
+   视觉横屏：移动端 + 竖屏（微信/QQ 内置 WebView、旋转锁定开启，
+   视口物理竖屏且无法真横屏）时，把整个应用旋转 90° 呈现横屏布局。
+   已用 Playwright 数值实验验证（390x844 视口、844x390 布局盒）：
+   - 顺时针握持（听筒朝右，多数人习惯）：
+     transform: rotate(90deg) translateY(-100vw)，视觉恰好覆盖视口，
+     游戏画面顶部朝屏幕右侧。
+   - 逆时针握持（听筒朝左）：html.td-rot-ccw 时换用
+     matrix(0,1,1,0)（绕 y=x 反射），画面顶部朝屏幕左侧。
+   竖持时画面旋转 90° 显示，用户横放手机后画面即正向。
+   触摸坐标逆变换由 main.js 覆盖 Phaser scale.transformX/Y 完成。
+   #app 带 transform 后成为 fixed 后代的 containing block，
+   HUD/遮罩等 fixed 元素会自动相对旋转后的 #app 定位，无需改动。
+   ============================================================ */
+html.is-mobile.is-portrait #app {
+  width: 100vh;
+  width: 100dvh;
+  height: 100vw;
+  height: 100dvw;
+  transform: rotate(90deg) translateY(-100vw);
+  transform: rotate(90deg) translateY(-100dvw);
+  transform-origin: 0 0;
+}
+
+/* 逆时针握持（听筒朝左）：画面顶部朝屏幕左侧 */
+html.is-mobile.is-portrait.td-rot-ccw #app {
+  transform: matrix(0, 1, 1, 0, 0, 0);
 }
 
 /* ---------------- 窄横屏手机：压缩内边距，保证全部 HUD 可见 ---------------- */
