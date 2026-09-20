@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>卡通塔防 H5（Phaser 3）</title>
+  <link rel="stylesheet" href="style.css?v=20260920b" />
+  <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js） -->
+  <script src="vendor/phaser.min.js?v=20260920b"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- Phaser 画布容器 -->
+    <div id="game-container"></div>
+
+    <!-- 顶部 HUD：金币 / 生命 / 波次 + 控制按钮 -->
+    <div id="hud-top">
+      <div class="stats">
+        <span class="chip chip-gold">🪙 <b id="hud-gold">0</b></span>
+        <span class="chip chip-lives">❤️ <b id="hud-lives">0</b></span>
+        <span class="chip chip-wave">🌊 <b id="hud-wave">0/0</b></span>
+      </div>
+      <div class="controls">
+        <button id="btn-levels" class="btn btn-ctrl" type="button">🗺 选关</button>
+        <button id="btn-speed" class="btn btn-ctrl" type="button">1x</button>
+        <button id="btn-pause" class="btn btn-ctrl" type="button">⏸ 暂停</button>
+      </div>
+    </div>
+
+    <!-- 底部 HUD：波次控制 + 塔商店 -->
+    <div id="hud-bottom">
+      <div id="wave-box">
+        <span id="wave-info"></span>
+        <button id="btn-wave" class="btn btn-wave" type="button"></button>
+      </div>
+      <div id="shop">
+        <button class="btn btn-tower towerA" data-type="towerA" type="button">
+          <span class="t-name">塔A</span><span class="t-desc">单体高伤</span><span class="t-cost">🪙100</span>
+        </button>
+        <button class="btn btn-tower towerB" data-type="towerB" type="button">
+          <span class="t-name">塔B</span><span class="t-desc">范围减速</span><span class="t-cost">🪙120</span>
+        </button>
+        <button class="btn btn-tower towerC" data-type="towerC" type="button">
+          <span class="t-name">塔C</span><span class="t-desc">攻速快</span><span class="t-cost">🪙80</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 暂停遮罩 -->
+    <div id="overlay-pause" class="overlay hidden">
+      <div class="overlay-card">
+        <h2>⏸ 已暂停</h2>
+        <button id="btn-resume" class="btn btn-resume" type="button">▶ 继续</button>
+      </div>
+    </div>
+
+    <!-- 结算遮罩 -->
+    <div id="overlay-end" class="overlay hidden">
+      <div class="overlay-card">
+        <h1 id="end-title">胜利！</h1>
+        <p id="end-desc"></p>
+        <div class="end-btns">
+          <button id="btn-restart" class="btn btn-restart" type="button">🔄 再来一局</button>
+          <button id="btn-to-levels" class="btn btn-to-levels" type="button">🗺 返回选关</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 竖屏提示（横屏优先） -->
+    <div id="orientation-hint">
+      <div class="rotate-icon">📱↻</div>
+      <p>请旋转设备至横屏游玩</p>
+    </div>
+  </div>
+
+  <!-- ===== 脚本按依赖顺序加载 ===== -->
+  <script src="js/config.js?v=20260920b"></script>
+  <script src="js/storage.js?v=20260920b"></script>
+  <script src="js/attackModule.js?v=20260920b"></script>
+  <script src="js/objects/Enemy.js?v=20260920b"></script>
+  <script src="js/objects/Projectile.js?v=20260920b"></script>
+  <script src="js/objects/Tower.js?v=20260920b"></script>
+  <script src="js/scenes/BootScene.js?v=20260920b"></script>
+  <script src="js/scenes/LevelSelectScene.js?v=20260920b"></script>
+  <script src="js/scenes/GameScene.js?v=20260920b"></script>
+  <script src="js/main.js?v=20260920b"></script>
+</body>
+</html>
