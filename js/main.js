@@ -6,6 +6,95 @@
 (function () {
   'use strict';
 
+  /* ============================================================
+   * 可靠的设备方向检测模块。
+   *
+   * 为什么不用纯 CSS @media (orientation: portrait)：
+   *   - CSS orientation 媒体查询依据的是「视口宽高比」，而非真实设备方向，
+   *     移动端地址栏显示/收起、分屏、软键盘都会改变视口尺寸导致误判。
+   *   - iOS Safari / 部分 Android 浏览器的 orientationchange 与视口更新
+   *     不同步，媒体查询会出现短暂错误状态。
+   *
+   * 本模块融合三路信号（按可靠性优先级）：
+   *   1. screen.orientation.type  —— 现代 API，优先使用
+   *   2. window.orientation        —— 旧 API，iOS Safari / 老 Android 广泛支持
+   *   3. innerWidth > innerHeight  —— 视口比例兜底
+   *
+   * 检测结果通过给 <html> 切换 is-landscape / is-portrait class 同步给 CSS，
+   * 保证检测与样式解耦、跨浏览器一致。
+   * ============================================================ */
+  const Orientation = (function () {
+    const html = document.documentElement;
+    let current = null;   // 'landscape' | 'portrait'
+    let timer = null;
+
+    /** 判断是否横屏（融合三路信号） */
+    const detectLandscape = () => {
+      // 信号 1：现代 Screen Orientation API
+      const so = (window.screen && screen.orientation) ? screen.orientation : null;
+      if (so && so.type) {
+        if (so.type.indexOf('landscape') === 0) return true;
+        if (so.type.indexOf('portrait') === 0) return false;
+      }
+      // 信号 2：旧版 window.orientation（0/180=竖屏，90/270=横屏）
+      if (typeof window.orientation === 'number') {
+        const o = Math.abs(window.orientation);
+        if (o === 90 || o === 270) return true;
+        if (o === 0 || o === 180) return false;
+      }
+      // 信号 3：视口宽高比兜底
+      return window.innerWidth > window.innerHeight;
+    };
+
+    /** 应用方向状态到 DOM class */
+    const apply = () => {
+      const landscape = detectLandscape();
+      const state = landscape ? 'landscape' : 'portrait';
+      if (state === current) return;
+      current = state;
+      if (landscape) {
+        html.classList.remove('is-portrait');
+        html.classList.add('is-landscape');
+      } else {
+        html.classList.remove('is-landscape');
+        html.classList.add('is-portrait');
+      }
+      // 对外暴露，便于调试 / 场景读取
+      window.__deviceOrientation = state;
+    };
+
+    /** 去抖刷新（地址栏动画会连续触发 resize，去抖避免闪烁） */
+    const schedule = () => {
+      clearTimeout(timer);
+      // 立即应用一次，再延迟 100ms 复核（兼容 orientationchange 后视口滞后）
+      apply();
+      timer = setTimeout(apply, 120);
+    };
+
+    // 监听所有方向相关事件
+    window.addEventListener('orientationchange', schedule);
+    window.addEventListener('resize', schedule);
+    if (window.matchMedia) {
+      // CSS 媒体查询作为补充信号源
+      try {
+        const mq = window.matchMedia('(orientation: landscape)');
+        const handler = () => schedule();
+        if (mq.addEventListener) mq.addEventListener('change', handler);
+        else if (mq.addListener) mq.addListener(handler);
+      } catch (e) { /* 忽略 */ }
+    }
+    // Screen Orientation API 的 change 事件
+    try {
+      const so2 = (window.screen && screen.orientation) ? screen.orientation : null;
+      if (so2 && so2.addEventListener) so2.addEventListener('change', schedule);
+    } catch (e) { /* 忽略 */ }
+
+    // 初始检测
+    schedule();
+
+    return { get isLandscape() { return detectLandscape(); } };
+  })();
+
   const world = TD_CONFIG.world;
 
   const game = new Phaser.Game({
