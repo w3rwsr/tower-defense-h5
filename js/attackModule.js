@@ -106,7 +106,9 @@
 
   /**
    * 范围吸引行为（塔D）：不发射弹道。【范围索敌】——每个脉冲窗口扫描
-   * 射程内的【全部小怪】并逐个施加沿路回拉（非单体锁定）。
+   * 射程内的【全部小怪】，对每一只施加【同等速率】的沿路吸引（非单体锁定、
+   * 不分先后）：投影点之前的小怪向前靠近、越过投影点的小怪被向后拉，
+   * 大家一起向塔的沿路投影点汇聚。
    * 每 attractInterval 毫秒触发一次吸附脉冲（建塔即开窗），脉冲持续
    * attractDuration 毫秒，脉冲间隙敌人位移自然衰减归零、继续沿路前进。
    *
@@ -118,15 +120,18 @@
    *     targets) 播放一次多目标攻击动画（GameScene.playPullPulse），
    *     炮头转向距塔最近的被吸目标；无目标时炮头保持原方向。
    *
-   * 位移铁律：吸引【只沿道路方向、只向后拉】，绝不产生横向/垂直分量：
+   * 位移铁律：吸引【只沿道路方向、双向汇聚】，绝不产生横向/垂直分量：
    *   1. 取敌人当前所在路径段，求塔在该段上的投影点（沿路里程 footDist）；
-   *   2. 回拉量 back = clamp(pathDist - footDist, 0, maxDisplace)
-   *      ——敌人走过投影点后才被往回拉，未走到不向前拽（避免帮怪加速）；
-   *   3. 写入 enemy.pullBack（沿路标量回拉距离），Enemy 渲染点取
+   *   2. 带符号位移 back = pathDist - footDist：>0 已越过投影点→向塔回拉，
+   *      <0 还在投影点之前→向塔拉近，=0 已在塔正对位置；统一限幅
+   *      clamp(back, -maxDisplace, +maxDisplace)，远近小怪都能明显靠近；
+   *   3. 写入【带符号】的 enemy.pullBack（正=向后、负=向前），Enemy 渲染点取
    *      pathPointAt(pathDist - pullBack) —— 该点【数学上恒在路径上】，
    *      拐弯处也不会切出道路；pathDist 本身永不回退，脉冲结束 pullBack
-   *      衰减归零即回到当前路径位置继续前进，不卡、不脱轨。
-   * 被显著回拉（pullBack>16）的敌人推进减速（Enemy.update 内判定）→ 真控场。
+   *      衰减归零即回到当前路径位置继续前进（向前的拉引只是窗口内视觉汇聚，
+   *      窗口结束回弹，不形成永久加速），不卡、不脱轨；
+   *   4. 每只小怪用同一收敛系数 k=1-exp(-pullStrength·dt)，吸引力度一致。
+   * 被显著吸引（|pullBack|>16）的敌人推进减速（Enemy.update 内判定）→ 真控场。
    */
   class PullBehavior {
     constructor(tower, cfg) {
@@ -182,7 +187,8 @@
       const maxD = this.eff.maxDisplace;
       const k = 1 - Math.exp(-strength * dt); // 帧率无关 lerp 系数
 
-      /* 范围索敌：遍历全场敌人，射程内的所有小怪逐个施加沿路回拉。
+      /* 范围索敌：遍历全场敌人，射程内的所有小怪【逐个】施加同速率沿路吸引，
+         不分先后、不挑第一个——每只怪独立向自己路段上的塔投影点汇聚。
          primary = 距塔最近的被吸目标，用于炮头朝向（多目标时的视觉锚点）。 */
       let primary = null;
       let primaryD2 = Infinity;
@@ -205,10 +211,12 @@
         f = f < 0 ? 0 : (f > 1 ? 1 : f);
         const footDist = seg.start + f * seg.len;
 
-        /* 只沿路向后拉：敌人越过投影点才有回拉量，限幅 maxD，永无横向分量 */
+        /* 沿路双向吸引（带符号，永无横向分量）：
+           back>0 已越过投影点→pullBack 正向塔回拉；
+           back<0 还在投影点之前→pullBack 负向塔拉近；back=0 正对塔不动。
+           对称限幅 ±maxD，同一收敛系数 k —— 范围内每只小怪力度一致。 */
         const back = e.pathDist - footDist;
-        if (back <= 0) continue;
-        const target = back < maxD ? back : maxD;
+        const target = back > maxD ? maxD : (back < -maxD ? -maxD : back);
         e.pullBack += (target - (e.pullBack || 0)) * k;
         e.pullFresh = true;
 
