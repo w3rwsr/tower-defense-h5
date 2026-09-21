@@ -371,9 +371,15 @@
        每次调用动态读取比例，FIT 重算后下一次触摸自动使用新比例。 */
     const curPoint = () => inputQueue[0];
     if (htmlEl.classList.contains('td-rot-ccw')) {
-      /* 逆时针握持（听筒朝左）：正变换 (cx,cy)=(ly,lx)
-         逆：lx=cy, ly=cx → gameX=(cy-OL)·s, gameY=(cx-OT)·s */
-      scale.transformX = () => (curPoint().y - canvas.offsetLeft) * readDS().x;
+      /* 听筒朝左校准：CSS 为 rotate(-90deg) translateX(-100dvh)，
+         浏览器实测变换矩阵作用于 #app 布局点：
+           (cx,cy) = (ly, LW-lx)，LW=#app 布局宽=视口高(offsetWidth)
+         （注意 cy 含 LW-lx 翻转项——曾漏写成 cy=lx，导致此校准
+          下所有触摸纵向镜像错位：点第1关命中第5关）
+         逆：lx=LW-cy, ly=cx
+           gameX=(LW-cy-OL)·s, gameY=(cx-OT)·s */
+      scale.transformX = () =>
+        (app.offsetWidth - curPoint().y - canvas.offsetLeft) * readDS().x;
       scale.transformY = () => (curPoint().x - canvas.offsetTop) * readDS().y;
     } else {
       /* 顺时针握持（听筒朝右）：正变换 (cx,cy)=(LH-ly, lx)，
