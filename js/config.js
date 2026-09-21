@@ -198,7 +198,7 @@ window.TD_CONFIG = {
       "targeting": "area",
       "stats": {
         "damage": 0,
-        "range": 140,
+        "range": 200,
         "cooldown": 0
       },
       "effect": {

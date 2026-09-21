@@ -808,9 +808,12 @@ class GameScene extends Phaser.Scene {
    * 几何夹具（Level 2 路径，建议在第 2 关内运行；Level 1 首段同为 y=100 水平段）：
    *   段0 (-40,100)→(720,100)，段1 (720,100)→(720,250)。
    *   塔1 (300,200)：投影点 footDist=340；塔2 (780,150) 卡拐角，投影 footDist=810。
-   *   小怪 e1 380（距≈108）、e2 400（≈117）、eA 420（≈128）均在塔1射程 140 内，
+   *   小怪 e1 380（距≈108）、e2 400（≈117）、eA 420（≈128）均在塔1射程 200 内，
    *   同一脉冲必须【全部】被回拉；eBoss 420 同为 cfg.boss，必须免疫；
    *   eB 740 射程外；eD 850 在拐角竖段（回拉 40，严格竖直、x 恒 720）。
+   *   射程边界（塔1 (300,200)，路径 y=100，段0 起点 x=-40）：
+   *   eEdgeIn pathDist 510（世界点 (470,100) 距≈197<200）必须被吸；
+   *   eEdgeOut pathDist 520（世界点 (480,100) 距≈206>200）必须安全不被吸。
    * 时序（脉冲 0–0.5s，间隙 0.5–2.0s，第二次脉冲 2.0–2.5s）：
    *   0.15s 查范围目标集/BOSS免疫/多目标动画（紫闪、炮头朝向、脉冲计数 1）；
    *   0.3s 查首次吸附 + 在路；0.3–0.5s 查 ctrlSlow；
@@ -859,23 +862,32 @@ class GameScene extends Phaser.Scene {
         effect: tower.cfg.effect
       };
 
-      const e1 = mkEnemy(380);    // (340,100) 距塔1≈108<140，回拉目标 40
-      const e2 = mkEnemy(400);    // (360,100) 距塔1≈117<140，回拉目标 60
-      const eA = mkEnemy(420);    // (380,100) 距塔1≈128<140，回拉目标 80
+      const e1 = mkEnemy(380);    // (340,100) 距塔1≈108<200，回拉目标 40
+      const e2 = mkEnemy(400);    // (360,100) 距塔1≈117<200，回拉目标 60
+      const eA = mkEnemy(420);    // (380,100) 距塔1≈128<200，回拉目标 80
       const eBoss = mkEnemy(420, 'enemyBoss'); // 与 eA 同位但 cfg.boss=true：必须免疫
-      const eB = mkEnemy(740);    // (700,100) 距塔1≈412>140，射程外
-      const eD = mkEnemy(850);    // (720,190) 拐角竖段，距塔2≈72<140，回拉 40
+      const eB = mkEnemy(740);    // (700,100) 距塔1≈412>200，射程外
+      const eD = mkEnemy(850);    // (720,190) 拐角竖段，距塔2≈72<200，回拉 40
+      /* 射程 200 边界对（段0 起点 x=-40，世界 x=pathDist-40）：197 必须吸到、
+         206 必须安全；两者距塔2均 >300，不受塔2干扰 */
+      const eEdgeIn = mkEnemy(510);  // 世界点 (470,100) 距塔1≈197<200，回拉目标限幅 95
+      const eEdgeOut = mkEnemy(520); // 世界点 (480,100) 距塔1≈206>200，射程外
 
       // ---- t=0.15s：首脉冲开窗瞬间——范围目标集 / BOSS免疫 / 多目标动画 ----
       await new Promise(r => setTimeout(r, 150));
       const tgts = tower.behavior.targets;
       report.phase0 = {
         targetsCount: tgts.length,
-        targetsAllSmall: tgts.indexOf(e1) !== -1 && tgts.indexOf(e2) !== -1 && tgts.indexOf(eA) !== -1,
+        targetsAllSmall: tgts.indexOf(e1) !== -1 && tgts.indexOf(e2) !== -1 &&
+                         tgts.indexOf(eA) !== -1 && tgts.indexOf(eEdgeIn) !== -1,
         bossExcluded: tgts.indexOf(eBoss) === -1,
-        pulled: { e1: e1.pullBack, e2: e2.pullBack, eA: eA.pullBack, boss: eBoss.pullBack },
+        pulled: { e1: e1.pullBack, e2: e2.pullBack, eA: eA.pullBack, boss: eBoss.pullBack,
+                  edgeIn: eEdgeIn.pullBack, edgeOut: eEdgeOut.pullBack },
         allSmallPulled: e1.pullBack > 5 && e2.pullBack > 5 && eA.pullBack > 5,
         bossUntouched: eBoss.pullBack < 0.5,
+        /* 射程 200 边界：197 在内且被回拉，206 在外且目标集不含、pullBack=0 */
+        edgeInsideHit: tgts.indexOf(eEdgeIn) !== -1 && eEdgeIn.pullBack > 5,
+        edgeOutsideSafe: tgts.indexOf(eEdgeOut) === -1 && eEdgeOut.pullBack < 0.5,
         /* 多目标攻击动画：被吸小怪紫闪 0xd9b8ff，BOSS 保持原色；炮头已转向；
            首次开窗脉冲计数 1（塔2 对 eD 同样 1） */
         fxTintOnSmall: eA.body.tintTopLeft === 0xd9b8ff,
@@ -893,8 +905,10 @@ class GameScene extends Phaser.Scene {
         A_pulled: eA.pullBack > 10,
         B_notPulled: eB.pullBack < 5,
         bossStillUntouched: eBoss.pullBack < 0.5,
+        edgeOutStillSafe: eEdgeOut.pullBack < 0.5 && tgts.indexOf(eEdgeOut) === -1,
         allOnPath: onPath(e1) < 0.5 && onPath(e2) < 0.5 && onPath(eA) < 0.5 &&
-                   onPath(eBoss) < 0.5 && onPath(eB) < 0.5 && onPath(eD) < 0.5,
+                   onPath(eBoss) < 0.5 && onPath(eB) < 0.5 && onPath(eD) < 0.5 &&
+                   onPath(eEdgeIn) < 0.5 && onPath(eEdgeOut) < 0.5,
         D_strictVertical: Math.abs(eD.x - 720) < 0.5
       };
 
@@ -933,20 +947,27 @@ class GameScene extends Phaser.Scene {
         A_pullBack: eA.pullBack, A_onPathDist: onPath(eA),
         e1_pullBack: e1.pullBack, e2_pullBack: e2.pullBack, boss_pullBack: eBoss.pullBack,
         D_pullBack: eD.pullBack, D_onPathDist: onPath(eD),
+        edgeIn_pullBack: eEdgeIn.pullBack, edgeOut_pullBack: eEdgeOut.pullBack,
         targetsCount: tower.behavior.targets.length,
         firedAgain: eA.pullBack > 10,
-        allSmallAgain: e1.pullBack > 5 && e2.pullBack > 5 && eA.pullBack > 5,
+        allSmallAgain: e1.pullBack > 5 && e2.pullBack > 5 && eA.pullBack > 5 &&
+                       eEdgeIn.pullBack > 5,
+        edgeBoundaryHolds: eEdgeIn.pullBack > 5 && eEdgeOut.pullBack < 0.5,
         bossStillImmune: eBoss.pullBack < 0.5,
         pulseCount2: tower.behavior.pulseCount === 2 && tower2.behavior.pulseCount === 2,
-        onPath: onPath(eA) < 0.5 && onPath(eD) < 0.5
+        onPath: onPath(eA) < 0.5 && onPath(eD) < 0.5 &&
+                onPath(eEdgeIn) < 0.5 && onPath(eEdgeOut) < 0.5
       };
 
       report.conclusion = {
         behaviorIsPull: report.tower.isPullBehavior,
+        rangeIs200: report.tower.stats.range === 200,
         intervalIs2s: report.tower.intervalSec === 2,
         smallOnlyFilter: report.tower.smallOnly === true,
-        areaMultiTarget: report.phase0.targetsCount === 3 && report.phase0.targetsAllSmall &&
+        areaMultiTarget: report.phase0.targetsCount === 4 && report.phase0.targetsAllSmall &&
                          report.phase0.allSmallPulled,
+        edgeBoundary: report.phase0.edgeInsideHit && report.phase0.edgeOutsideSafe &&
+                      report.phase1.edgeOutStillSafe && report.secondPulse.edgeBoundaryHolds,
         bossImmune: report.phase0.bossExcluded && report.phase0.bossUntouched &&
                     report.phase1.bossStillUntouched && report.secondPulse.bossStillImmune,
         multiTargetFx: report.phase0.fxTintOnSmall && report.phase0.fxNoTintOnBoss &&
@@ -960,20 +981,23 @@ class GameScene extends Phaser.Scene {
         pulseEvery2s: report.secondPulse.firedAgain && report.secondPulse.allSmallAgain &&
                       report.secondPulse.pulseCount2,
         slowedButMoving: report.ctrlSlow.slowedButMoving,
-        pass: report.tower.isPullBehavior && report.tower.intervalSec === 2 &&
+        pass: report.tower.isPullBehavior && report.tower.stats.range === 200 &&
+              report.tower.intervalSec === 2 &&
               report.tower.smallOnly === true &&
-              report.phase0.targetsCount === 3 && report.phase0.targetsAllSmall &&
+              report.phase0.targetsCount === 4 && report.phase0.targetsAllSmall &&
               report.phase0.allSmallPulled && report.phase0.bossExcluded &&
               report.phase0.bossUntouched &&
+              report.phase0.edgeInsideHit && report.phase0.edgeOutsideSafe &&
               report.phase0.fxTintOnSmall && report.phase0.fxNoTintOnBoss &&
               report.phase0.turretAimed && report.phase0.pulseCount1 &&
               report.phase1.A_pulled && report.phase1.B_notPulled &&
-              report.phase1.bossStillUntouched &&
+              report.phase1.bossStillUntouched && report.phase1.edgeOutStillSafe &&
               report.phase1.allOnPath && report.phase1.D_strictVertical &&
               report.release.returnedToPath && report.intervalGap.inGap &&
               report.intervalGap.targetsCleared &&
               report.secondPulse.firedAgain && report.secondPulse.allSmallAgain &&
               report.secondPulse.bossStillImmune && report.secondPulse.pulseCount2 &&
+              report.secondPulse.edgeBoundaryHolds &&
               report.secondPulse.onPath && report.ctrlSlow.slowedButMoving
       };
       report.step = 'done';
