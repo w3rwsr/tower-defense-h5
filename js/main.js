@@ -244,18 +244,47 @@
   /* 视觉横屏模式下的触摸坐标逆变换。
      CSS 旋转容器中 canvas.getBoundingClientRect() 返回轴对齐框，
      Phaser 默认的 pageX→canvas 映射会错位，导致旋转后触摸点不准确。
-     这里覆盖 scale.transformX/Y，用最近一次的 clientX/clientY
-     （capture 阶段记录）逆旋转还原为 canvas 物理坐标：
-       正变换（CSS translateY(dvh) rotate(90deg) 顺时针，appW=布局宽=dvh）：
-         (lx,ly) → (ly, appW-lx)
-       逆变换（视觉 → 布局）：
-         lx = appW - clientY,  ly = clientX
-       canvas 内坐标 = (lx - offsetLeft, ly - offsetTop)。 */
+     这里覆盖 scale.transformX/Y，用【最近一次输入事件】的
+     clientX/clientY 逆旋转还原为 canvas 布局坐标：
+       cw  正变换 (cx,cy)=(LH-ly, lx)，逆 lx=cy, ly=LH-cx
+       ccw 正变换 (cx,cy)=(ly, lx)，   逆 lx=cy, ly=cx
+       游戏坐标 = (布局坐标 - canvas.offset*) × 世界/布局比例。
+
+     为什么必须自己捕获坐标而不用 Phaser 的函数参数：
+       Phaser 是【分别】调用 transformX(pageX) 与 transformY(pageY)
+       的（各只有一个参数），但 CSS 旋转 90° 后游戏 X 来自视口 Y、
+       游戏 Y 来自视口 X，单个参数无法同时拿到交叉轴坐标，
+       因此在 capture 阶段记录完整的 (clientX,clientY)。
+
+     为什么 pointer/touch/mouse 三类事件都要监听：
+       - 现代浏览器：pointerdown 最先触发；
+       - 旧版微信 X5/QQ 内核可能不派发 PointerEvent，只派发 touch*，
+         只监听 pointer 会导致捕获值恒为 (0,0)，所有点击错位；
+       - 桌面调试与跨内核兜底保留 mouse*。
+       三类事件均在 capture 阶段记录，早于 Phaser 在目标上的处理，
+       同一触摸的 clientX/Y 完全相同，重复覆盖无副作用。 */
   let lastPointerX = 0, lastPointerY = 0, inputRewired = false;
   try {
-    document.addEventListener('pointerdown', (e) => { lastPointerX = e.clientX; lastPointerY = e.clientY; }, true);
-    document.addEventListener('pointermove', (e) => { lastPointerX = e.clientX; lastPointerY = e.clientY; }, true);
-    document.addEventListener('pointerup', (e) => { lastPointerX = e.clientX; lastPointerY = e.clientY; }, true);
+    const record = (x, y) => {
+      if (typeof x === 'number' && typeof y === 'number') {
+        lastPointerX = x;
+        lastPointerY = y;
+      }
+    };
+    const recordPointer = (e) => record(e.clientX, e.clientY);
+    const recordTouch = (e) => {
+      const ts = e.changedTouches;
+      if (ts && ts.length) {
+        const t = ts[ts.length - 1];   // 多指时取最新触点（单指为常规点击）
+        record(t.clientX, t.clientY);
+      }
+    };
+    ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].forEach((evt) =>
+      document.addEventListener(evt, recordPointer, true));
+    ['touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach((evt) =>
+      document.addEventListener(evt, recordTouch, true));
+    ['mousedown', 'mousemove', 'mouseup'].forEach((evt) =>
+      document.addEventListener(evt, recordPointer, true));
   } catch (e) { /* 忽略 */ }
 
   const applyVisualLandscapeInput = () => {
@@ -314,15 +343,19 @@
       ? { x: scale.gameSize.width / canvas.clientWidth,
           y: scale.gameSize.height / canvas.clientHeight }
       : scale.displayScale;
+    /* 捕获值即视口 client 坐标（pointer/touch/mouse 统一）。
+       布局坐标（#app 未旋转系，尺寸 100dvh × 100dvw）：
+       canvas 在 #app 内 flex 居中，offsetLeft/Top 即布局内偏移。
+       每次调用动态读取，FIT 重算后下一次触摸自动使用新比例。 */
     if (htmlEl.classList.contains('td-rot-ccw')) {
-      /* 逆时针握持（听筒朝左）：正变换 (vx,vy)=(ly,lx)
-         逆：lx=vy, ly=vx */
+      /* 逆时针握持（听筒朝左）：正变换 (cx,cy)=(ly,lx)
+         逆：lx=cy, ly=cx → gameX=(cy-OL)·s, gameY=(cx-OT)·s */
       scale.transformX = () => (lastPointerY - canvas.offsetLeft) * readDS().x;
       scale.transformY = () => (lastPointerX - canvas.offsetTop) * readDS().y;
     } else {
-      /* 顺时针握持（听筒朝右）：正变换 (vx,vy)=(VW-ly, lx)，
-         VW=视口宽=app 布局高(offsetHeight)
-         逆：ly=VW-vx, lx=vy */
+      /* 顺时针握持（听筒朝右）：正变换 (cx,cy)=(LH-ly, lx)，
+         LH=#app 布局高=视口宽(offsetHeight)
+         逆：lx=cy, ly=LH-cx → gameY=(LH-cx-OT)·s */
       scale.transformX = () => (lastPointerY - canvas.offsetLeft) * readDS().x;
       scale.transformY = () => (app.offsetHeight - lastPointerX - canvas.offsetTop) * readDS().y;
     }

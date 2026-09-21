@@ -115,6 +115,9 @@ html, body {
   white-space: nowrap;
 }
 .chip b { font-size: 1.08em; color: #2e2110; }
+/* 当前关卡标识：蓝色调与金币/生命/波次区分 */
+.chip-level { background: rgba(219, 238, 255, .95); color: #17406b; }
+.chip-level b { color: #0d2c4d; }
 
 .btn-ctrl {
   min-width: 56px;

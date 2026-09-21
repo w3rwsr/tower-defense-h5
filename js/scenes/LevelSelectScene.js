@@ -151,6 +151,9 @@ class LevelSelectScene extends Phaser.Scene {
   }
 
   makeCard(x, y, w, h, level, info, unlocked, completed) {
+    /* 整张卡片收进一个 Container，便于做按下缩放反馈；
+       容器内所有子元素使用相对卡片中心的局部坐标。 */
+    const card = this.add.container(x, y);
     const g = this.add.graphics();
     const mainColor = unlocked ? 0xfff8e7 : 0xb8b0a0;
     const borderColor = unlocked ? (completed ? 0x3f9e34 : 0x2f6fc0) : 0x5d554d;
@@ -158,55 +161,88 @@ class LevelSelectScene extends Phaser.Scene {
     const bandH = 38;
 
     g.fillStyle(0x000000, 0.18);
-    g.fillRoundedRect(x - w / 2 + 3, y - h / 2 + 5, w, h, 16);
+    g.fillRoundedRect(-w / 2 + 3, -h / 2 + 5, w, h, 16);
     g.fillStyle(mainColor, 1);
-    g.fillRoundedRect(x - w / 2, y - h / 2, w, h, 16);
+    g.fillRoundedRect(-w / 2, -h / 2, w, h, 16);
     g.lineStyle(4, borderColor, 1);
-    g.strokeRoundedRect(x - w / 2, y - h / 2, w, h, 16);
+    g.strokeRoundedRect(-w / 2, -h / 2, w, h, 16);
 
     g.fillStyle(bandColor, 1);
-    g.fillRoundedRect(x - w / 2, y - h / 2, w, bandH, { tl: 16, tr: 16, bl: 0, br: 0 });
+    g.fillRoundedRect(-w / 2, -h / 2, w, bandH, { tl: 16, tr: 16, bl: 0, br: 0 });
 
-    this.add.text(x, y - h / 2 + bandH / 2, '第 ' + level + ' 关', {
+    const titleText = this.add.text(0, -h / 2 + bandH / 2, '第 ' + level + ' 关', {
       fontFamily: TD_FONT_STACK,
       fontSize: 15 + 'px', fontStyle: 'bold', color: '#ffffff'
     }).setOrigin(0.5).setStroke('#1d1610', 3);
 
-    const emojiY = y - h * 0.08;
-    const nameY = y + h * 0.22;
-    const descY = y + h * 0.38;
+    const emojiY = -h * 0.08;
+    const nameY = h * 0.22;
+    const descY = h * 0.38;
 
-    this.add.text(x, emojiY, info.emoji, { fontSize: 36 + 'px' }).setOrigin(0.5);
+    const emojiText = this.add.text(0, emojiY, info.emoji, { fontSize: 36 + 'px' }).setOrigin(0.5);
 
-    this.add.text(x, nameY, info.name, {
+    const nameText = this.add.text(0, nameY, info.name, {
       fontFamily: TD_FONT_STACK,
       fontSize: 15 + 'px', fontStyle: 'bold',
       color: unlocked ? '#4a3313' : '#3d352e'
     }).setOrigin(0.5);
-    this.add.text(x, descY, info.desc, {
+    const descText = this.add.text(0, descY, info.desc, {
       fontFamily: TD_FONT_STACK,
       fontSize: 12 + 'px', color: unlocked ? '#5f4720' : '#3d352e'
     }).setOrigin(0.5);
 
+    card.add([g, titleText, emojiText, nameText, descText]);
+
     if (completed) {
-      const bx = x + w / 2 - 16, by = y - h / 2 + 16;
+      const bx = w / 2 - 16, by = -h / 2 + 16;
       const badge = this.add.graphics();
       const br = 12;
       badge.fillStyle(0x6be86b, 1).fillCircle(bx, by, br);
       badge.lineStyle(2, 0x2e7d1c, 1).strokeCircle(bx, by, br);
-      this.add.text(bx, by, '✓', {
+      const check = this.add.text(bx, by, '✓', {
         fontFamily: TD_FONT_STACK, fontSize: 14 + 'px', fontStyle: 'bold', color: '#1b5e10'
       }).setOrigin(0.5);
+      card.add([badge, check]);
     }
 
     if (!unlocked) {
-      this.add.text(x, emojiY, '🔒', { fontSize: 36 + 'px' }).setOrigin(0.5).setAlpha(0.85);
+      const lock = this.add.text(0, emojiY, '🔒', { fontSize: 36 + 'px' })
+        .setOrigin(0.5).setAlpha(0.85);
+      card.add(lock);
     }
 
-    const zone = this.add.zone(x, y, w + 8, h + 8).setInteractive({ useHandCursor: unlocked });
-    zone.on('pointerdown', () => this.onSelectLevel(level, unlocked, x, y));
+    /* 触控热区略大于卡片（>=44px 规范由卡片尺寸保证）。
+       手势状态机（按下/抬起/滑出）：
+         pointerdown       → 卡片缩放 0.95 的按压反馈
+         pointerup（仍在内）→ 恢复并触发选择（轻点）
+         pointerout /      → 手指滑出热区：恢复反馈，不触发选择，
+         pointerupoutside     从而把"滑动手势"与"点击"区分开。 */
+    const zone = this.add.zone(0, 0, w + 8, h + 8).setInteractive({ useHandCursor: unlocked });
+    let pressed = false;
+    const pressScale = 0.95;
+    const setPressed = (v) => {
+      if (pressed === v) return;
+      pressed = v;
+      this.tweens.killTweensOf(card);
+      this.tweens.add({
+        targets: card,
+        scaleX: v ? pressScale : 1,
+        scaleY: v ? pressScale : 1,
+        duration: 70,
+        ease: 'Quad.out'
+      });
+    };
+    zone.on('pointerdown', () => setPressed(true));
+    zone.on('pointerup', () => {
+      if (!pressed) return;
+      setPressed(false);
+      this.onSelectLevel(level, unlocked, x, y);
+    });
+    zone.on('pointerout', () => setPressed(false));
+    zone.on('pointerupoutside', () => setPressed(false));
+    card.add(zone);
 
-    return { level, unlocked, zone };
+    return { level, unlocked, zone, container: card };
   }
 
   onSelectLevel(level, unlocked, x, y) {

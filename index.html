@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>卡通塔防 H5（Phaser 3）</title>
-  <link rel="stylesheet" href="style.css?v=20260921e" />
+  <link rel="stylesheet" href="style.css?v=20260921h" />
   <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js） -->
   <script src="vendor/phaser.min.js?v=20260920h"></script>
 </head>
@@ -17,6 +17,7 @@
     <!-- 顶部 HUD：金币 / 生命 / 波次 + 控制按钮 -->
     <div id="hud-top">
       <div class="stats">
+        <span class="chip chip-level">🎯 <b id="hud-level">第 1 关</b></span>
         <span class="chip chip-gold">🪙 <b id="hud-gold">0</b></span>
         <span class="chip chip-lives">❤️ <b id="hud-lives">0</b></span>
         <span class="chip chip-wave">🌊 <b id="hud-wave">0/0</b></span>
@@ -90,8 +91,8 @@
   <script src="js/objects/Projectile.js?v=20260920h"></script>
   <script src="js/objects/Tower.js?v=20260920h"></script>
   <script src="js/scenes/BootScene.js?v=20260920h"></script>
-  <script src="js/scenes/LevelSelectScene.js?v=20260921g"></script>
-  <script src="js/scenes/GameScene.js?v=20260920h"></script>
-  <script src="js/main.js?v=20260921e"></script>
+  <script src="js/scenes/LevelSelectScene.js?v=20260921h"></script>
+  <script src="js/scenes/GameScene.js?v=20260921h"></script>
+  <script src="js/main.js?v=20260921h"></script>
 </body>
 </html>
