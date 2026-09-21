@@ -119,6 +119,47 @@ class BootScene extends Phaser.Scene {
       g.fillEllipse(10, 9, 10, 6);
     });
 
+    /* ---------- 障碍物（放塔无效区：石头 / 树木 / 木桶，可被塔摧毁） ---------- */
+    this.makeTexture('obst_rock', 52, 42, (g) => {
+      g.fillStyle(0x000000, 0.15);
+      g.fillEllipse(26, 36, 40, 10);
+      g.fillStyle(0x8f9aa3, 1);
+      g.fillRoundedRect(6, 8, 40, 30, 14);
+      g.fillStyle(0xaab6bf, 1);
+      g.fillRoundedRect(10, 6, 26, 18, 9);
+      g.fillStyle(0xffffff, 0.4);
+      g.fillEllipse(18, 13, 10, 5);
+      g.fillStyle(0x6f7a83, 1);
+      g.fillCircle(34, 28, 3); g.fillCircle(22, 30, 2.4);
+    });
+    this.makeTexture('obst_tree', 56, 64, (g) => {
+      g.fillStyle(0x000000, 0.15);
+      g.fillEllipse(28, 58, 34, 9);
+      g.fillStyle(0x8a5a2b, 1);                       // 树干
+      g.fillRoundedRect(23, 34, 10, 24, 4);
+      g.fillStyle(0x3e8f2f, 1);                       // 树冠三层
+      g.fillCircle(28, 20, 19);
+      g.fillCircle(15, 30, 12); g.fillCircle(41, 30, 12);
+      g.fillStyle(0x55b044, 1);
+      g.fillCircle(24, 15, 10); g.fillCircle(36, 22, 8);
+      g.fillStyle(0xffffff, 0.3);
+      g.fillCircle(20, 11, 4.5);
+      g.fillStyle(0xd8453e, 1);                       // 两颗小果子
+      g.fillCircle(18, 26, 2.6); g.fillCircle(37, 17, 2.6);
+    });
+    this.makeTexture('obst_barrel', 42, 50, (g) => {
+      g.fillStyle(0x000000, 0.15);
+      g.fillEllipse(21, 45, 32, 8);
+      g.fillStyle(0xa9713a, 1);                       // 桶身
+      g.fillRoundedRect(5, 6, 32, 40, 10);
+      g.fillStyle(0xc08a4d, 1);
+      g.fillRoundedRect(8, 8, 26, 14, 7);
+      g.lineStyle(3, 0x7a4d20, 1);                    // 两道铁箍
+      g.lineBetween(5, 17, 37, 17); g.lineBetween(5, 36, 37, 36);
+      g.fillStyle(0x8a5a2b, 1);                       // 桶口
+      g.fillEllipse(21, 8, 24, 7);
+    });
+
     this.scene.start('LevelSelectScene');
   }
 

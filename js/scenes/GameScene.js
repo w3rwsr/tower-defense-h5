@@ -24,8 +24,11 @@ class GameScene extends Phaser.Scene {
     /* ---- 路径几何预计算 ---- */
     this.buildPathGeometry();
 
-    /* ---- 放塔热区：主网格 + 棋盘交错补点（道路两侧/拐弯/下方空白） ---- */
+    /* ---- 放塔热区：沿路径两侧均匀分布的两排整齐点（不再铺满全图） ---- */
     this.buildHotspots();
+
+    /* ---- 障碍物：放塔无效区（离路太远、放塔打不到路面）摆卡通障碍物 ---- */
+    this.spawnObstacles();
 
     /* ---- 静态画面 ---- */
     this.drawGround();
@@ -39,6 +42,7 @@ class GameScene extends Phaser.Scene {
     this.towers = [];
     this.enemies = [];
     this.projectiles = [];
+    /* this.obstacles 已在 create 开头的 spawnObstacles() 生成，这里不再重置 */
     this.occupied = new Map();      // 热区 key("x_y") -> Tower
     this.selectedType = null;       // 商店选中的塔类型（放置模式）
     this.selectedTower = null;
@@ -122,26 +126,46 @@ class GameScene extends Phaser.Scene {
   }
 
   /* ============================================================
-   * 放塔热区：主网格（cell 间距，奇数对齐）+ 第二组棋盘交错热区
-   * （整体偏移 hotspotOffset，通常 = cell/2）。交错点把道路两侧、
-   * 拐弯内侧/外侧、下方空白处原本落在 80px 网格缝里的可建位置补出来；
-   * 两组热区最近相距 cell·√2/2 ≈ 56.6px > 双塔半径之和(44)，不会重叠。
-   * 每个热点的合法性仍由 canBuildAt 逐个做【边界 + 离路距离 + 占用】校验，
-   * 交错补点永远不会补到路面上。
+   * 放塔热区：由路径几何直接生成【沿道路两侧均匀分布的两排整齐点】。
+   * 沿路径每 cell(80px) 采样一次，向两侧法向各偏移 roadGap(62px)：
+   *   - 每个点距路心恒 ≈62px，小于最短塔射程(125)——放塔必能打到路面，
+     杜绝"放了塔也打不到怪"的白放点位；
+   *   - 出界点、离路过近（<minPathDistance，拐弯处法向点可能贴到相邻
+     路段）的点直接剔除，绝不压路面；
+   *   - 拐弯内侧两排过近的点按 minSpacing(56) 去重，保持整齐不堆叠。
    * ============================================================ */
   buildHotspots() {
-    const cell = TD_CONFIG.build.cell;
-    const off = TD_CONFIG.build.hotspotOffset || 0;
-    this.hotspots = [];
-    const pushLattice = (start) => {
-      for (let cx = start; cx < this.W; cx += cell) {
-        for (let cy = start; cy < this.H; cy += cell) {
-          this.hotspots.push({ x: cx, y: cy, key: cx + '_' + cy });
-        }
+    const b = TD_CONFIG.build;
+    const gap = (b.roadGap != null) ? b.roadGap : 62;
+    const step = b.cell;
+    const minSpacing = b.minSpacing || 56;
+    const raw = [];
+    for (const s of this.segments) {
+      const n = Math.max(1, Math.round(s.len / step));
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n;                  // 段内均匀布点（避开拐角重合）
+        const px = s.x1 + (s.x2 - s.x1) * t;
+        const py = s.y1 + (s.y2 - s.y1) * t;
+        const inv = 1 / s.len;                    // 单位法向量（垂直于路段）
+        const nx = -(s.y2 - s.y1) * inv, ny = (s.x2 - s.x1) * inv;
+        raw.push({ x: px + nx * gap, y: py + ny * gap });
+        raw.push({ x: px - nx * gap, y: py - ny * gap });
       }
-    };
-    pushLattice(cell / 2);                 // 主网格：40,120,200…
-    if (off > 0) pushLattice(cell / 2 + off); // 交错补点：80,160,240…
+    }
+    /* 全局筛选：画面边界内 + 避路硬校验 + 最小间距去重 */
+    this.hotspots = [];
+    for (const p of raw) {
+      if (p.x < b.edgeMargin || p.x > this.W - b.edgeMargin ||
+          p.y < b.edgeMargin || p.y > this.H - b.edgeMargin) continue;
+      if (this.distToPath(p.x, p.y) < b.minPathDistance) continue;
+      let dup = false;
+      for (const h of this.hotspots) {
+        if (Math.abs(h.x - p.x) < minSpacing && Math.abs(h.y - p.y) < minSpacing) { dup = true; break; }
+      }
+      if (dup) continue;
+      const rx = Math.round(p.x), ry = Math.round(p.y);
+      this.hotspots.push({ x: rx, y: ry, key: rx + '_' + ry });
+    }
   }
 
   /** 指针坐标吸附到最近热区（触摸/鼠标共用，保证点击与显示格子完全重合） */
@@ -171,28 +195,20 @@ class GameScene extends Phaser.Scene {
   }
 
   /* ============================================================
-   * 可放置区域图层：遍历全部网格，绘制所有合法格子的可视化标识
-   * 绿色半透明填充 + 深绿描边，与路径 / 已占格 / 边界形成明显区分
+   * 可放置区域图层：仅在每个合法放置点画一个绿色圆点标记，
+   * 沿道路两侧排成整齐两排——不再铺满全图的网格块/网格线。
    * ============================================================ */
   drawPlacementGrid() {
     const g = this.placementGridGfx;
     g.clear();
-    const cell = TD_CONFIG.build.cell;
-    const pad = 4;
-    const fillCol = 0x6be86b;
-    const borderCol = 0x2e7d1c;
-
-    /* 遍历全部热区（主网格 + 交错补点），仅绘制通过校验的格子。
-       交错补点后最近热区间距 ≈ cell·√2/2，块尺寸随密度缩小，避免相邻块重叠发花 */
-    const size = (TD_CONFIG.build.hotspotOffset > 0) ? cell * 0.66 : cell - pad * 2;
     for (const h of this.hotspots) {
       if (!this.canBuildAt(h.x, h.y, h.key)) continue;
-      const x = h.x - size / 2;
-      const y = h.y - size / 2;
-      g.fillStyle(fillCol, 0.30);
-      g.fillRoundedRect(x, y, size, size, 9);
-      g.lineStyle(2, borderCol, 0.65);
-      g.strokeRoundedRect(x, y, size, size, 9);
+      g.fillStyle(0x5fe35f, 0.42);
+      g.fillCircle(h.x, h.y, 17);
+      g.lineStyle(2, 0x2e7d1c, 0.7);
+      g.strokeCircle(h.x, h.y, 17);
+      g.fillStyle(0xeaffea, 0.9);
+      g.fillCircle(h.x, h.y, 4.5);
     }
   }
 
@@ -237,6 +253,12 @@ class GameScene extends Phaser.Scene {
       const x = 20 + rnd() * (this.W - 40);
       const y = 20 + rnd() * (this.H - 40);
       if (this.distToPath(x, y) < 46) continue; // 不压在路面上
+      /* 避开障碍物：小装饰不与石头/树/木桶叠在一起 */
+      let nearOb = false;
+      for (const o of this.obstacles) {
+        if (Math.abs(o.x - x) < 52 && Math.abs(o.y - y) < 52) { nearOb = true; break; }
+      }
+      if (nearOb) continue;
       const key = keys[Math.floor(rnd() * keys.length)];
       const img = this.add.image(x, y, key).setDepth(2);
       img.setScale(0.8 + rnd() * 0.5);
@@ -269,6 +291,9 @@ class GameScene extends Phaser.Scene {
 
       for (const e of this.enemies) e.update(dt);
       this.enemies = this.enemies.filter((e) => !e.removed);
+
+      /* 障碍物：被摧毁的从场上下排在销毁动画结束后移除（本体已 dead） */
+      this.obstacles = this.obstacles.filter((o) => !o.dead);
 
       for (const p of this.projectiles) p.update(dt);
       this.projectiles = this.projectiles.filter((p) => !p.done);
@@ -409,8 +434,9 @@ class GameScene extends Phaser.Scene {
     if (this.selectedType) {
       this.drawGhost(pointer.x, pointer.y);
       /* 左键按住拖动：连续放置（仅在放置模式 + 鼠标左键按下时触发，
-         拖过的每个合法空格都立即放置，体验类似"画笔刷塔"） */
-      if (pointer.isDown && !pointer.rightButtonDown()) {
+         拖过的每个合法空格都立即放置，体验类似"画笔刷塔"）。
+         拖到障碍物上不落塔（障碍物区域不可建造）。 */
+      if (pointer.isDown && !pointer.rightButtonDown() && !this.getObstacleAt(pointer.x, pointer.y)) {
         this.tryPlaceAt(pointer.x, pointer.y);
       }
     }
@@ -444,13 +470,25 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
-    // 2) 放置模式：网格吸附 + 合法性校验
+    // 2) 障碍物：不可放塔；放置模式点击仅提示，普通模式点击=指派最近的塔攻击
+    const ob = this.getObstacleAt(x, y);
+    if (ob) {
+      if (this.selectedType) {
+        this.floatText(ob.x, ob.y - 30, '障碍物，不能放塔', 0xff9d9d);
+        this.tweens.add({ targets: ob.img, scaleX: 1.12, scaleY: 0.9, duration: 90, yoyo: true });
+      } else {
+        this.clickObstacle(ob);
+      }
+      return;
+    }
+
+    // 3) 放置模式：网格吸附 + 合法性校验
     if (this.selectedType) {
       this.tryPlaceAt(x, y);
       return;
     }
 
-    // 3) 点空地：取消选中
+    // 4) 点空地：取消选中
     this.hidePanel();
     this.selectedTower = null;
     this.rangeGfx.clear();
@@ -473,6 +511,11 @@ class GameScene extends Phaser.Scene {
     if (!tower) return;
     this.gold += tower.getSellValue();
     this.occupied.delete(tower.hotspotKey);
+    /* 塔被卖掉时解除其障碍物转火锁定 */
+    if (tower.obstacleTarget) {
+      tower.obstacleTarget.assignedTower = null;
+      tower.obstacleTarget = null;
+    }
     this.towers = this.towers.filter((v) => v !== tower);
     tower.destroy();
     if (this.selectedTower === tower) {
@@ -502,22 +545,169 @@ class GameScene extends Phaser.Scene {
     return true;
   }
 
+  /* ============================================================
+   * 障碍物系统：放塔无效区（离路超出所有塔射程，放塔也打不到路面）
+   * 摆放卡通装饰物（石头/树木/木桶）。不可放塔；点击后由最近的、
+   * 射程够得到的伤害型塔转火攻击；血量/奖励全部 JSON 配置驱动。
+   * ============================================================ */
+
+  /** 生成关卡障碍物：在距路径中心线 [minRoadDist, maxRoadDist] 的环带内，
+   * 按固定种子随机挑选间距 ≥spacing 的点（每次刷新布局一致），上限 maxCount */
+  spawnObstacles() {
+    const ocfg = TD_CONFIG.obstacles;
+    this.obstacles = [];
+    if (!ocfg || ocfg.hp == null) return;
+    const cand = [];
+    /* 40px 步进晶格覆盖旧双网格位置，逐点查离路距离 */
+    for (let cx = 40; cx < this.W; cx += 40) {
+      for (let cy = 40; cy < this.H; cy += 40) {
+        const d = this.distToPath(cx, cy);
+        if (d >= ocfg.minRoadDist && d <= ocfg.maxRoadDist) cand.push({ x: cx, y: cy });
+      }
+    }
+    /* 固定种子洗牌（与 drawDecor 同思路，布局稳定可复现） */
+    let seed = 20260921;
+    const rnd = () => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+    for (let i = cand.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      const t = cand[i]; cand[i] = cand[j]; cand[j] = t;
+    }
+    const kinds = ocfg.kinds || ['rock'];
+    for (const c of cand) {
+      if (this.obstacles.length >= ocfg.maxCount) break;
+      let dup = false;
+      for (const o of this.obstacles) {
+        if (Math.abs(o.x - c.x) < ocfg.spacing && Math.abs(o.y - c.y) < ocfg.spacing) { dup = true; break; }
+      }
+      if (dup) continue;
+      this.obstacles.push(this.makeObstacle(c.x, c.y, kinds[Math.floor(rnd() * kinds.length)]));
+    }
+  }
+
+  /** 创建单个障碍物：贴图 + 常显血条（攻击进度一目了然） */
+  makeObstacle(x, y, kind) {
+    const ocfg = TD_CONFIG.obstacles;
+    const img = this.add.image(x, y, 'obst_' + kind).setDepth(8);
+    const bar = this.add.graphics().setDepth(30);
+    const ob = {
+      isObstacle: true, x, y, kind,
+      hp: ocfg.hp, maxHp: ocfg.hp, radius: ocfg.radius,
+      img, bar, baseScale: 1,
+      barY: -(img.height / 2) - 10,       // 血条挂在顶上方
+      assignedTower: null, dead: false
+    };
+    ob.takeDamage = (dmg) => this.damageObstacle(ob, dmg);
+    this.redrawObstacleBar(ob);
+    return ob;
+  }
+
+  /** 重画障碍物血条（绿→黄→红随血量变化） */
+  redrawObstacleBar(ob) {
+    const g = ob.bar;
+    g.clear();
+    g.setPosition(ob.x, ob.y);
+    const w = 44, h = 6, x0 = -w / 2, y0 = ob.barY;
+    g.fillStyle(0x2b2230, 0.85);
+    g.fillRoundedRect(x0 - 1, y0 - 1, w + 2, h + 2, 3);
+    const ratio = ob.hp / ob.maxHp;
+    if (ratio > 0) {
+      g.fillStyle(ratio > 0.5 ? 0x7ee06a : (ratio > 0.25 ? 0xffd84a : 0xff6b6b), 1);
+      g.fillRoundedRect(x0, y0, Math.max(2, w * ratio), h, 2.5);
+    }
+  }
+
+  /** 障碍物受击：扣血 + 白闪抖动反馈；血量归零 → 摧毁发奖励 */
+  damageObstacle(ob, dmg) {
+    if (ob.dead) return;
+    ob.hp = Math.max(0, ob.hp - dmg);
+    this.redrawObstacleBar(ob);
+    ob.img.setTintFill(0xffffff);
+    this.time.delayedCall(60, () => {
+      try { if (!ob.dead) ob.img.clearTint(); } catch (_) {}
+    });
+    this.tweens.add({
+      targets: ob.img, scaleX: ob.baseScale * 1.08, scaleY: ob.baseScale * 0.94,
+      duration: 70, yoyo: true
+    });
+    if (ob.hp <= 0) this.destroyObstacle(ob);
+  }
+
+  /** 障碍物被摧毁：奖励金币、解除塔的转火锁定、播放消散动画 */
+  destroyObstacle(ob) {
+    if (ob.dead) return;
+    ob.dead = true;
+    if (ob.assignedTower) {
+      ob.assignedTower.obstacleTarget = null;
+      ob.assignedTower = null;
+    }
+    const reward = TD_CONFIG.obstacles.reward;
+    this.gold += reward;
+    this.syncHud();
+    this.floatText(ob.x, ob.y - 34, '+' + reward, 0xffd84a);
+    ob.bar.destroy();
+    this.tweens.add({
+      targets: ob.img, alpha: 0, scale: ob.baseScale * 0.4, angle: 30,
+      duration: 240, ease: 'Cubic.in', onComplete: () => ob.img.destroy()
+    });
+  }
+
+  /** 点选命中最障碍物（触摸/鼠标共用放大热区） */
+  getObstacleAt(x, y) {
+    const r = TD_CONFIG.build.touchRadius + (TD_CONFIG.obstacles ? TD_CONFIG.obstacles.radius : 20);
+    let best = null, bestD2 = r * r;
+    for (const o of this.obstacles) {
+      if (o.dead) continue;
+      const d2 = (o.x - x) * (o.x - x) + (o.y - y) * (o.y - y);
+      if (d2 <= bestD2) { best = o; bestD2 = d2; }
+    }
+    return best;
+  }
+
+  /** 点击障碍物：指派【最近的、射程够得到的】伤害型塔转火攻击。
+   *  塔D（无伤害的范围吸引塔）不能攻击障碍物，不参与指派；
+   *  攻击障碍物期间该塔不攻击小怪（Projectile/AttackBehavior 区分目标）。 */
+  clickObstacle(ob) {
+    let best = null, bestD2 = Infinity;
+    for (const t of this.towers) {
+      if (!t.stats.damage) continue;                       // 无伤害塔（塔D）跳过
+      const eff = t.cfg.effect;
+      if (eff && eff.type === 'pull') continue;            // 吸引塔无弹道，跳过
+      const d2 = (t.x - ob.x) * (t.x - ob.x) + (t.y - ob.y) * (t.y - ob.y);
+      if (d2 <= t.stats.range * t.stats.range && d2 < bestD2) { best = t; bestD2 = d2; }
+    }
+    if (!best) {
+      this.floatText(ob.x, ob.y - 30, '附近没有塔够得到', 0xff9d9d);
+      return;
+    }
+    /* 一座塔只锁定一个障碍物、一个障碍物只有一座塔在打：互斥切换 */
+    if (best.obstacleTarget && best.obstacleTarget !== ob) best.obstacleTarget.assignedTower = null;
+    if (ob.assignedTower && ob.assignedTower !== best) ob.assignedTower.obstacleTarget = null;
+    best.obstacleTarget = ob;
+    ob.assignedTower = best;
+    this.floatText(ob.x, ob.y - 30, best.cfg.name + ' 开火！', 0xffe27a);
+    this.tweens.add({
+      targets: ob.img, scaleX: ob.baseScale * 1.12, scaleY: ob.baseScale * 0.9,
+      duration: 90, yoyo: true
+    });
+  }
+
   /** 放置预览：绿色=可放 / 红色=非法，并显示射程 */
   drawGhost(x, y) {
     const g = this.ghost;
     g.clear();
     if (!this.selectedType) return;
     const cfg = TD_CONFIG.towers[this.selectedType];
-    const cell = TD_CONFIG.build.cell;
     const h = this.snapHotspot(x, y);
     const cx = h.x, cy = h.y;
     const ok = this.canBuildAt(cx, cy, h.key) && this.gold >= cfg.cost;
     const color = ok ? 0x6be86b : 0xff5d5d;
 
-    // 热区落点提示（尺寸与放置网格一致：交错密度下用 cell*0.66）
-    const markSize = (TD_CONFIG.build.hotspotOffset > 0) ? cell * 0.66 : cell - 8;
-    g.fillStyle(0xffffff, 0.12);
-    g.fillRoundedRect(cx - markSize / 2, cy - markSize / 2, markSize, markSize, 10);
+    // 放置点提示（与放置网格同款圆形标记）
+    g.fillStyle(0xffffff, 0.20);
+    g.fillCircle(cx, cy, 17);
     // 射程圈
     g.lineStyle(2, color, 0.9);
     g.fillStyle(color, 0.10);

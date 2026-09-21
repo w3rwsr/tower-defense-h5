@@ -89,6 +89,25 @@
       // 1) 冷却计时（倍速与暂停由场景统一换算进 dt）
       if (this.cooldown > 0) this.cooldown -= dt;
 
+      /* 【障碍物转火】玩家点击障碍物后（GameScene.clickObstacle 指派），
+         本塔锁定攻击该障碍物，期间完全不索敌小怪——攻击障碍物时，
+         不攻击小怪（目标互斥）。障碍物被摧毁后自动恢复常规索敌。 */
+      const ob = this.tower.obstacleTarget;
+      if (ob) {
+        if (ob.dead) {
+          this.tower.obstacleTarget = null;   // 已摧毁：解除锁定，回归小怪
+        } else {
+          this.tower.setTarget(ob);
+          const ddx = ob.x - this.tower.x, ddy = ob.y - this.tower.y;
+          const inRange = ddx * ddx + ddy * ddy <= this.tower.stats.range * this.tower.stats.range;
+          if (inRange && this.cooldown <= 0) {
+            ctx.fire(this.tower, ob);
+            this.cooldown = this.tower.stats.cooldown;
+          }
+          return;                              // 锁定期间不索敌小怪
+        }
+      }
+
       // 2) 索敌
       const strategy = Targeting[this.strategyName] || Targeting.furthest;
       const target = strategy(this.tower, ctx.enemies);
