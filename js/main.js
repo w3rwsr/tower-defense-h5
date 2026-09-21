@@ -25,18 +25,6 @@
     } catch (e) { /* 忽略 */ }
   })();
 
-  /* 画面方向反转覆盖（仅移动端视觉横屏生效）：
-     false = 自动跟随握持方向（γ 符号，见 applyHeldState）；
-     true  = 在自动结果上整体反转（个别安卓/X5 内核 γ 报告符号反相
-     时修正用）。持久化于 localStorage tdRotFlip；页面提供
-     「翻转画面」按钮（仅移动端可见）一键切换，无需手动改存储。
-     必须在 Orientation 模块之前用 let 声明并完成初始化：Orientation IIFE
-     初始化时会同步调用 apply()→updateDebug() 引用本变量，若声明在其后，
-     同步调用瞬间变量仍处于 TDZ，抛 ReferenceError 会中断整个主 IIFE，
-     导致 Phaser 游戏与 deviceorientation 监听全部无法注册。 */
-  let manualFlip = false;
-  try { manualFlip = localStorage.getItem('tdRotFlip') === '1'; } catch (e) { /* 忽略 */ }
-
   /* ============================================================
    * 可靠的设备方向检测模块。
    *
@@ -116,8 +104,7 @@
         ' | 信号源=' + src +
         ' | 倾斜=β' + (mo.beta === undefined ? '-' : mo.beta) + '/γ' + (mo.gamma === undefined ? '-' : mo.gamma) +
         ' | 横置=' + (html.classList.contains('is-held-landscape') ? '是' : '否') +
-        ' | 朝向=' + (html.classList.contains('td-rot-ccw') ? '左边框' : '右边框') +
-        ' | 反相覆盖=' + (manualFlip ? '开' : '关') +
+        ' | 方向=固定(rotate90·听筒朝左)' +
         ' | 事件=' + eventCount + ' 轮询=' + pollCount +
         ' | 更新=' + lastUpdate;
     };
@@ -370,25 +357,12 @@
        canvas 在 #app 内 flex 居中，offsetLeft/Top 即布局内偏移。
        每次调用动态读取比例，FIT 重算后下一次触摸自动使用新比例。 */
     const curPoint = () => inputQueue[0];
-    if (htmlEl.classList.contains('td-rot-ccw')) {
-      /* 听筒朝左校准：CSS 为 rotate(-90deg) translateX(-100dvh)，
-         浏览器实测变换矩阵作用于 #app 布局点：
-           (cx,cy) = (ly, LW-lx)，LW=#app 布局宽=视口高(offsetWidth)
-         （注意 cy 含 LW-lx 翻转项——曾漏写成 cy=lx，导致此校准
-          下所有触摸纵向镜像错位：点第1关命中第5关）
-         逆：lx=LW-cy, ly=cx
-           gameX=(LW-cy-OL)·s, gameY=(cx-OT)·s */
-      scale.transformX = () =>
-        (app.offsetWidth - curPoint().y - canvas.offsetLeft) * readDS().x;
-      scale.transformY = () => (curPoint().x - canvas.offsetTop) * readDS().y;
-    } else {
-      /* 顺时针握持（听筒朝右）：正变换 (cx,cy)=(LH-ly, lx)，
-         LH=#app 布局高=视口宽(offsetHeight)
-         逆：lx=cy, ly=LH-cx → gameY=(LH-cx-OT)·s */
-      scale.transformX = () => (curPoint().y - canvas.offsetLeft) * readDS().x;
-      scale.transformY = () =>
-        (app.offsetHeight - curPoint().x - canvas.offsetTop) * readDS().y;
-    }
+    /* 方向永久固定为 rotate(90deg)（听筒朝左握持正向），无方向分支。
+       正变换 (cx,cy)=(LH-ly, lx)，LH=#app 布局高=视口宽(offsetHeight)
+       逆：lx=cy, ly=LH-cx → gameY=(LH-cx-OT)·s */
+    scale.transformX = () => (curPoint().y - canvas.offsetLeft) * readDS().x;
+    scale.transformY = () =>
+      (app.offsetHeight - curPoint().x - canvas.offsetTop) * readDS().y;
     inputRewired = true;
   };
 
@@ -425,26 +399,23 @@
   };
 
   /* ============================================================
-   * 横置检测 + 画面方向锁定（始终朝向设备音量键一侧）
+   * 横置检测（仅控制竖屏提示层显隐）+ 画面方向永久固定
    *
-   * 设计决策（2026-09-21）：画面方向【相对机身固定】，不随握持
-   * 姿态、听筒朝左/朝右、γ 符号或传感器噪声翻转。音量键是机身上
-   * 的固定锚点——锁竖屏 WebView 的视口表面就是机身坐标系：
-   *   - manualFlip=false（默认）：rotate(90)，UI 顶部朝机身【右边框】
-   *     （多数安卓机音量键位置）
-   *   manualFlip=true：rotate(-90)，UI 顶部朝机身【左边框】
-   *     （音量键在左侧的机型）
-   * 校准值存 localStorage（tdRotFlip），UI 无翻转按钮；需切换时经
-   * 调试入口写入后刷新。校准后无论手机怎么横置/转 180°/后仰/
-   * 平放，UI 顶部永远指向音量键所在边框。
+   * 设计决策（2026-09-21 最终版）：画面方向【永久固定】为
+   * rotate(90deg)（style.css 中 #app 的视觉横屏规则；听筒朝左
+   * 握持时正向，真机已确认）。方向不依赖 screen.orientation /
+   * window.orientation / γ 角度或任何传感器数据——手机转动、
+   * 横竖屏切换均不会改变画面方向；无翻转按钮、无自动翻转逻辑，
+   * 从根上杜绝 180° 倒置复发。
    *
-   * 为什么不再用 γ 符号自动选方向：
+   * 为什么不用 γ/方向 API 自动选方向：
    *   - 部分微信/QQ X5 内核 γ 符号与 W3C 标准相反，自动判定必然
    *     在一类设备上选错，与系统表面旋转叠加成 180° 全颠倒；
    *   - 即使标准设备，自动双向意味着用户换个方向横置画面就翻转，
-   *     不符合"方向锁定"诉求；
+   *     不符合"方向固定"诉求；
    *   - γ 近水平时符号不可辨识，任何自动方案在平放过渡区都会抖动。
-   *   γ 现在仅用于判断"是否已横置"（提示层显隐），不参与方向。
+   *   下方状态机的 γ/β 仅用于判断"是否已横置"，只控制竖屏提示层
+   *   显隐，不参与画面方向。
    *
    * 横置状态机（DeviceOrientation，解决平放横屏退出问题）：
    * - γ：绕设备长轴旋转角，垂直横置≈±90°，平放≈0°，横置后仰
@@ -459,10 +430,9 @@
    *   横置一次"重置"。
    *
    * 平台边界：真横屏（非锁竖屏浏览器）由系统接管旋转，UI 始终朝
-   *   物理上方且正向；Web 无法在非全屏下 lock 原生方向，故本锁定
-   *   作用于视觉横屏（微信/QQ 等锁竖屏 WebView，本项目主场景）。
+   *   物理上方且正向；Web 无法在非全屏下 lock 原生方向，故视觉
+   *   横屏作用于锁竖屏 WebView（微信/QQ 等，本项目主场景）。
    * ============================================================ */
-  let lastTiltState = null;
   let tiltTimer = null;
 
   /* 握持状态的唯一应用入口（单一状态源，避免事件回调与轮询各自写 class）：
@@ -488,23 +458,10 @@
     } else {
       heldLandscape = fresh && g > 12;
     }
-    /* 方向自动跟随握持（γ 符号）+ 反转覆盖修正：
-       几何推导（portrait 视口 y 轴恒朝听筒、CSS rotate(90deg) 正方向
-       为顺时针，内容顶部将落在机身右边框）：听筒朝左 ⇒ 画面需 cw
-       摆放（rotate 90deg），听筒朝右 ⇒ 需 ccw（td-rot-ccw）。
-       W3C 规范 γ>0 即设备逆时针旋转（听筒朝左），故 autoCcw = γ<0。
-       用户横持中 180° 换边时 γ 变号 → 画面自动翻转、始终保持正向；
-       γ 报告符号反相的设备用 tdRotFlip=1 整体反转（页面「翻转画面」
-       按钮，仅移动端可见，一键持久化）。 */
-    const autoCcw = fresh && m.gamma < 0;
-    const ccw = heldLandscape && (autoCcw !== manualFlip);
+    /* 仅更新提示层显隐：画面方向永久固定，与握持姿态/γ 符号
+       无关——传感器数据或符号异常不会导致任何画面翻转。 */
     if (wasHeld !== heldLandscape) {
       htmlEl.classList.toggle('is-held-landscape', heldLandscape);
-    }
-    if (ccw !== lastTiltState) {
-      lastTiltState = ccw;
-      htmlEl.classList.toggle('td-rot-ccw', ccw);
-      applyVisualLandscapeInput();
     }
   };
 
@@ -524,24 +481,6 @@
   try {
     document.addEventListener('visibilitychange', applyHeldState);
     window.addEventListener('pageshow', applyHeldState);
-  } catch (e) { /* 忽略 */ }
-
-  /* 「翻转画面」按钮（仅移动端可见，DOM 在 #app 外不受旋转影响）：
-     切换 tdRotFlip 反转覆盖并立即重算握持状态、触摸逆变换与画布布局。
-     解决两类问题：(1) 个别机型 γ 报告符号反相导致自动方向整体倒置；
-     (2) 用户横持方向与自动判定不符时的即时修正。 */
-  try {
-    const flipBtn = document.getElementById('btn-flip');
-    if (flipBtn) {
-      flipBtn.addEventListener('click', () => {
-        manualFlip = !manualFlip;
-        try {
-          localStorage.setItem('tdRotFlip', manualFlip ? '1' : '0');
-        } catch (e) { /* 忽略 */ }
-        applyHeldState();
-        forceRelayout();
-      });
-    }
   } catch (e) { /* 忽略 */ }
 
   window.addEventListener('orientationchange', forceRelayout);

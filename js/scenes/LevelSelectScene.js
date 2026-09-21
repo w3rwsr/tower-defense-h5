@@ -28,9 +28,9 @@ class LevelSelectScene extends Phaser.Scene {
     /* 选关界面不做任何摄像机翻转：canvas 与游戏内 DOM（HUD/商店/
        按钮）同在 #app 内共享同一套 CSS 视觉横屏旋转，方向基准必须
        统一。历史上曾仅移动端 setRotation(π)，导致选关画面相对
-       GameScene 倒立 180°——听筒朝左校准(tdRotFlip=1)下用户点
-       视觉第 1 关实际命中第 5 关，且两种握持方向下卡片顺序均反向。
-       GameScene 从未翻转且方向正确，故选关保持 rotation=0。 */
+       GameScene 倒立 180°——曾出现点视觉第 1 关实际命中第 5 关、
+       卡片顺序反向的问题。GameScene 从未翻转且方向正确，故选关
+       保持 rotation=0。 */
 
     /* 强制横屏模式：方向变化时无需重建布局（始终横屏），
        仅刷新 Phaser 画布尺寸。监听器挂在游戏级 ScaleManager 上，

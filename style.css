@@ -361,24 +361,19 @@ html.is-mobile.is-portrait.is-held-landscape #orientation-hint {
 /* ============================================================
    视觉横屏：移动端 + 竖屏（微信/QQ 内置 WebView、旋转锁定开启，
    视口物理竖屏且无法真横屏）时，把整个应用旋转 90° 呈现横屏布局。
-   方向【相对机身锁定】——锁竖屏视口表面就是机身坐标系，旋转方向
-   不随机身姿态/听筒朝向/γ 符号变化，UI 顶部始终指向校准的
-   音量键所在边框（localStorage tdRotFlip 记忆）：
-   - 默认（tdRotFlip=0）：rotate(90deg)，UI 顶部朝机身右边框
-     （多数安卓机音量键位置）
-   - td-rot-ccw（tdRotFlip=1）：rotate(-90deg)，UI 顶部朝机身左边框
-     （音量键在左侧的机型）
+   方向【永久固定】为 rotate(90deg)（听筒朝左握持时正向，真机已
+   确认），不依赖 screen.orientation / window.orientation / γ 角度
+   或任何传感器数据——手机转动、横竖屏切换均不会改变画面方向；
+   无翻转按钮、无自动翻转逻辑，从根上杜绝 180° 倒置复发。
    数学推导（视口 W=innerWidth, H=innerHeight，竖屏下 W<H；
    #app 布局盒 width=100dvh=H, height=100dvw=W，transform-origin:0 0）：
    - rotate(90deg) translateY(-100dvw)
        先 translateY(-W) 再 rotate(90deg)：(x,y)→(-y,x)，
        画面落在 x∈[0,W],y∈[0,H]，顶部 (0,-1)→(1,0) 朝视口右 ✓
-   - rotate(-90deg) translateX(-100dvh)
-       先 translateX(-H) 再 rotate(-90deg)：(x,y)→(y,-x)，
-       画面落在 x∈[0,W],y∈[0,H]，顶部 (0,-1)→(-1,0) 朝视口左 ✓
    关键：必须用 rotate 而非 matrix(0,1,1,0)——后者是绕 y=x 反射，
    会让画面左右镜像（文字反着写），视觉上像"完全倒置"。
-   触摸坐标逆变换由 main.js 覆盖 Phaser scale.transformX/Y 完成。
+   触摸坐标逆变换由 main.js 覆盖 Phaser scale.transformX/Y 完成，
+   与本节 rotate(90deg) 几何严格对应，勿单独改动一侧。
    #app 带 transform 后成为 fixed 后代的 containing block，
    HUD/遮罩等 fixed 元素会自动相对旋转后的 #app 定位，无需改动。
    ============================================================ */
@@ -390,14 +385,6 @@ html.is-mobile.is-portrait #app {
   transform: rotate(90deg) translateY(-100vw);
   transform: rotate(90deg) translateY(-100dvw);
   transform-origin: 0 0;
-}
-
-/* 校准为机身左边框（音量键在左）：UI 顶部朝视口左侧
-   注意：rotate(-90deg) 是逆时针旋转 90°，保持画面方向不变；
-   matrix(0,1,1,0) 是反射会让画面镜像，不能用。 */
-html.is-mobile.is-portrait.td-rot-ccw #app {
-  transform: rotate(-90deg) translateX(-100vh);
-  transform: rotate(-90deg) translateX(-100dvh);
 }
 
 /* ---------------- 窄横屏手机：压缩内边距，保证全部 HUD 可见 ---------------- */
@@ -429,23 +416,3 @@ html.is-mobile.is-portrait.td-rot-ccw #app {
 
 /* #dbg hash 时显示诊断面板（由 JS 写入，hidden 属性默认隐藏） */
 html.has-dbg #dbg-panel { display: block; }
-
-/* ---------------- 移动端「翻转画面」按钮 ----------------
-   仅移动端可见（桌面 display:none 保持不变）；置于视口左上角、
-   #app 外部不参与视觉横屏旋转，半透明避免遮挡游戏画面。
-   用于即时修正画面方向（个别机型 γ 符号反相 / 握持方向变化）。 */
-#btn-flip { display: none; }
-html.is-mobile #btn-flip {
-  display: block;
-  position: fixed;
-  left: 10px;
-  top: 10px;
-  z-index: 9990;
-  padding: 6px 10px;
-  font: 600 13px/1 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-  border: 1px solid rgba(0, 0, 0, .25);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, .78);
-  color: #24400f;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
-}
