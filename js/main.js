@@ -103,6 +103,7 @@
         ' | 判定=' + state +
         ' | 信号源=' + src +
         ' | 倾斜=β' + (mo.beta === undefined ? '-' : mo.beta) + '/γ' + (mo.gamma === undefined ? '-' : mo.gamma) +
+        ' | 横置=' + (html.classList.contains('is-held-landscape') ? '是' : '否') +
         ' | 握持=' + (html.classList.contains('td-rot-ccw') ? '听筒左' : '听筒右') +
         ' | 事件=' + eventCount + ' 轮询=' + pollCount +
         ' | 更新=' + lastUpdate;
@@ -349,16 +350,26 @@
 
   /* ============================================================
    * 双方向握持自适应：用加速度计（DeviceOrientation）判断
-   * 用户是听筒朝右还是朝左横放，切换对应旋转方向，
+   * 用户是否横置手机及听筒朝左/朝右，切换对应视觉旋转方向，
    * 两种拿法画面都正向。不可用（iOS 未授权/不支持）时
    * 保持默认顺时针（听筒朝右）。
-   * beta 符号映射（绕屏幕内向右的水平轴旋转）：
-   *   beta 明显为正 → 听筒朝左（逆时针拿）→ td-rot-ccw
-   *   beta 明显为负 → 听筒朝右（顺时针拿）→ 默认方向
-   * 该映射若在真机出现反相，可通过 #dbg 面板观察 beta 值校正。
+   *
+   * 为什么用 |γ| 低阈值 + 迟滞 + 方向锁存：
+   * - γ 定义为绕设备长轴（Y 轴）的旋转角：垂直横置 ≈±90°，
+   *   完全平放 ≈0°。手机横置后向后倾斜（躺卧/支架斜放）时，
+   *   仰角 0~90° 全程 |γ|≈仰角——用低阈值即可覆盖整个倾斜范围。
+   *   旧阈值 45 在仰角超过 45° 时误判「未横置」，提示层重新遮住游戏。
+   * - 不用 β：部分微信 X5 WebView 的 β 恒报 0（竖持也 ≈0），
+   *   依赖 β 会把 β 失效机型上的任何姿态都判成横置。
+   * - 近水平（|γ| 低于退出阈值）时握持方向物理上不可辨识
+   *   （系统旋转在平放时同样不响应），按未横置处理。
+   * - γ 符号仅在 |γ| 足够大时可信（近水平时噪声大），方向确认后
+   *   锁存，小倾角沿用上次方向，避免仰角变化过程中画面 180° 翻转。
+   * 若真机出现方向反相，可通过 #dbg 面板观察 γ 值校正。
    * ============================================================ */
   let lastTiltState = null;
   let tiltTimer = null;
+  let latchedCcw = false;   // 上次在 |γ| 足够大时确认的横放方向
 
   /* 握持状态的唯一应用入口（单一状态源，避免事件回调与轮询各自写 class）：
      - 依据 window.__tdMotion（deviceorientation 回调只更新数据+时间戳）
@@ -369,11 +380,20 @@
   const applyHeldState = () => {
     const m = window.__tdMotion;
     const fresh = !!(m && (Date.now() - m.t) < 2000);
-    const heldLandscape = !!(fresh && Math.abs(m.gamma) > 45);
-    /* γ<0：听筒朝左 → 逆时针握持；γ>0：听筒朝右 → 默认方向。
-       部分微信 X5 WebView 的 beta 不可靠（竖持也报 β≈0），以 gamma 为准。 */
-    const ccw = heldLandscape && m.gamma < 0;
+    const g = fresh ? Math.abs(m.gamma) : 0;
     const htmlEl = document.documentElement;
+    /* 迟滞双阈值：进入需 |γ|>12°，退出放宽到 |γ|<8°。
+       横置后仰角 0~90° 全范围内 |γ|≈仰角，12° 门槛覆盖了除近乎
+       完全平放以外的全部倾斜角度；迟滞带（8~12°）防止平放时的
+       传感器噪声与阈值边界抖动引起提示层闪烁。 */
+    const heldLandscape = fresh && (htmlEl.classList.contains('is-held-landscape')
+      ? g >= 8 : g > 12);
+    /* 方向锁存：仅在 |γ|>10° 时确认 γ 符号并记住；仰角减小到近水平
+       时 γ 已接近 0，符号会随噪声来回跳变，直接沿用会让 td-rot-ccw
+       切换、画面 180° 来回翻转。 */
+    if (heldLandscape && g > 10) latchedCcw = m.gamma < 0;
+    /* γ<0：听筒朝左 → 逆时针握持；γ>0：听筒朝右 → 默认方向 */
+    const ccw = heldLandscape && latchedCcw;
     if (htmlEl.classList.contains('is-held-landscape') !== heldLandscape) {
       htmlEl.classList.toggle('is-held-landscape', heldLandscape);
     }
