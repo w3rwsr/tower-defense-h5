@@ -29,8 +29,13 @@ class Enemy extends Phaser.GameObjects.Container {
     this.slowTimer = 0;
     this.slowFactor = 1;
 
-    /* ---- 范围吸引位移场（塔D）：渲染坐标 = 路径基点 + (pullDX,pullDY)
-         pullFresh 由塔 D 每帧标记，未标记时位移向 0 衰减回路径 ---- */
+    /* ---- 范围吸引（塔D）：pullBack = 沿路【向后】的视觉回拉距离（像素，≥0）
+         渲染点 = pathPointAt(pathDist - pullBack)，数学上恒在道路上，
+         绝不横向偏离路径；pathDist 只增不减，脉冲结束 pullBack 衰减归零
+         即回到当前路径位置继续前进。
+         pullDX/pullDY 为渲染点相对路径基点的派生向量（供自查/判定复用）；
+         pullFresh 由塔D在吸附脉冲窗口内每帧标记，未标记时 pullBack 衰减。 */
+    this.pullBack = 0;
     this.pullDX = 0;
     this.pullDY = 0;
     this.pullFresh = false;
@@ -79,10 +84,9 @@ class Enemy extends Phaser.GameObjects.Container {
       }
     }
 
-    /* 沿路径前进；被塔D显著拉开时推进减速（真控场，避免拉开同时仍正常推进） */
+    /* 沿路径前进；被塔D显著回拉时推进减速（真控场，避免回拉同时仍正常推进） */
     const speedNow = this.baseSpeed * (this.slowTimer > 0 ? this.slowFactor : 1);
-    const dispMag = Math.hypot(this.pullDX, this.pullDY);
-    const ctrlSlow = (this.pullFresh && dispMag > 16) ? 0.5 : 1;
+    const ctrlSlow = (this.pullFresh && this.pullBack > 16) ? 0.5 : 1;
     this.pathDist += speedNow * dt * ctrlSlow;
 
     if (this.pathDist >= this.scene.pathLength) {
@@ -92,15 +96,20 @@ class Enemy extends Phaser.GameObjects.Container {
       return;
     }
 
-    const p = this.scene.pathPointAt(this.pathDist);
-    /* 未被塔D标记时位移向 0 衰减（敌人离开吸引范围后回归路径） */
+    /* 脉冲间隙/离开射程：沿路回拉量向 0 衰减，敌人回弹到当前路径位置 */
     if (!this.pullFresh) {
-      const decay = Math.exp(-9 * dt);
-      this.pullDX *= decay;
-      this.pullDY *= decay;
+      this.pullBack *= Math.exp(-9 * dt);
+      if (this.pullBack < 0.5) this.pullBack = 0;
     }
     this.pullFresh = false;
-    this.setPosition(p.x + this.pullDX, p.y + this.pullDY);
+
+    /* 基点（真实进度）与渲染点（被回拉后的路径点）——两者都在路径上，
+       从几何上保证敌人任何时刻都不会离开道路，拐弯同样成立。 */
+    const p = this.scene.pathPointAt(this.pathDist);
+    const vp = this.scene.pathPointAt(Math.max(0, this.pathDist - this.pullBack));
+    this.pullDX = vp.x - p.x;
+    this.pullDY = vp.y - p.y;
+    this.setPosition(vp.x, vp.y);
     /* 让下方的敌人盖住上方的，制造一点层次 */
     this.setDepth(20 + Math.floor(p.y));
   }

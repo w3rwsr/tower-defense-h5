@@ -743,15 +743,26 @@ class GameScene extends Phaser.Scene {
 
     /* 塔 D 真实运行时自查钩子：控制台调用 window.__tdPullTest() 即可。
        在当前已运行的 GameScene 内构造真实 Tower D + 真实 Enemy，
-       让真实 update 循环跑 800ms，读真实 pullDX/DY 验证吸引生效。 */
+       由真实 update 循环驱动，验证：沿路回拉生效、不出道路、
+       脉冲每 2s 一次、间隙回弹归位、ctrlSlow 期间仍继续前进。 */
     window.__tdPullTest = () => this.runPullTest();
   }
 
-  /** 塔 D 范围吸引真实运行时自查（控制台 window.__tdPullTest() 触发）。
-   *  构造真实 Tower + 真实 Enemy，由本场景真实 update 循环驱动，
-   *  读真实 pullDX/DY 验证：范围内被拉拢、范围外不被拉、ctrlSlow 压制推进。 */
+  /**
+   * 塔 D「沿路吸附」真实运行时自查（控制台 window.__tdPullTest()）。
+   * 几何夹具（Level 2 路径，建议在第 2 关内运行；Level 1 首段同为 y=100 水平段）：
+   *   段0 (-40,100)→(720,100)，段1 (720,100)→(720,250)。
+   *   塔1 (300,200)：投影点 footDist=340；塔2 (780,150) 卡拐角，投影 footDist=810。
+   *   eA 420 在塔1射程内（回拉目标 80）、eB 740 在射程外；
+   *   eD 850 在拐角竖段（回拉 40，必须严格竖直、x 恒为 720）。
+   * 时序（脉冲 0–0.5s，间隙 0.5–2.0s，第二次脉冲 2.0–2.5s）：
+   *   0.3s 查首次吸附 + 在路；0.25–0.45s 查 ctrlSlow；
+   *   1.5s 查回弹归位；1.9s 查脉冲间隙；2.15s 查第二次脉冲。
+   */
   async runPullTest() {
-    const report = { step: 'init', tower: null, enemyA: null, enemyB: null, ctrlSlow: null, conclusion: null, error: null };
+    const report = { step: 'init', tower: null, phase1: null, ctrlSlow: null,
+                     release: null, intervalGap: null, secondPulse: null,
+                     conclusion: null, error: null };
     try {
       // 清残留测试对象（重复调用时）
       this._pullTestObjs = this._pullTestObjs || { towers: [], enemies: [] };
@@ -759,82 +770,103 @@ class GameScene extends Phaser.Scene {
       this._pullTestObjs.enemies.forEach(e => { try { e.destroyImmediately && e.destroyImmediately(); } catch(_){ try{e.destroy&&e.destroy();}catch(_){} } });
       this._pullTestObjs = { towers: [], enemies: [] };
 
-      // 路径段 1（Level 2：(-40,100)→(720,100)）或 Level 1 第 1 段都是水平线 y=100
-      // 塔放 (300,200)：距路径 100px，range=140>100，路径上 x∈[202,398] 的敌人进入射程
-      const tower = new Tower(this, 300, 200, 'towerD');
-      this.towers.push(tower);
-      this._pullTestObjs.towers.push(tower);
+      const mkTower = (x, y) => {
+        const tw = new Tower(this, x, y, 'towerD');
+        this.towers.push(tw);
+        this._pullTestObjs.towers.push(tw);
+        return tw;
+      };
+      const mkEnemy = (dist) => {
+        const e = new Enemy(this, 'enemyX');
+        e.pathDist = dist;
+        e.baseSpeed = 0;
+        this.enemies.push(e);
+        this._pullTestObjs.enemies.push(e);
+        return e;
+      };
+      /* 敌人到路径中心线的最短距离：被吸附时也必须 ≈0（始终在道路内） */
+      const onPath = (e) => this.distToPath(e.x, e.y);
+
+      const tower = mkTower(300, 200);
+      const tower2 = mkTower(780, 150);
       report.tower = {
         type: tower.typeKey,
-        behaviorClass: tower.behavior ? tower.behavior.constructor.name : 'none',
         isPullBehavior: tower.behavior && tower.behavior.constructor.name === 'PullBehavior',
+        intervalSec: tower.behavior.interval,
+        durationSec: tower.behavior.duration,
         stats: tower.stats,
         effect: tower.cfg.effect
       };
 
-      // 敌人 A：射程内（pathDist=320 → x=280, 距塔≈102<140），baseSpeed=0 不走，纯测位移累积
-      const eA = new Enemy(this, 'enemyX');
-      eA.pathDist = 320;
-      eA.baseSpeed = 0;
-      eA.pullDX = 0; eA.pullDY = 0;
-      this.enemies.push(eA);
-      this._pullTestObjs.enemies.push(eA);
+      const eA = mkEnemy(420);  // (380,100) 距塔1≈128<140，目标回拉 80
+      const eB = mkEnemy(740);  // (700,100) 距塔1≈412>140，射程外
+      const eD = mkEnemy(850);  // (720,190) 拐角竖段，距塔2≈72<140，目标回拉 40
 
-      // 敌人 B：射程外（pathDist=740 → x=700, 距塔≈412>140）
-      const eB = new Enemy(this, 'enemyX');
-      eB.pathDist = 740;
-      eB.baseSpeed = 0;
-      eB.pullDX = 0; eB.pullDY = 0;
-      this.enemies.push(eB);
-      this._pullTestObjs.enemies.push(eB);
-
-      const distToTower = (e) => Math.hypot(e.x - 300, e.y - 200);
-      const before = {
-        A: { x: eA.x, y: eA.y, pullDX: eA.pullDX, pullDY: eA.pullDY, dist: distToTower(eA) },
-        B: { x: eB.x, y: eB.y, pullDX: eB.pullDX, pullDY: eB.pullDY, dist: distToTower(eB) }
+      // ---- t=0.3s：首次脉冲窗口内 ----
+      await new Promise(r => setTimeout(r, 300));
+      report.phase1 = {
+        A: { pullBack: eA.pullBack, onPathDist: onPath(eA), x: eA.x, y: eA.y },
+        B: { pullBack: eB.pullBack, onPathDist: onPath(eB) },
+        D: { pullBack: eD.pullBack, onPathDist: onPath(eD), x: eD.x, y: eD.y },
+        A_pulled: eA.pullBack > 10,
+        B_notPulled: eB.pullBack < 5,
+        allOnPath: onPath(eA) < 0.5 && onPath(eB) < 0.5 && onPath(eD) < 0.5,
+        D_strictVertical: Math.abs(eD.x - 720) < 0.5
       };
 
-      // 让真实 update 循环跑 800ms（≈48帧@60fps）：PullBehavior 每帧改 pullDX，Enemy.update 合成新位置
-      await new Promise(r => setTimeout(r, 800));
-
-      const after = {
-        A: { x: eA.x, y: eA.y, pullDX: eA.pullDX, pullDY: eA.pullDY, dist: distToTower(eA) },
-        B: { x: eB.x, y: eB.y, pullDX: eB.pullDX, pullDY: eB.pullDY, dist: distToTower(eB) }
-      };
-      report.enemyA = { before, after,
-        pullMag: Math.hypot(after.A.pullDX, after.A.pullDY),
-        pulled: Math.hypot(after.A.pullDX, after.A.pullDY) > 10,
-        movedCloser: after.A.dist < before.A.dist };
-
-      report.enemyB = { before, after,
-        pullMag: Math.hypot(after.B.pullDX, after.B.pullDY),
-        notPulled: Math.hypot(after.B.pullDX, after.B.pullDY) < 5 };
-
-      // ctrlSlow 验证：重置 A 位移，恢复正常速度，跑 600ms 看 pathDist 增量
-      // 正常增量 = speed*0.6 ≈ 46*0.6=27.6；被 ctrlSlow(0.5) 压制应 ≈13.8
-      eA.pullDX = 0; eA.pullDY = 0;
-      eA.pathDist = 320;
-      eA.baseSpeed = TD_CONFIG.enemies.enemyX.speed;
-      const pdBefore = eA.pathDist;
-      await new Promise(r => setTimeout(r, 600));
-      const pdAfter = eA.pathDist;
-      const dispNow = Math.hypot(eA.pullDX, eA.pullDY);
+      // ---- t=0.25~0.45s（仍在首个 0.5s 窗口内）：ctrlSlow 压制但仍在前进 ----
+      const eC = mkEnemy(420);
+      eC.baseSpeed = TD_CONFIG.enemies.enemyX.speed;
+      const pdBefore = eC.pathDist;
+      await new Promise(r => setTimeout(r, 200));
+      const delta = eC.pathDist - pdBefore;
+      const expectedNormal = TD_CONFIG.enemies.enemyX.speed * 0.2;
       report.ctrlSlow = {
-        pathDistDelta: pdAfter - pdBefore,
-        expectedNormal: TD_CONFIG.enemies.enemyX.speed * 0.6,
-        expectedCtrlSlow: TD_CONFIG.enemies.enemyX.speed * 0.6 * 0.5,
-        dispNow, pullFresh: eA.pullFresh,
-        ctrlSlowTriggered: dispNow > 16,
-        note: '若 dispNow>16 且增量≈expectedCtrlSlow（约一半），ctrlSlow 生效'
+        pathDistDelta: delta,
+        expectedNormal,
+        expectedCtrlSlow: expectedNormal * 0.5,
+        pullBack: eC.pullBack,
+        onPathDist: onPath(eC),
+        slowedButMoving: delta > expectedNormal * 0.25 && delta < expectedNormal * 0.7
+      };
+
+      // ---- t=1.5s：脉冲间隙已 1s，pullBack 应衰减归零（回弹到路径位置继续走） ----
+      await new Promise(r => setTimeout(r, 1050));
+      report.release = { time: 1.5, A_pullBack: eA.pullBack, A_onPathDist: onPath(eA),
+        returnedToPath: eA.pullBack < 2 && onPath(eA) < 0.5 };
+
+      // ---- t=1.9s：第二次脉冲（2.0s）前的间隙，仍应归零 ----
+      await new Promise(r => setTimeout(r, 400));
+      report.intervalGap = { time: 1.9, A_pullBack: eA.pullBack, inGap: eA.pullBack < 2 };
+
+      // ---- t=2.15s：第二次脉冲窗口（2.0–2.5s），再次被回拉 ----
+      await new Promise(r => setTimeout(r, 250));
+      report.secondPulse = {
+        time: 2.15,
+        A_pullBack: eA.pullBack, A_onPathDist: onPath(eA),
+        D_pullBack: eD.pullBack, D_onPathDist: onPath(eD),
+        firedAgain: eA.pullBack > 10,
+        onPath: onPath(eA) < 0.5 && onPath(eD) < 0.5
       };
 
       report.conclusion = {
         behaviorIsPull: report.tower.isPullBehavior,
-        A_pulled: report.enemyA.pulled,
-        B_notPulled: report.enemyB.notPulled,
-        A_movedCloser: report.enemyA.movedCloser,
-        ctrlSlowActive: report.ctrlSlow.ctrlSlowTriggered && report.ctrlSlow.pathDistDelta < report.ctrlSlow.expectedNormal * 0.7,
-        pass: report.tower.isPullBehavior && report.enemyA.pulled && report.enemyB.notPulled
+        intervalIs2s: report.tower.intervalSec === 2,
+        A_pulled: report.phase1.A_pulled,
+        B_notPulled: report.phase1.B_notPulled,
+        alwaysOnPath: report.phase1.allOnPath && report.ctrlSlow.onPathDist < 0.5 &&
+                      report.release.A_onPathDist < 0.5 && report.secondPulse.onPath,
+        cornerNoSideways: report.phase1.D_strictVertical,
+        returnedToPath: report.release.returnedToPath,
+        pulseGapClear: report.intervalGap.inGap,
+        pulseEvery2s: report.secondPulse.firedAgain,
+        slowedButMoving: report.ctrlSlow.slowedButMoving,
+        pass: report.tower.isPullBehavior && report.tower.intervalSec === 2 &&
+              report.phase1.A_pulled && report.phase1.B_notPulled &&
+              report.phase1.allOnPath && report.phase1.D_strictVertical &&
+              report.release.returnedToPath && report.intervalGap.inGap &&
+              report.secondPulse.firedAgain && report.secondPulse.onPath &&
+              report.ctrlSlow.slowedButMoving
       };
       report.step = 'done';
     } catch (e) {

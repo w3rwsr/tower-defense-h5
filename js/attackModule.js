@@ -105,23 +105,54 @@
   }
 
   /**
-   * 范围吸引行为（塔D）：不发射弹道，每帧把射程内敌人向塔方向位移。
-   * 直接修改 enemy.pullDX/pullDY（位移场），由 Enemy.update 合成最终坐标：
-   *   pos = pathPointAt(pathDist) + (pullDX, pullDY)
-   * - 目标位移 = clamp(塔坐标 - 路径基点, maxDisplace)，使敌人被拉向塔但
-   *   不堆叠到塔心；lerp 收敛速率 = pullStrength（越大拉拢越快）。
-   * - 被显著位移（|D|>16）的敌人推进减速（Enemy.update 内判定）→ 真控场。
-   * - 射程随塔等级提升（读 tower.stats.range），升级即扩大吸引范围。
+   * 范围吸引行为（塔D）：不发射弹道。每 attractInterval 毫秒触发一次吸附
+   * 脉冲（首次进战立即触发），脉冲持续 attractDuration 毫秒，脉冲间隙
+   * 敌人位移自然衰减归零、继续沿路前进。
+   *
+   * 铁律：吸引【只沿道路方向、只向后拉】，绝不产生横向/垂直分量：
+   *   1. 取敌人当前所在路径段，求塔在该段上的投影点（沿路里程 footDist）；
+   *   2. 回拉量 back = clamp(pathDist - footDist, 0, maxDisplace)
+   *      ——敌人走过投影点后才被往回拉，未走到不向前拽（避免帮怪加速）；
+   *   3. 写入 enemy.pullBack（沿路标量回拉距离），Enemy 渲染点取
+   *      pathPointAt(pathDist - pullBack) —— 该点【数学上恒在路径上】，
+   *      拐弯处也不会切出道路；pathDist 本身永不回退，脉冲结束 pullBack
+   *      衰减归零即回到当前路径位置继续前进，不卡、不脱轨。
+   * 被显著回拉（pullBack>16）的敌人推进减速（Enemy.update 内判定）→ 真控场。
+   * 射程随塔等级提升（读 tower.stats.range），升级即扩大吸引范围。
    */
   class PullBehavior {
     constructor(tower, cfg) {
       this.tower = tower;
       this.cfg = cfg;
       this.eff = cfg.effect;
+      this.interval = (this.eff.attractInterval != null ? this.eff.attractInterval : 2000) / 1000;
+      this.duration = (this.eff.attractDuration != null ? this.eff.attractDuration : 500) / 1000;
+      this.timer = this.interval; // 初始即满：2 秒后第二次脉冲
+      this.active = this.duration; // 首次脉冲开窗：建塔即生效，不用干等 2 秒
+    }
+
+    /** 按沿路里程找当前路径段（与 GameScene.buildPathGeometry 的 segments 同构） */
+    segmentAt(scene, dist) {
+      const segs = scene.segments;
+      for (let i = 0; i < segs.length; i++) {
+        if (dist <= segs[i].start + segs[i].len) return segs[i];
+      }
+      return segs[segs.length - 1];
     }
 
     update(dt, ctx) {
+      /* ---- 脉冲计时：每 interval 秒开窗一次，窗内持续 duration 秒 ---- */
+      this.timer -= dt;
+      if (this.active > 0) this.active -= dt;
+      if (this.timer <= 0) {
+        this.timer += this.interval;
+        this.active = this.duration;
+      }
+      /* 脉冲间隙：不标记任何敌人，Enemy.update 让 pullBack 衰减归位 */
+      if (this.active <= 0) return;
+
       const t = this.tower;
+      const scene = t.scene;
       const range = t.stats.range;
       const r2 = range * range;
       const strength = this.eff.pullStrength;
@@ -133,16 +164,20 @@
         if (e.dead) continue;
         const dx = e.x - t.x;
         const dy = e.y - t.y;
-        if (dx * dx + dy * dy > r2) continue; // 射程外：不标记 pullFresh，Enemy 自行衰减归位
-        // 反推路径基点（渲染坐标 - 当前位移），目标位移 = 朝塔方向、限幅 maxD
-        const bx = e.x - e.pullDX;
-        const by = e.y - e.pullDY;
-        let tx = t.x - bx;
-        let ty = t.y - by;
-        const td = Math.hypot(tx, ty);
-        if (td > maxD) { tx = tx / td * maxD; ty = ty / td * maxD; }
-        e.pullDX += (tx - e.pullDX) * k;
-        e.pullDY += (ty - e.pullDY) * k;
+        if (dx * dx + dy * dy > r2) continue; // 射程外：不标记，Enemy 自行衰减归位
+
+        /* 塔在敌人当前路段上的投影（钳在路段内），换算为沿路里程 */
+        const seg = this.segmentAt(scene, e.pathDist);
+        const inv = 1 / seg.len;
+        let f = ((t.x - seg.x1) * (seg.x2 - seg.x1) + (t.y - seg.y1) * (seg.y2 - seg.y1)) * inv * inv;
+        f = f < 0 ? 0 : (f > 1 ? 1 : f);
+        const footDist = seg.start + f * seg.len;
+
+        /* 只沿路向后拉：敌人越过投影点才有回拉量，限幅 maxD，永无横向分量 */
+        const back = e.pathDist - footDist;
+        if (back <= 0) continue;
+        const target = back < maxD ? back : maxD;
+        e.pullBack += (target - (e.pullBack || 0)) * k;
         e.pullFresh = true;
       }
     }
