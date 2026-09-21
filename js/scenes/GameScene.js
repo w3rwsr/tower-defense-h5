@@ -343,7 +343,10 @@ class GameScene extends Phaser.Scene {
     const ov = document.getElementById('overlay-end');
     document.getElementById('end-title').textContent = win ? '🎉 胜利！' : '💀 防线告破';
     document.getElementById('end-desc').textContent = win
-      ? ('第 ' + this.levelId + ' 关通过！' + (this.levelId === 1 ? ' 教程完成，继续挑战更多关卡吧！' : ''))
+      ? ('第 ' + this.levelId + ' 关通过！' +
+         (this.levelId === 1
+           ? ' 教程完成，🔓 新塔「塔D·范围吸引控场」已解锁，第 2 关起即可使用！'
+           : ''))
       : ('坚持到了第 ' + (this.waveIndex + 1) + ' 波，再试一次吧！');
     ov.classList.remove('hidden');
   }
@@ -726,6 +729,14 @@ class GameScene extends Phaser.Scene {
         const s = window.__tdScene;
         if (!s) return;
         const type = btn.dataset.type;
+        /* 未解锁塔（第 1 关的塔D）：不进入放置模式，画布中央提示解锁条件 */
+        if (!TDStorage.isTowerUnlocked(type, s.levelId)) {
+          const need = TDStorage.towerUnlockLevel(type);
+          s.floatText(s.W / 2, s.H - 130,
+            TD_CONFIG.towers[type].name + '：通关第 ' + (need - 1) + ' 关后，第 ' + need + ' 关解锁',
+            0xffffff);
+          return;
+        }
         s.setPlacement(s.selectedType === type ? null : type);
       });
     });
@@ -843,6 +854,8 @@ class GameScene extends Phaser.Scene {
   /** 进入 / 退出放置模式（由商店按钮触发）
    *  进入：重绘可放置区域并平滑淡入；退出：平滑淡出后清空，切换过程无闪烁 */
   setPlacement(typeKey) {
+    /* 兜底拦截：未解锁塔禁止进入放置模式（UI 点击层已拦一次，防止代码直调） */
+    if (typeKey && !TDStorage.isTowerUnlocked(typeKey, this.levelId)) return;
     this.selectedType = typeKey;
     const gfx = this.placementGridGfx;
     if (typeKey) {
@@ -999,11 +1012,14 @@ class GameScene extends Phaser.Scene {
     document.getElementById('hud-wave').textContent =
       Math.min(this.waveIndex + 1, this.levelCfg.waves.list.length) + '/' + this.levelCfg.waves.list.length;
 
-    // 商店按钮：金币不足置灰，选中高亮
+    // 商店按钮：未解锁显示锁定态（保持可点击以弹出解锁条件提示，
+    // 不用 disabled——禁用按钮不派发 click）；已解锁则按金币置灰 / 选中高亮
     document.querySelectorAll('.btn-tower').forEach((btn) => {
-      const cost = TD_CONFIG.towers[btn.dataset.type].cost;
-      btn.disabled = this.gold < cost;
-      btn.classList.toggle('active', this.selectedType === btn.dataset.type);
+      const type = btn.dataset.type;
+      const unlocked = TDStorage.isTowerUnlocked(type, this.levelId);
+      btn.classList.toggle('locked', !unlocked);
+      btn.disabled = unlocked && this.gold < TD_CONFIG.towers[type].cost;
+      btn.classList.toggle('active', unlocked && this.selectedType === type);
     });
 
     // 暂停 / 倍速按钮

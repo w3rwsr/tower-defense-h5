@@ -81,11 +81,15 @@ window.TD_CONFIG = {
     ]
   },
 
-  /* ---------- 塔配置（3 种占位塔） ----------
+  /* ---------- 塔配置（4 种塔） ----------
    * targeting: furthest = 优先攻击走得最远的敌人
    * projectile.effect.type:
    *   damage      —— 单体伤害
    *   splashSlow  —— 范围伤害 + 减速
+   *   pull        —— 无弹道，范围吸引控场（塔D，见 effect 配置）
+   * unlock（可选）：塔的解锁条件，缺省 = 第 1 关起默认可用
+   *   { "unlockLevel": N } —— 通关第 N-1 关后永久解锁，
+   *     仅在第 N 关及之后关卡的商店中可选用（TDStorage 统一判定 + 持久化）
    * upgrade: 每级相对上一级的成长系数                            */
   "towers": {
     "towerA": {
@@ -177,13 +181,16 @@ window.TD_CONFIG = {
 
     /* 塔D —— 范围吸引·控场：不发射弹道，每帧把射程内敌人向自身位移
        （lerp 收敛 + maxDisplace 上限），被显著拉开时敌人推进减速，
-       实现真控场。数值见 effect，升级提高 stats.range 即扩大吸引范围。 */
+       实现真控场。数值见 effect，升级提高 stats.range 即扩大吸引范围。
+       解锁条件：通关第 1 关后自动永久解锁，第 2 关及后续关卡可用
+       （第 1 关商店中显示锁定，判定/持久化统一走 TDStorage）。 */
     "towerD": {
       "name": "塔D",
       "desc": "范围吸引·控场",
       "cost": 110,
       "color": 0xb07bea,
       "darkColor": 0x7a4fb0,
+      "unlock": { "unlockLevel": 2 },
       "targeting": "nearest",
       "stats": {
         "damage": 0,

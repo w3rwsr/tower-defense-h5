@@ -1,7 +1,9 @@
 /* ============================================================
- * Tower.js —— 防御塔（塔A / 塔B / 塔C）
+ * Tower.js —— 防御塔（塔A / 塔B / 塔C / 塔D）
  * 属性与升级成长全部来自 config.towers；
- * 攻击行为委托给独立模块 TDAttack（索敌→攻击→冷却）。
+ * 是否可建造由 TDStorage.isTowerUnlocked(type, levelId) 统一判定
+ * （塔D 通关第 1 关后解锁，仅第 2 关及之后关卡可建）；
+ * 攻击行为委托给独立模块 TDAttack（索敌→攻击→冷却 / 范围吸引）。
  * ============================================================ */
 class Tower extends Phaser.GameObjects.Container {
   constructor(scene, x, y, typeKey) {

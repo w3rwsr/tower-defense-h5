@@ -203,6 +203,22 @@ html, body {
   box-shadow: 0 0 0 3px rgba(255, 93, 93, .35), 0 4px 0 rgba(0,0,0,.18);
 }
 
+/* 未解锁塔（塔D：通关第 1 关前）：灰化 + 锁标，隐藏描述与价格。
+   刻意不使用 disabled——禁用按钮不派发 click，无法弹出解锁条件提示；
+   点击拦截与提示由 GameScene 统一处理。 */
+.btn-tower .t-lock {
+  display: none;
+  font-size: clamp(10px, 1.7vmin, 12px);
+  font-weight: 800;
+  color: #5d554d;
+  line-height: 1.1;
+}
+.btn-tower.locked { background: #e6e1d6; border-color: #9a928a; cursor: not-allowed; }
+.btn-tower.locked .t-name { color: #6b655b; }
+.btn-tower.locked .t-desc,
+.btn-tower.locked .t-cost { display: none; }
+.btn-tower.locked .t-lock { display: block; }
+
 /* ---------------- 遮罩层 ---------------- */
 .overlay {
   position: absolute;

@@ -119,7 +119,7 @@ class LevelSelectScene extends Phaser.Scene {
     }
 
     /* ---- 底部提示 ---- */
-    this.add.text(W / 2, vl.hintY, '通关第 1 关解锁第 2 关，更多关卡持续到来', {
+    this.add.text(W / 2, vl.hintY, '通关第 1 关解锁第 2 关与新塔「塔D·范围吸引」，更多关卡持续到来', {
       fontFamily: TD_FONT_STACK,
       fontSize: this.ls(13) + 'px', color: '#1e4620'
     }).setOrigin(0.5).setStroke('#e6f7d8', 3);
