@@ -261,23 +261,44 @@
        - 旧版微信 X5/QQ 内核可能不派发 PointerEvent，只派发 touch*，
          只监听 pointer 会导致捕获值恒为 (0,0)，所有点击错位；
        - 桌面调试与跨内核兜底保留 mouse*。
-       三类事件均在 capture 阶段记录，早于 Phaser 在目标上的处理，
-       同一触摸的 clientX/Y 完全相同，重复覆盖无副作用。 */
-  let lastPointerX = 0, lastPointerY = 0, inputRewired = false;
+       三类事件均在 capture 阶段记录，早于 Phaser 在目标上的处理。
+
+     多触点对齐：Phaser 3 默认 activePointers=1，同一时刻只有一个
+       活跃触摸 pointer，多余触点直接忽略；但一次 touchend/move 的
+       changedTouches 可能同时含多根手指。若盲目取第 0/最后一个触点，
+       可能选到被忽略的那根手指，坐标就串了。这里与 Phaser 的选择
+       逻辑对齐：优先取 identifier === 当前活跃触摸 pointer 的触点；
+       touchstart 时（pointer 尚未激活）取第一个新触点——Phaser 也是
+       把第一个空闲触点分配给唯一的触摸 pointer。单指操作下二者等价，
+       就是 changedTouches[0]。 */
+  let inputRewired = false;
+  let inputQueue = [{ x: 0, y: 0 }];
   try {
-    const record = (x, y) => {
-      if (typeof x === 'number' && typeof y === 'number') {
-        lastPointerX = x;
-        lastPointerY = y;
-      }
+    const setPoint = (pt) => { inputQueue = [pt]; };
+    const recordPointer = (e) => {
+      if (typeof e.clientX === 'number') setPoint({ x: e.clientX, y: e.clientY });
     };
-    const recordPointer = (e) => record(e.clientX, e.clientY);
+    const activeTouchId = () => {
+      try {
+        const ps = game.input.manager.pointers;
+        for (let i = 1; i < ps.length; i++) {
+          if (ps[i].active) return ps[i].identifier;
+        }
+      } catch (e) { /* 忽略 */ }
+      return null;
+    };
     const recordTouch = (e) => {
       const ts = e.changedTouches;
-      if (ts && ts.length) {
-        const t = ts[ts.length - 1];   // 多指时取最新触点（单指为常规点击）
-        record(t.clientX, t.clientY);
+      if (!ts || !ts.length) return;
+      let chosen = null;
+      const aid = activeTouchId();
+      if (aid !== null && aid !== undefined) {
+        for (let i = 0; i < ts.length; i++) {
+          if (ts[i].identifier === aid) { chosen = ts[i]; break; }
+        }
       }
+      if (!chosen) chosen = ts[0];
+      setPoint({ x: chosen.clientX, y: chosen.clientY });
     };
     ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].forEach((evt) =>
       document.addEventListener(evt, recordPointer, true));
@@ -343,21 +364,24 @@
       ? { x: scale.gameSize.width / canvas.clientWidth,
           y: scale.gameSize.height / canvas.clientHeight }
       : scale.displayScale;
-    /* 捕获值即视口 client 坐标（pointer/touch/mouse 统一）。
+    /* 捕获值即视口 client 坐标（pointer/touch/mouse 统一，已对齐
+       Phaser 单触摸 pointer 的触点，队列恒为 1 项）。
        布局坐标（#app 未旋转系，尺寸 100dvh × 100dvw）：
        canvas 在 #app 内 flex 居中，offsetLeft/Top 即布局内偏移。
-       每次调用动态读取，FIT 重算后下一次触摸自动使用新比例。 */
+       每次调用动态读取比例，FIT 重算后下一次触摸自动使用新比例。 */
+    const curPoint = () => inputQueue[0];
     if (htmlEl.classList.contains('td-rot-ccw')) {
       /* 逆时针握持（听筒朝左）：正变换 (cx,cy)=(ly,lx)
          逆：lx=cy, ly=cx → gameX=(cy-OL)·s, gameY=(cx-OT)·s */
-      scale.transformX = () => (lastPointerY - canvas.offsetLeft) * readDS().x;
-      scale.transformY = () => (lastPointerX - canvas.offsetTop) * readDS().y;
+      scale.transformX = () => (curPoint().y - canvas.offsetLeft) * readDS().x;
+      scale.transformY = () => (curPoint().x - canvas.offsetTop) * readDS().y;
     } else {
       /* 顺时针握持（听筒朝右）：正变换 (cx,cy)=(LH-ly, lx)，
          LH=#app 布局高=视口宽(offsetHeight)
          逆：lx=cy, ly=LH-cx → gameY=(LH-cx-OT)·s */
-      scale.transformX = () => (lastPointerY - canvas.offsetLeft) * readDS().x;
-      scale.transformY = () => (app.offsetHeight - lastPointerX - canvas.offsetTop) * readDS().y;
+      scale.transformX = () => (curPoint().y - canvas.offsetLeft) * readDS().x;
+      scale.transformY = () =>
+        (app.offsetHeight - curPoint().x - canvas.offsetTop) * readDS().y;
     }
     inputRewired = true;
   };
