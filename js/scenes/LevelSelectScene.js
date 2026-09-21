@@ -25,6 +25,21 @@ class LevelSelectScene extends Phaser.Scene {
 
     this.buildLayout();
 
+    /* 选关界面整体 180° 翻转（垂直 + 水平镜像等价效果）——仅移动端。
+       桌面端保持正向（main.js detectMobile 识别结果存于
+       window.__isMobile）。
+       旋转主摄像机而非逐个翻转对象：所有元素（背景图案、关卡图标、
+       文字说明、卡片色带、Toast）作为整体绕画面中心 (W/2,H/2) 旋转，
+       元素间相对位置关系完全保持，180° 旋转不产生任何缩放变形；
+       背景/边框旋转对称，翻转后依然无缝铺满。
+       交互无需额外处理：Phaser 输入系统对旋转摄像机自动走
+       camera.getWorldPoint 逆变换，卡片点击热区随画面同步翻转，
+       点视觉位置即命中对应关卡。场景每次 create 都会重新设置，
+       从 GameScene 返回选关时角度自动复位为本值。 */
+    if (window.__isMobile) {
+      this.cameras.main.setRotation(Math.PI);
+    }
+
     /* 强制横屏模式：方向变化时无需重建布局（始终横屏），
        仅刷新 Phaser 画布尺寸。监听器挂在游戏级 ScaleManager 上，
        场景关闭时手动移除，避免泄漏到 GameScene。 */
