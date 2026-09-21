@@ -308,55 +308,12 @@ html.is-portrait:not(.is-mobile) #orientation-hint p {
 }
 
 /* ============================================================
-   移动端竖屏提示（视觉横屏模式下）：
-   视觉横屏把 #app 旋转 90°，用户竖持手机时画面是侧的，
-   叠加一个半透明提示层告诉用户"请横置手机"。
-   与桌面版不同：背景半透明，让旋转后的游戏画面透出，
-   用户一眼就明白需要横置手机；pointer-events:none 不阻挡
-   触摸（视觉横屏下触摸坐标已做逆变换，仍可操作）。
-   当 DeviceOrientation 检测到用户物理横置手机后，
-   html.is-held-landscape 被加上，提示自动消失——此时
-   旋转后的画面相对用户已是正向。
+   移动端「请横屏放置」提示层已彻底移除：画面方向永久固定为
+   rotate(90deg)，方向不再依赖任何传感器/方向 API，提示无意义；
+   且微信 X5 WebView 下 deviceorientation 事件停发/γ 符号异常会
+   误触弹出（横屏几秒后误判为竖屏）。#orientation-hint 元素保留
+   供桌面窄窗竖屏提示使用（见上方 :not(.is-mobile) 规则）。
    ============================================================ */
-html.is-mobile.is-portrait #orientation-hint {
-  display: flex;
-  position: fixed;
-  inset: 0;
-  z-index: 9998;
-  background: rgba(20, 24, 40, 0.55);
-  backdrop-filter: blur(2px);
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 24px;
-  color: #fff;
-  pointer-events: none;
-}
-html.is-mobile.is-portrait #orientation-hint .rotate-inner {
-  max-width: 280px;
-}
-html.is-mobile.is-portrait #orientation-hint .rotate-icon {
-  font-size: 56px;
-  margin-bottom: 14px;
-  animation: rotatePhone 1.6s ease-in-out infinite;
-}
-html.is-mobile.is-portrait #orientation-hint h2 {
-  font-size: 19px;
-  font-weight: 700;
-  margin-bottom: 8px;
-  color: #ffd66b;
-}
-html.is-mobile.is-portrait #orientation-hint p {
-  font-size: 13px;
-  opacity: .88;
-  line-height: 1.6;
-}
-
-/* 用户物理横置手机后（DeviceOrientation 检测 gamma 绝对值 > 45°），
-   旋转后的游戏画面已相对用户正向，隐藏提示层。 */
-html.is-mobile.is-portrait.is-held-landscape #orientation-hint {
-  display: none;
-}
 
 /* ============================================================
    视觉横屏：移动端 + 竖屏（微信/QQ 内置 WebView、旋转锁定开启，

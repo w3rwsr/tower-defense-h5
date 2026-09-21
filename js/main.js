@@ -95,15 +95,12 @@
       try { soType = (screen.orientation && screen.orientation.type) || '-'; } catch (e) {}
       const wo = (typeof window.orientation === 'number') ? String(window.orientation) : '-';
       const src = { so: 'screen.orientation', wo: 'window.orientation', vw: '视口比例' }[lastSource] || lastSource;
-      const mo = window.__tdMotion || {};
       panel.textContent =
         '方向诊断 | so.type=' + soType +
         ' | win.orient=' + wo +
         ' | 视口=' + window.innerWidth + 'x' + window.innerHeight +
         ' | 判定=' + state +
         ' | 信号源=' + src +
-        ' | 倾斜=β' + (mo.beta === undefined ? '-' : mo.beta) + '/γ' + (mo.gamma === undefined ? '-' : mo.gamma) +
-        ' | 横置=' + (html.classList.contains('is-held-landscape') ? '是' : '否') +
         ' | 方向=固定(rotate90·听筒朝左)' +
         ' | 事件=' + eventCount + ' 轮询=' + pollCount +
         ' | 更新=' + lastUpdate;
@@ -398,90 +395,12 @@
     } catch (e) { /* 忽略 */ }
   };
 
-  /* ============================================================
-   * 横置检测（仅控制竖屏提示层显隐）+ 画面方向永久固定
-   *
-   * 设计决策（2026-09-21 最终版）：画面方向【永久固定】为
-   * rotate(90deg)（style.css 中 #app 的视觉横屏规则；听筒朝左
-   * 握持时正向，真机已确认）。方向不依赖 screen.orientation /
-   * window.orientation / γ 角度或任何传感器数据——手机转动、
-   * 横竖屏切换均不会改变画面方向；无翻转按钮、无自动翻转逻辑，
-   * 从根上杜绝 180° 倒置复发。
-   *
-   * 为什么不用 γ/方向 API 自动选方向：
-   *   - 部分微信/QQ X5 内核 γ 符号与 W3C 标准相反，自动判定必然
-   *     在一类设备上选错，与系统表面旋转叠加成 180° 全颠倒；
-   *   - 即使标准设备，自动双向意味着用户换个方向横置画面就翻转，
-   *     不符合"方向固定"诉求；
-   *   - γ 近水平时符号不可辨识，任何自动方案在平放过渡区都会抖动。
-   *   下方状态机的 γ/β 仅用于判断"是否已横置"，只控制竖屏提示层
-   *   显隐，不参与画面方向。
-   *
-   * 横置状态机（DeviceOrientation，解决平放横屏退出问题）：
-   * - γ：绕设备长轴旋转角，垂直横置≈±90°，平放≈0°，横置后仰
-   *   0~90° 全程 |γ|≈仰角
-   * - β：平放屏幕朝上≈0°，竖持≈90°
-   * - 进入横置：|γ|>12°（确保用户主动横置）
-   * - 保持横置：|γ|>=8°，或 |γ|<8° 且 β<=45°（平放横屏）
-   * - 退出横置：|γ|<8° 且 β>45°（明显竖持），或传感器 2s 无数据
-   *
-   * β 不可靠机型妥协：部分 X5 WebView 的 β 恒报 0，横置→竖持后
-   *   无法自动退出提示层（W3C 规范下 γ/β 均无法区分），需重新
-   *   横置一次"重置"。
-   *
-   * 平台边界：真横屏（非锁竖屏浏览器）由系统接管旋转，UI 始终朝
-   *   物理上方且正向；Web 无法在非全屏下 lock 原生方向，故视觉
-   *   横屏作用于锁竖屏 WebView（微信/QQ 等，本项目主场景）。
-   * ============================================================ */
-  let tiltTimer = null;
-
-  /* 握持状态的唯一应用入口（单一状态源，避免事件回调与轮询各自写 class）：
-     - 依据 window.__tdMotion（deviceorientation 回调只更新数据+时间戳）
-     - 传感器数据超过 2 秒未更新视为失效（微信 X5 WebView 切后台/锁屏/
-       权限收回时事件会停发），此时强制按「未横置」处理——
-       解决「横放后切回竖屏，提示层不恢复」的残留状态问题。
-     - 由 200ms 防抖（快速响应）和 500ms 轮询（兜底）共同驱动。 */
-  const applyHeldState = () => {
-    const m = window.__tdMotion;
-    const fresh = !!(m && (Date.now() - m.t) < 2000);
-    const g = fresh ? Math.abs(m.gamma) : 0;
-    const b = fresh ? Math.abs(m.beta || 0) : 0;
-    const htmlEl = document.documentElement;
-    const wasHeld = htmlEl.classList.contains('is-held-landscape');
-    /* 进入横置：|γ|>12°（迟滞带 8~12° 防止边界抖动）
-       保持横置：|γ|>=8°，或 |γ|<8° 但 β<=45°（疑似平放横屏）
-       退出横置：|γ|<8° 且 β>45°（明显竖持）
-       —— β 用于区分平放横屏（β≈0）与竖持（β≈90） */
-    let heldLandscape;
-    if (wasHeld) {
-      heldLandscape = fresh && (g >= 8 || b <= 45);
-    } else {
-      heldLandscape = fresh && g > 12;
-    }
-    /* 仅更新提示层显隐：画面方向永久固定，与握持姿态/γ 符号
-       无关——传感器数据或符号异常不会导致任何画面翻转。 */
-    if (wasHeld !== heldLandscape) {
-      htmlEl.classList.toggle('is-held-landscape', heldLandscape);
-    }
-  };
-
-  try {
-    window.addEventListener('deviceorientation', (e) => {
-      const betaNum = typeof e.beta === 'number' ? e.beta : 0;
-      const gammaNum = typeof e.gamma === 'number' ? e.gamma : 0;
-      if (typeof e.beta !== 'number' && typeof e.gamma !== 'number') return;
-      window.__tdMotion = { beta: Math.round(betaNum), gamma: Math.round(gammaNum), t: Date.now() };
-      clearTimeout(tiltTimer);
-      tiltTimer = setTimeout(applyHeldState, 200);
-    });
-  } catch (e) { /* 忽略 */ }
-  /* 轮询兜底：传感器事件停发（WebView 节流/切后台返回）时，
-     靠新鲜度判定把 is-held-landscape 拉回 false，提示层恢复 */
-  setInterval(applyHeldState, 500);
-  try {
-    document.addEventListener('visibilitychange', applyHeldState);
-    window.addEventListener('pageshow', applyHeldState);
-  } catch (e) { /* 忽略 */ }
+  /* 画面方向【永久固定】为 rotate(90deg)（听筒朝左正向，真机确认），
+     不依赖任何传感器/方向 API。移动端「请横屏放置」提示层及相关的
+     deviceorientation 监听、setInterval、新鲜度判定已彻底移除——方向
+     既已固定，提示无意义；且微信 X5 WebView 下 γ 符号异常/事件停发会
+     误触弹出（横屏几秒后误判为竖屏）。下方 forceRelayout 仅响应窗口
+     尺寸变化重算画布，不参与任何方向/提示判定。 */
 
   window.addEventListener('orientationchange', forceRelayout);
   window.addEventListener('resize', forceRelayout);
