@@ -358,21 +358,23 @@ html.is-mobile.is-portrait.is-held-landscape #orientation-hint {
 /* ============================================================
    视觉横屏：移动端 + 竖屏（微信/QQ 内置 WebView、旋转锁定开启，
    视口物理竖屏且无法真横屏）时，把整个应用旋转 90° 呈现横屏布局。
+   方向【相对机身锁定】——锁竖屏视口表面就是机身坐标系，旋转方向
+   不随机身姿态/听筒朝向/γ 符号变化，UI 顶部始终指向用户校准的
+   音量键所在边框（#rot-flip 按钮切换，localStorage 记忆）：
+   - 默认（tdRotFlip=0）：rotate(90deg)，UI 顶部朝机身右边框
+     （多数安卓机音量键位置）
+   - td-rot-ccw（tdRotFlip=1）：rotate(-90deg)，UI 顶部朝机身左边框
+     （音量键在左侧的机型）
    数学推导（视口 W=innerWidth, H=innerHeight，竖屏下 W<H；
    #app 布局盒 width=100dvh=H, height=100dvw=W，transform-origin:0 0）：
-   - 顺时针握持（听筒朝右，多数人习惯）：
-     rotate(90deg) translateY(-100dvw)
-       先 translateY(-W)：#app 从 x∈[0,H],y∈[0,W] 平移到 x∈[0,H],y∈[-W,0]
-       后 rotate(90deg)：(x,y)→(-y,x)，画面落在 x∈[0,W],y∈[0,H]
-       顶部方向 (0,-1) → (1,0)，画面顶部朝屏幕右侧 ✓
-   - 逆时针握持（听筒朝左）：
-     rotate(-90deg) translateX(-100dvh)
-       先 translateX(-H)：#app 平移到 x∈[-H,0],y∈[0,W]
-       后 rotate(-90deg)：(x,y)→(y,-x)，画面落在 x∈[0,W],y∈[0,H]
-       顶部方向 (0,-1) → (-1,0)，画面顶部朝屏幕左侧 ✓
+   - rotate(90deg) translateY(-100dvw)
+       先 translateY(-W) 再 rotate(90deg)：(x,y)→(-y,x)，
+       画面落在 x∈[0,W],y∈[0,H]，顶部 (0,-1)→(1,0) 朝视口右 ✓
+   - rotate(-90deg) translateX(-100dvh)
+       先 translateX(-H) 再 rotate(-90deg)：(x,y)→(y,-x)，
+       画面落在 x∈[0,W],y∈[0,H]，顶部 (0,-1)→(-1,0) 朝视口左 ✓
    关键：必须用 rotate 而非 matrix(0,1,1,0)——后者是绕 y=x 反射，
    会让画面左右镜像（文字反着写），视觉上像"完全倒置"。
-   竖持时画面旋转 90° 显示，用户横放手机后画面即正向。
    触摸坐标逆变换由 main.js 覆盖 Phaser scale.transformX/Y 完成。
    #app 带 transform 后成为 fixed 后代的 containing block，
    HUD/遮罩等 fixed 元素会自动相对旋转后的 #app 定位，无需改动。
@@ -387,7 +389,7 @@ html.is-mobile.is-portrait #app {
   transform-origin: 0 0;
 }
 
-/* 逆时针握持（听筒朝左）：画面顶部朝屏幕左侧
+/* 校准为机身左边框（音量键在左）：UI 顶部朝视口左侧
    注意：rotate(-90deg) 是逆时针旋转 90°，保持画面方向不变；
    matrix(0,1,1,0) 是反射会让画面镜像，不能用。 */
 html.is-mobile.is-portrait.td-rot-ccw #app {
