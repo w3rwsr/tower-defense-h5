@@ -390,3 +390,170 @@ html.is-mobile.is-portrait #app {
 
 /* #dbg hash 时显示诊断面板（由 JS 写入，hidden 属性默认隐藏） */
 html.has-dbg #dbg-panel { display: block; }
+
+/* ======================================================================
+   调试浏览器（debugTools.js，仅 #dbg 模式由 JS 创建；无 #dbg 时 DOM 不存在）
+   位于 #app 外部，不参与视觉横屏旋转；触摸 / 鼠标均可操作。
+   ====================================================================== */
+#td-dbg-browser-fab {
+  position: fixed;
+  left: 10px;
+  bottom: 10px;
+  z-index: 99997;
+  padding: 9px 14px;
+  border: 2px solid rgba(255, 255, 255, .75);
+  border-radius: 22px;
+  background: rgba(47, 111, 192, .92);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .3);
+  cursor: pointer;
+}
+#td-dbg-browser-fab:active { transform: scale(.96); }
+#td-dbg-browser-fab.open { display: none; }
+
+#td-dbg-browser {
+  position: fixed;
+  z-index: 99998;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(960px, 96vw);
+  height: min(640px, 92vh);
+  display: flex;
+  flex-direction: column;
+  background: #eef2e8;
+  border: 2px solid #2f6fc0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+}
+#td-dbg-browser[hidden] { display: none; }
+
+.td-dbg-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: #2f6fc0;
+}
+.td-dbg-btn {
+  flex: 0 0 auto;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, .55);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .16);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+.td-dbg-btn:hover:not(:disabled) { background: rgba(255, 255, 255, .3); }
+.td-dbg-btn:disabled { opacity: .38; cursor: default; }
+.td-dbg-go { font-weight: 700; }
+.td-dbg-x { margin-left: 2px; }
+
+.td-dbg-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #b9c7a8;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #1d2a10;
+  background: #fff;
+}
+.td-dbg-url:focus { outline: 2px solid #8ed861; outline-offset: -1px; }
+
+.td-dbg-hist {
+  position: absolute;
+  top: 50px;
+  right: 10px;
+  bottom: 40px;
+  width: min(340px, 72vw);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #b9c7a8;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .25);
+  overflow: hidden;
+}
+.td-dbg-hist[hidden] { display: none; }
+.td-dbg-hist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #2f4a16;
+  background: #e7f1d8;
+  border-bottom: 1px solid #cdddb2;
+}
+.td-dbg-hist-head .td-dbg-btn {
+  height: 26px;
+  min-width: auto;
+  padding: 0 10px;
+  font-size: 12px;
+  color: #7a2810;
+  border-color: rgba(122, 40, 16, .4);
+  background: rgba(255, 255, 255, .7);
+}
+.td-dbg-hist-list { flex: 1; overflow-y: auto; }
+.td-dbg-hist-item {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  grid-template-rows: auto auto;
+  width: 100%;
+  gap: 0 6px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid #eef2e8;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+.td-dbg-hist-item:hover { background: #f4f9ec; }
+.td-dbg-hist-item.cur { background: #e7f1d8; }
+.td-dbg-hist-dot {
+  grid-row: 1 / 3;
+  align-self: center;
+  color: #2f6fc0;
+  font-size: 12px;
+}
+.td-dbg-hist-url {
+  font-size: 13px;
+  color: #243018;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.td-dbg-hist-item small {
+  grid-column: 2;
+  font-size: 11px;
+  color: #8a9772;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.td-dbg-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+.td-dbg-foot {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  background: #eef2e8;
+  color: #7a866a;
+  font-size: 11px;
+  text-align: center;
+  border-top: 1px solid #cdddb2;
+}

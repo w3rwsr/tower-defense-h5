@@ -224,7 +224,10 @@ class GameScene extends Phaser.Scene {
 
       const ctx = {
         enemies: this.enemies,
-        fire: (tower, target) => this.fireProjectile(tower, target)
+        fire: (tower, target) => this.fireProjectile(tower, target),
+        /* 塔D 范围吸引脉冲：开窗瞬间由 PullBehavior 回调一次，targets 为本脉冲
+           锁定的全部小怪，播放多目标攻击动画（纯视觉，不写数值/伤害） */
+        pullPulse: (tower, range, targets) => this.playPullPulse(tower, range, targets)
       };
       /* 塔先于敌更新：塔D（PullBehavior）先标记 pullFresh/写位移，敌再据其位移；
          普通 AttackBehavior 同样先于敌，1 帧索敌延迟不可见 */
@@ -644,6 +647,58 @@ class GameScene extends Phaser.Scene {
     );
   }
 
+  /* ============================================================
+   * 塔D 范围吸引脉冲动画（多目标，纯视觉，不造成伤害）：
+   *   1) 塔心向射程边缘扩散一圈紫色吸引光环；
+   *   2) 每个被吸小怪紫色一闪 + 轻微收缩（多目标逐个反馈）；
+   *   3) 炮头一次脉冲缩放，表示本次范围攻击已释放。
+   * 频率由 PullBehavior 保证（每 2 秒开窗仅回调一次）。
+   * ============================================================ */
+  playPullPulse(tower, range, targets) {
+    const color = tower.cfg.color;
+
+    /* 1) 扩散光环：描边圈 + 极淡填充，从塔心扩到射程边缘 */
+    const ring = this.add.graphics().setDepth(45);
+    const st = { r: 16, a: 0.9 };
+    this.tweens.add({
+      targets: st, r: range, a: 0,
+      duration: 420, ease: 'Quad.out',
+      onUpdate: () => {
+        ring.clear();
+        ring.fillStyle(color, st.a * 0.08);
+        ring.fillCircle(tower.x, tower.y, st.r);
+        ring.lineStyle(4, color, st.a);
+        ring.strokeCircle(tower.x, tower.y, st.r);
+      },
+      onComplete: () => ring.destroy()
+    });
+
+    /* 2) 每个被吸小怪：紫色吸引闪光 + 轻微收缩回弹（数量即多目标反馈） */
+    for (const e of targets) {
+      if (!e.body || e.dead) continue;
+      e.body.setTint(0xd9b8ff);
+      this.tweens.add({
+        targets: e, scaleX: 0.92, scaleY: 0.92,
+        duration: 120, yoyo: true,
+        onComplete: () => { try { e.setScale(1); } catch (_) {} }
+      });
+      /* 闪光结束后恢复原色；若正处于减速（塔B 蓝色 tint）则还原减速色 */
+      this.time.delayedCall(260, () => {
+        try {
+          if (e.dead) return;
+          if (e.slowTimer > 0) e.body.setTint(0xbbeeff);
+          else e.body.clearTint();
+        } catch (_) {}
+      });
+    }
+
+    /* 3) 炮头脉冲缩放 */
+    this.tweens.add({
+      targets: tower.turret, scaleX: 1.18, scaleY: 1.18,
+      duration: 110, yoyo: true
+    });
+  }
+
   spawnSplashFx(x, y, radius, color) {
     const g = this.add.graphics().setPosition(x, y).setDepth(45);
     g.fillStyle(color, 0.35);
@@ -749,18 +804,20 @@ class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 塔 D「沿路吸附」真实运行时自查（控制台 window.__tdPullTest()）。
+   * 塔 D「沿路吸附·范围多目标」真实运行时自查（控制台 window.__tdPullTest()）。
    * 几何夹具（Level 2 路径，建议在第 2 关内运行；Level 1 首段同为 y=100 水平段）：
    *   段0 (-40,100)→(720,100)，段1 (720,100)→(720,250)。
    *   塔1 (300,200)：投影点 footDist=340；塔2 (780,150) 卡拐角，投影 footDist=810。
-   *   eA 420 在塔1射程内（回拉目标 80）、eB 740 在射程外；
-   *   eD 850 在拐角竖段（回拉 40，必须严格竖直、x 恒为 720）。
+   *   小怪 e1 380（距≈108）、e2 400（≈117）、eA 420（≈128）均在塔1射程 140 内，
+   *   同一脉冲必须【全部】被回拉；eBoss 420 同为 cfg.boss，必须免疫；
+   *   eB 740 射程外；eD 850 在拐角竖段（回拉 40，严格竖直、x 恒 720）。
    * 时序（脉冲 0–0.5s，间隙 0.5–2.0s，第二次脉冲 2.0–2.5s）：
-   *   0.3s 查首次吸附 + 在路；0.25–0.45s 查 ctrlSlow；
-   *   1.5s 查回弹归位；1.9s 查脉冲间隙；2.15s 查第二次脉冲。
+   *   0.15s 查范围目标集/BOSS免疫/多目标动画（紫闪、炮头朝向、脉冲计数 1）；
+   *   0.3s 查首次吸附 + 在路；0.3–0.5s 查 ctrlSlow；
+   *   1.5s 查回弹归位；1.9s 查脉冲间隙；2.15s 查第二次脉冲（计数 2）。
    */
   async runPullTest() {
-    const report = { step: 'init', tower: null, phase1: null, ctrlSlow: null,
+    const report = { step: 'init', tower: null, phase0: null, phase1: null, ctrlSlow: null,
                      release: null, intervalGap: null, secondPulse: null,
                      conclusion: null, error: null };
     try {
@@ -776,10 +833,13 @@ class GameScene extends Phaser.Scene {
         this._pullTestObjs.towers.push(tw);
         return tw;
       };
-      const mkEnemy = (dist) => {
-        const e = new Enemy(this, 'enemyX');
+      const mkEnemy = (dist, typeKey) => {
+        const e = new Enemy(this, typeKey || 'enemyX');
         e.pathDist = dist;
         e.baseSpeed = 0;
+        /* Enemy 出生渲染点在路径起点，手动设置 pathDist 后用 dt=0 跑一次
+           update 对齐渲染位置（真实出兵由出生点沿路走，不存在此问题） */
+        e.update(0);
         this.enemies.push(e);
         this._pullTestObjs.enemies.push(e);
         return e;
@@ -794,27 +854,51 @@ class GameScene extends Phaser.Scene {
         isPullBehavior: tower.behavior && tower.behavior.constructor.name === 'PullBehavior',
         intervalSec: tower.behavior.interval,
         durationSec: tower.behavior.duration,
+        smallOnly: tower.behavior.smallOnly,
         stats: tower.stats,
         effect: tower.cfg.effect
       };
 
-      const eA = mkEnemy(420);  // (380,100) 距塔1≈128<140，目标回拉 80
-      const eB = mkEnemy(740);  // (700,100) 距塔1≈412>140，射程外
-      const eD = mkEnemy(850);  // (720,190) 拐角竖段，距塔2≈72<140，目标回拉 40
+      const e1 = mkEnemy(380);    // (340,100) 距塔1≈108<140，回拉目标 40
+      const e2 = mkEnemy(400);    // (360,100) 距塔1≈117<140，回拉目标 60
+      const eA = mkEnemy(420);    // (380,100) 距塔1≈128<140，回拉目标 80
+      const eBoss = mkEnemy(420, 'enemyBoss'); // 与 eA 同位但 cfg.boss=true：必须免疫
+      const eB = mkEnemy(740);    // (700,100) 距塔1≈412>140，射程外
+      const eD = mkEnemy(850);    // (720,190) 拐角竖段，距塔2≈72<140，回拉 40
+
+      // ---- t=0.15s：首脉冲开窗瞬间——范围目标集 / BOSS免疫 / 多目标动画 ----
+      await new Promise(r => setTimeout(r, 150));
+      const tgts = tower.behavior.targets;
+      report.phase0 = {
+        targetsCount: tgts.length,
+        targetsAllSmall: tgts.indexOf(e1) !== -1 && tgts.indexOf(e2) !== -1 && tgts.indexOf(eA) !== -1,
+        bossExcluded: tgts.indexOf(eBoss) === -1,
+        pulled: { e1: e1.pullBack, e2: e2.pullBack, eA: eA.pullBack, boss: eBoss.pullBack },
+        allSmallPulled: e1.pullBack > 5 && e2.pullBack > 5 && eA.pullBack > 5,
+        bossUntouched: eBoss.pullBack < 0.5,
+        /* 多目标攻击动画：被吸小怪紫闪 0xd9b8ff，BOSS 保持原色；炮头已转向；
+           首次开窗脉冲计数 1（塔2 对 eD 同样 1） */
+        fxTintOnSmall: eA.body.tintTopLeft === 0xd9b8ff,
+        fxNoTintOnBoss: eBoss.body.tintTopLeft === 0xffffff,
+        turretAimed: Math.abs(tower.turret.rotation - (-Math.PI / 2)) > 0.05,
+        pulseCount1: tower.behavior.pulseCount === 1 && tower2.behavior.pulseCount === 1
+      };
 
       // ---- t=0.3s：首次脉冲窗口内 ----
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise(r => setTimeout(r, 150));
       report.phase1 = {
         A: { pullBack: eA.pullBack, onPathDist: onPath(eA), x: eA.x, y: eA.y },
         B: { pullBack: eB.pullBack, onPathDist: onPath(eB) },
         D: { pullBack: eD.pullBack, onPathDist: onPath(eD), x: eD.x, y: eD.y },
         A_pulled: eA.pullBack > 10,
         B_notPulled: eB.pullBack < 5,
-        allOnPath: onPath(eA) < 0.5 && onPath(eB) < 0.5 && onPath(eD) < 0.5,
+        bossStillUntouched: eBoss.pullBack < 0.5,
+        allOnPath: onPath(e1) < 0.5 && onPath(e2) < 0.5 && onPath(eA) < 0.5 &&
+                   onPath(eBoss) < 0.5 && onPath(eB) < 0.5 && onPath(eD) < 0.5,
         D_strictVertical: Math.abs(eD.x - 720) < 0.5
       };
 
-      // ---- t=0.25~0.45s（仍在首个 0.5s 窗口内）：ctrlSlow 压制但仍在前进 ----
+      // ---- t=0.3~0.5s（仍在首个 0.5s 窗口内）：ctrlSlow 压制但仍在前进 ----
       const eC = mkEnemy(420);
       eC.baseSpeed = TD_CONFIG.enemies.enemyX.speed;
       const pdBefore = eC.pathDist;
@@ -833,40 +917,64 @@ class GameScene extends Phaser.Scene {
       // ---- t=1.5s：脉冲间隙已 1s，pullBack 应衰减归零（回弹到路径位置继续走） ----
       await new Promise(r => setTimeout(r, 1050));
       report.release = { time: 1.5, A_pullBack: eA.pullBack, A_onPathDist: onPath(eA),
+        bossPullBack: eBoss.pullBack,
         returnedToPath: eA.pullBack < 2 && onPath(eA) < 0.5 };
 
       // ---- t=1.9s：第二次脉冲（2.0s）前的间隙，仍应归零 ----
       await new Promise(r => setTimeout(r, 400));
-      report.intervalGap = { time: 1.9, A_pullBack: eA.pullBack, inGap: eA.pullBack < 2 };
+      report.intervalGap = { time: 1.9, A_pullBack: eA.pullBack,
+        targetsCleared: tower.behavior.targets.length === 0,
+        inGap: eA.pullBack < 2 };
 
-      // ---- t=2.15s：第二次脉冲窗口（2.0–2.5s），再次被回拉 ----
+      // ---- t=2.15s：第二次脉冲窗口（2.0–2.5s），小怪再次全部被回拉、BOSS 仍免疫 ----
       await new Promise(r => setTimeout(r, 250));
       report.secondPulse = {
         time: 2.15,
         A_pullBack: eA.pullBack, A_onPathDist: onPath(eA),
+        e1_pullBack: e1.pullBack, e2_pullBack: e2.pullBack, boss_pullBack: eBoss.pullBack,
         D_pullBack: eD.pullBack, D_onPathDist: onPath(eD),
+        targetsCount: tower.behavior.targets.length,
         firedAgain: eA.pullBack > 10,
+        allSmallAgain: e1.pullBack > 5 && e2.pullBack > 5 && eA.pullBack > 5,
+        bossStillImmune: eBoss.pullBack < 0.5,
+        pulseCount2: tower.behavior.pulseCount === 2 && tower2.behavior.pulseCount === 2,
         onPath: onPath(eA) < 0.5 && onPath(eD) < 0.5
       };
 
       report.conclusion = {
         behaviorIsPull: report.tower.isPullBehavior,
         intervalIs2s: report.tower.intervalSec === 2,
-        A_pulled: report.phase1.A_pulled,
-        B_notPulled: report.phase1.B_notPulled,
+        smallOnlyFilter: report.tower.smallOnly === true,
+        areaMultiTarget: report.phase0.targetsCount === 3 && report.phase0.targetsAllSmall &&
+                         report.phase0.allSmallPulled,
+        bossImmune: report.phase0.bossExcluded && report.phase0.bossUntouched &&
+                    report.phase1.bossStillUntouched && report.secondPulse.bossStillImmune,
+        multiTargetFx: report.phase0.fxTintOnSmall && report.phase0.fxNoTintOnBoss &&
+                       report.phase0.turretAimed && report.phase0.pulseCount1,
+        outOfRangeSafe: report.phase1.B_notPulled,
         alwaysOnPath: report.phase1.allOnPath && report.ctrlSlow.onPathDist < 0.5 &&
                       report.release.A_onPathDist < 0.5 && report.secondPulse.onPath,
         cornerNoSideways: report.phase1.D_strictVertical,
         returnedToPath: report.release.returnedToPath,
-        pulseGapClear: report.intervalGap.inGap,
-        pulseEvery2s: report.secondPulse.firedAgain,
+        pulseGapClear: report.intervalGap.inGap && report.intervalGap.targetsCleared,
+        pulseEvery2s: report.secondPulse.firedAgain && report.secondPulse.allSmallAgain &&
+                      report.secondPulse.pulseCount2,
         slowedButMoving: report.ctrlSlow.slowedButMoving,
         pass: report.tower.isPullBehavior && report.tower.intervalSec === 2 &&
+              report.tower.smallOnly === true &&
+              report.phase0.targetsCount === 3 && report.phase0.targetsAllSmall &&
+              report.phase0.allSmallPulled && report.phase0.bossExcluded &&
+              report.phase0.bossUntouched &&
+              report.phase0.fxTintOnSmall && report.phase0.fxNoTintOnBoss &&
+              report.phase0.turretAimed && report.phase0.pulseCount1 &&
               report.phase1.A_pulled && report.phase1.B_notPulled &&
+              report.phase1.bossStillUntouched &&
               report.phase1.allOnPath && report.phase1.D_strictVertical &&
               report.release.returnedToPath && report.intervalGap.inGap &&
-              report.secondPulse.firedAgain && report.secondPulse.onPath &&
-              report.ctrlSlow.slowedButMoving
+              report.intervalGap.targetsCleared &&
+              report.secondPulse.firedAgain && report.secondPulse.allSmallAgain &&
+              report.secondPulse.bossStillImmune && report.secondPulse.pulseCount2 &&
+              report.secondPulse.onPath && report.ctrlSlow.slowedButMoving
       };
       report.step = 'done';
     } catch (e) {

@@ -17,8 +17,17 @@
   const TOTAL_LEVELS = 5;
 
   const storage = {
+    /**
+     * 调试总开关（纯内存，默认 false，绝不写入 localStorage）。
+     * 仅 URL 带 #dbg 时由 debugTools.js 置 true：开启后所有关卡 / 塔 /
+     * 特殊解锁条件一律放行，供开发调试直接访问全部内容；
+     * 不改变存档数据结构（completed / unlockedTowers）与正式业务逻辑。
+     */
+    __debugAllUnlocked: false,
+
     /** 当前版本开放的最大关卡编号（第 2 关通关第 1 关后解锁，以此类推） */
     get maxUnlocked() {
+      if (this.__debugAllUnlocked) return TOTAL_LEVELS;
       let n = 1;
       while (n < TOTAL_LEVELS && this.isCompleted(n)) n++;
       return n;
@@ -63,6 +72,7 @@
     /** 某关是否可进入：第 1 关恒开放；第 N 关需第 N-1 关已通关 */
     isUnlocked(level) {
       if (level < 1 || level > TOTAL_LEVELS) return false;
+      if (this.__debugAllUnlocked) return true; // 调试态：全关卡放行（不落盘）
       if (level === 1) return true;
       return this.isCompleted(level - 1);
     },
@@ -85,6 +95,7 @@
      *       旧档无记录时回退按「解锁关卡的前一关已通关」推导。
      */
     isTowerUnlocked(typeKey, levelId) {
+      if (this.__debugAllUnlocked) return true; // 调试态：全部塔放行（含第1关用塔D）
       const need = this.towerUnlockLevel(typeKey);
       if (!need) return true;
       if (levelId != null && levelId < need) return false;

@@ -179,13 +179,15 @@ window.TD_CONFIG = {
       }
     },
 
-    /* 塔D —— 范围吸引·控场：不发射弹道，每 attractInterval(2s) 触发一次
-       吸附脉冲，把射程内敌人【沿道路方向】向塔的路径投影点回拉
-       （只沿路径切线、只向后拉、限幅 maxDisplace），敌人渲染点始终
-       是路径上的点，绝不会被拉出道路；吸附结束位移回弹归零、继续前进，
-       被显著回拉期间推进减速（ctrlSlow 0.5）。升级提高 stats.range
-       即扩大吸引范围。解锁条件：通关第 1 关后自动永久解锁，第 2 关及
-       后续关卡可用（第 1 关商店中显示锁定，判定/持久化走 TDStorage）。 */
+    /* 塔D —— 范围吸引·控场：不发射弹道，【范围索敌】锁定射程内所有小怪，
+       每 attractInterval(2s) 触发一次吸附脉冲，把它们【沿道路方向】
+       向塔的路径投影点回拉（只沿路径切线、只向后拉、限幅 maxDisplace），
+       敌人渲染点始终是路径上的点，绝不会被拉出道路；吸附结束位移回弹
+       归零、继续前进，被显著回拉期间推进减速（ctrlSlow 0.5）。
+       targetFilter=nonBoss：仅小怪生效（enemyX/enemyY 等 cfg.boss 非真），
+       BOSS 免疫吸引。升级提高 stats.range 即扩大吸引范围。
+       解锁条件：通关第 1 关后自动永久解锁，第 2 关及后续关卡可用
+       （第 1 关商店中显示锁定，判定/持久化走 TDStorage）。 */
     "towerD": {
       "name": "塔D",
       "desc": "范围吸引·控场",
@@ -193,7 +195,7 @@ window.TD_CONFIG = {
       "color": 0xb07bea,
       "darkColor": 0x7a4fb0,
       "unlock": { "unlockLevel": 2 },
-      "targeting": "nearest",
+      "targeting": "area",
       "stats": {
         "damage": 0,
         "range": 140,
@@ -201,6 +203,7 @@ window.TD_CONFIG = {
       },
       "effect": {
         "type": "pull",
+        "targetFilter": "nonBoss", // 只吸小怪：cfg.boss===true 的 BOSS 免疫；缺省/其他值=全敌
         "pullStrength": 7,     // 单次吸附时位移收敛速率（越大越快被拉拢，1/秒）
         "maxDisplace": 95,     // 沿路向后最大回拉距离（像素），敌人绝不会被拉出道路
         "attractInterval": 2000, // 吸附间隔（毫秒）：每 2 秒触发一次

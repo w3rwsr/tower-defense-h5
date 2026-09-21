@@ -105,11 +105,20 @@
   }
 
   /**
-   * 范围吸引行为（塔D）：不发射弹道。每 attractInterval 毫秒触发一次吸附
-   * 脉冲（首次进战立即触发），脉冲持续 attractDuration 毫秒，脉冲间隙
-   * 敌人位移自然衰减归零、继续沿路前进。
+   * 范围吸引行为（塔D）：不发射弹道。【范围索敌】——每个脉冲窗口扫描
+   * 射程内的【全部小怪】并逐个施加沿路回拉（非单体锁定）。
+   * 每 attractInterval 毫秒触发一次吸附脉冲（建塔即开窗），脉冲持续
+   * attractDuration 毫秒，脉冲间隙敌人位移自然衰减归零、继续沿路前进。
    *
-   * 铁律：吸引【只沿道路方向、只向后拉】，绝不产生横向/垂直分量：
+   * 目标规则：
+   *   - 射程：欧氏距离 ≤ tower.stats.range（升级 range 即扩大吸引范围）；
+   *   - targetFilter='nonBoss'：仅小怪（cfg.boss 非真，如 enemyX/enemyY）
+   *     生效，BOSS 免疫吸引；其他/缺省值 = 全部敌人生效；
+   *   - 开窗瞬间若存在 ≥1 个有效目标，回调 ctx.pullPulse(tower, range,
+   *     targets) 播放一次多目标攻击动画（GameScene.playPullPulse），
+   *     炮头转向距塔最近的被吸目标；无目标时炮头保持原方向。
+   *
+   * 位移铁律：吸引【只沿道路方向、只向后拉】，绝不产生横向/垂直分量：
    *   1. 取敌人当前所在路径段，求塔在该段上的投影点（沿路里程 footDist）；
    *   2. 回拉量 back = clamp(pathDist - footDist, 0, maxDisplace)
    *      ——敌人走过投影点后才被往回拉，未走到不向前拽（避免帮怪加速）；
@@ -118,7 +127,6 @@
    *      拐弯处也不会切出道路；pathDist 本身永不回退，脉冲结束 pullBack
    *      衰减归零即回到当前路径位置继续前进，不卡、不脱轨。
    * 被显著回拉（pullBack>16）的敌人推进减速（Enemy.update 内判定）→ 真控场。
-   * 射程随塔等级提升（读 tower.stats.range），升级即扩大吸引范围。
    */
   class PullBehavior {
     constructor(tower, cfg) {
@@ -129,6 +137,10 @@
       this.duration = (this.eff.attractDuration != null ? this.eff.attractDuration : 500) / 1000;
       this.timer = this.interval; // 初始即满：2 秒后第二次脉冲
       this.active = this.duration; // 首次脉冲开窗：建塔即生效，不用干等 2 秒
+      this.primed = false;         // 首帧把开窗状态补记为一次脉冲（首窗也有动画）
+      this.targets = [];           // 本帧实际被吸的小怪集合（范围目标，供动画/自查）
+      this.pulseCount = 0;         // 已触发的攻击脉冲数（有目标才计数，供自查）
+      this.smallOnly = this.eff.targetFilter === 'nonBoss';
     }
 
     /** 按沿路里程找当前路径段（与 GameScene.buildPathGeometry 的 segments 同构） */
@@ -144,11 +156,22 @@
       /* ---- 脉冲计时：每 interval 秒开窗一次，窗内持续 duration 秒 ---- */
       this.timer -= dt;
       if (this.active > 0) this.active -= dt;
+      let windowJustOpened = false;
+      if (!this.primed) {
+        /* 构造时已开首个窗口（建塔即生效），首帧补记一次开窗事件 */
+        this.primed = true;
+        windowJustOpened = true;
+      }
       if (this.timer <= 0) {
         this.timer += this.interval;
         this.active = this.duration;
+        windowJustOpened = true;
       }
-      /* 脉冲间隙：不标记任何敌人，Enemy.update 让 pullBack 衰减归位 */
+
+      this.targets = [];
+
+      /* 脉冲间隙：不索敌不标记，Enemy.update 让 pullBack 衰减归位；
+         炮头保持上一次朝向，不产生攻击动画 */
       if (this.active <= 0) return;
 
       const t = this.tower;
@@ -159,12 +182,21 @@
       const maxD = this.eff.maxDisplace;
       const k = 1 - Math.exp(-strength * dt); // 帧率无关 lerp 系数
 
+      /* 范围索敌：遍历全场敌人，射程内的所有小怪逐个施加沿路回拉。
+         primary = 距塔最近的被吸目标，用于炮头朝向（多目标时的视觉锚点）。 */
+      let primary = null;
+      let primaryD2 = Infinity;
+
       for (let i = 0; i < ctx.enemies.length; i++) {
         const e = ctx.enemies[i];
         if (e.dead) continue;
+        /* 小怪过滤：nonBoss 模式下 BOSS（cfg.boss===true）免疫吸引 */
+        if (this.smallOnly && e.cfg && e.cfg.boss) continue;
+
         const dx = e.x - t.x;
         const dy = e.y - t.y;
-        if (dx * dx + dy * dy > r2) continue; // 射程外：不标记，Enemy 自行衰减归位
+        const d2 = dx * dx + dy * dy;
+        if (d2 > r2) continue; // 射程外：不标记，Enemy 自行衰减归位
 
         /* 塔在敌人当前路段上的投影（钳在路段内），换算为沿路里程 */
         const seg = this.segmentAt(scene, e.pathDist);
@@ -179,6 +211,18 @@
         const target = back < maxD ? back : maxD;
         e.pullBack += (target - (e.pullBack || 0)) * k;
         e.pullFresh = true;
+
+        this.targets.push(e);
+        if (d2 < primaryD2) { primaryD2 = d2; primary = e; }
+      }
+
+      /* 炮头朝向最近的被吸小怪；本帧无目标时保持上一次方向 */
+      t.setTarget(primary);
+
+      /* 开窗瞬间且至少锁定 1 个小怪：播放一次多目标攻击动画（每 2 秒一次） */
+      if (windowJustOpened && this.targets.length > 0 && typeof ctx.pullPulse === 'function') {
+        ctx.pullPulse(t, range, this.targets);
+        this.pulseCount++;
       }
     }
   }
