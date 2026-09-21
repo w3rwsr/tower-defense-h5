@@ -666,19 +666,27 @@ class GameScene extends Phaser.Scene {
     return best;
   }
 
-  /** 点击障碍物：指派【最近的、射程够得到的】伤害型塔转火攻击。
-   *  塔D（无伤害的范围吸引塔）不能攻击障碍物，不参与指派；
-   *  攻击障碍物期间该塔不攻击小怪（Projectile/AttackBehavior 区分目标）。 */
+  /** 点击障碍物：只在【射程圈能覆盖到障碍物本体】的伤害型塔中，指派距离最近
+   *  的一座转火攻击。
+   *  - 覆盖口径：塔心到障碍物中心 ≤ tower.range + ob.radius（射程擦到障碍物
+   *    实体即可打，与 AttackBehavior 的开火判定完全同口径，杜绝“指派了却
+   *    打不到/打空气”）；
+   *  - 哪怕物理距离更近，射程覆盖不到的塔也绝不入选；
+   *  - 没有任何塔覆盖时：不攻击、不转火，仅给一行文字反馈；
+   *  - 塔D（无伤害的范围吸引塔）不能攻击障碍物，不参与指派。 */
   clickObstacle(ob) {
     let best = null, bestD2 = Infinity;
     for (const t of this.towers) {
       if (!t.stats.damage) continue;                       // 无伤害塔（塔D）跳过
       const eff = t.cfg.effect;
       if (eff && eff.type === 'pull') continue;            // 吸引塔无弹道，跳过
-      const d2 = (t.x - ob.x) * (t.x - ob.x) + (t.y - ob.y) * (t.y - ob.y);
-      if (d2 <= t.stats.range * t.stats.range && d2 < bestD2) { best = t; bestD2 = d2; }
+      const dx = t.x - ob.x, dy = t.y - ob.y;
+      const d2 = dx * dx + dy * dy;
+      const reach = t.stats.range + ob.radius;             // 覆盖到障碍物本体即可
+      if (d2 <= reach * reach && d2 < bestD2) { best = t; bestD2 = d2; }
     }
     if (!best) {
+      // 无塔覆盖：不攻击、不转火（浮字仅为点击反馈，不改变任何塔的目标）
       this.floatText(ob.x, ob.y - 30, '附近没有塔够得到', 0xff9d9d);
       return;
     }

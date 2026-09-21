@@ -99,7 +99,11 @@
         } else {
           this.tower.setTarget(ob);
           const ddx = ob.x - this.tower.x, ddy = ob.y - this.tower.y;
-          const inRange = ddx * ddx + ddy * ddy <= this.tower.stats.range * this.tower.stats.range;
+          /* 开火口径与 GameScene.clickObstacle 完全一致：射程圈触及障碍物
+             本体即可开火（reach = 射程 + 障碍物半径），保证“被指派的塔
+             一定打得到”，绝不对着射程外目标空射 */
+          const reach = this.tower.stats.range + (ob.radius || 0);
+          const inRange = ddx * ddx + ddy * ddy <= reach * reach;
           if (inRange && this.cooldown <= 0) {
             ctx.fire(this.tower, ob);
             this.cooldown = this.tower.stats.cooldown;
