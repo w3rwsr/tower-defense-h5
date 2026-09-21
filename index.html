@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>卡通塔防 H5（Phaser 3）</title>
-  <link rel="stylesheet" href="style.css?v=20260921h" />
+  <link rel="stylesheet" href="style.css?v=20260921k" />
   <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js） -->
   <script src="vendor/phaser.min.js?v=20260920h"></script>
 </head>
@@ -83,6 +83,11 @@
        任何握持角度下面板始终横向、完整可读（真机排查用，#dbg 时显示） -->
   <div id="dbg-panel" hidden>方向诊断：等待检测…</div>
 
+  <!-- 移动端「翻转画面」按钮：置于 #app 外部不参与视觉横屏旋转，
+       仅移动端可见（CSS 控制）。点击一键反转画面方向并持久化，
+       修正个别机型 γ 报告符号反相 / 握持方向变化导致的倒置 -->
+  <button id="btn-flip" class="btn-flip" type="button">⟳ 翻转画面</button>
+
   <!-- ===== 脚本按依赖顺序加载 ===== -->
   <script src="js/config.js?v=20260920h"></script>
   <script src="js/storage.js?v=20260920h"></script>
@@ -93,6 +98,6 @@
   <script src="js/scenes/BootScene.js?v=20260920h"></script>
   <script src="js/scenes/LevelSelectScene.js?v=20260921j"></script>
   <script src="js/scenes/GameScene.js?v=20260921h"></script>
-  <script src="js/main.js?v=20260921j"></script>
+  <script src="js/main.js?v=20260921k"></script>
 </body>
 </html>

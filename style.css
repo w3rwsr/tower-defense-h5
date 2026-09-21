@@ -429,3 +429,23 @@ html.is-mobile.is-portrait.td-rot-ccw #app {
 
 /* #dbg hash 时显示诊断面板（由 JS 写入，hidden 属性默认隐藏） */
 html.has-dbg #dbg-panel { display: block; }
+
+/* ---------------- 移动端「翻转画面」按钮 ----------------
+   仅移动端可见（桌面 display:none 保持不变）；置于视口左上角、
+   #app 外部不参与视觉横屏旋转，半透明避免遮挡游戏画面。
+   用于即时修正画面方向（个别机型 γ 符号反相 / 握持方向变化）。 */
+#btn-flip { display: none; }
+html.is-mobile #btn-flip {
+  display: block;
+  position: fixed;
+  left: 10px;
+  top: 10px;
+  z-index: 9990;
+  padding: 6px 10px;
+  font: 600 13px/1 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  border: 1px solid rgba(0, 0, 0, .25);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .78);
+  color: #24400f;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
+}

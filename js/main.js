@@ -25,11 +25,11 @@
     } catch (e) { /* 忽略 */ }
   })();
 
-  /* 画面朝向校准（音量键侧）：false=UI 顶部朝机身右边框（默认，多数
-     安卓音量键位置），true=朝左边框。校准值持久化于 localStorage
-     tdRotFlip，画面方向相对机身永久锁定。UI 中不再提供翻转按钮；
-     需要切换朝向时（换新设备/音量键侧与默认不符），由调试入口预置：
-     localStorage.setItem('tdRotFlip','1') 后刷新页面（'0' 为恢复默认）。
+  /* 画面方向反转覆盖（仅移动端视觉横屏生效）：
+     false = 自动跟随握持方向（γ 符号，见 applyHeldState）；
+     true  = 在自动结果上整体反转（个别安卓/X5 内核 γ 报告符号反相
+     时修正用）。持久化于 localStorage tdRotFlip；页面提供
+     「翻转画面」按钮（仅移动端可见）一键切换，无需手动改存储。
      必须在 Orientation 模块之前用 let 声明并完成初始化：Orientation IIFE
      初始化时会同步调用 apply()→updateDebug() 引用本变量，若声明在其后，
      同步调用瞬间变量仍处于 TDZ，抛 ReferenceError 会中断整个主 IIFE，
@@ -117,7 +117,7 @@
         ' | 倾斜=β' + (mo.beta === undefined ? '-' : mo.beta) + '/γ' + (mo.gamma === undefined ? '-' : mo.gamma) +
         ' | 横置=' + (html.classList.contains('is-held-landscape') ? '是' : '否') +
         ' | 朝向=' + (html.classList.contains('td-rot-ccw') ? '左边框' : '右边框') +
-        ' | 校准=' + (manualFlip ? '左' : '右') +
+        ' | 反相覆盖=' + (manualFlip ? '开' : '关') +
         ' | 事件=' + eventCount + ' 轮询=' + pollCount +
         ' | 更新=' + lastUpdate;
     };
@@ -488,10 +488,16 @@
     } else {
       heldLandscape = fresh && g > 12;
     }
-    /* 方向锁定：只看用户校准的 manualFlip，与 γ 符号完全无关——
-       听筒朝左/朝右、X5 报告符号反相、近水平噪声都不会翻转画面，
-       UI 顶部始终指向用户选定的边框（音量键侧）。 */
-    const ccw = heldLandscape && manualFlip;
+    /* 方向自动跟随握持（γ 符号）+ 反转覆盖修正：
+       几何推导（portrait 视口 y 轴恒朝听筒、CSS rotate(90deg) 正方向
+       为顺时针，内容顶部将落在机身右边框）：听筒朝左 ⇒ 画面需 cw
+       摆放（rotate 90deg），听筒朝右 ⇒ 需 ccw（td-rot-ccw）。
+       W3C 规范 γ>0 即设备逆时针旋转（听筒朝左），故 autoCcw = γ<0。
+       用户横持中 180° 换边时 γ 变号 → 画面自动翻转、始终保持正向；
+       γ 报告符号反相的设备用 tdRotFlip=1 整体反转（页面「翻转画面」
+       按钮，仅移动端可见，一键持久化）。 */
+    const autoCcw = fresh && m.gamma < 0;
+    const ccw = heldLandscape && (autoCcw !== manualFlip);
     if (wasHeld !== heldLandscape) {
       htmlEl.classList.toggle('is-held-landscape', heldLandscape);
     }
@@ -518,6 +524,24 @@
   try {
     document.addEventListener('visibilitychange', applyHeldState);
     window.addEventListener('pageshow', applyHeldState);
+  } catch (e) { /* 忽略 */ }
+
+  /* 「翻转画面」按钮（仅移动端可见，DOM 在 #app 外不受旋转影响）：
+     切换 tdRotFlip 反转覆盖并立即重算握持状态、触摸逆变换与画布布局。
+     解决两类问题：(1) 个别机型 γ 报告符号反相导致自动方向整体倒置；
+     (2) 用户横持方向与自动判定不符时的即时修正。 */
+  try {
+    const flipBtn = document.getElementById('btn-flip');
+    if (flipBtn) {
+      flipBtn.addEventListener('click', () => {
+        manualFlip = !manualFlip;
+        try {
+          localStorage.setItem('tdRotFlip', manualFlip ? '1' : '0');
+        } catch (e) { /* 忽略 */ }
+        applyHeldState();
+        forceRelayout();
+      });
+    }
   } catch (e) { /* 忽略 */ }
 
   window.addEventListener('orientationchange', forceRelayout);
