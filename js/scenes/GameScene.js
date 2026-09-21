@@ -19,10 +19,13 @@ class GameScene extends Phaser.Scene {
 
     /* 关卡独立配置：Level 1 回退到顶层 path/waves/economy（零改动保持已正常体验） */
     this.levelCfg = TD_CONFIG.levels[this.levelId] ||
-      { path: TD_CONFIG.path, waves: TD_CONFIG.waves, hpGrowth: 1, economy: TD_CONFIG.economy };
+      { path: TD_CONFIG.path, waves: TD_CONFIG.waves, economy: TD_CONFIG.economy };
 
     /* ---- 路径几何预计算 ---- */
     this.buildPathGeometry();
+
+    /* ---- 放塔热区：主网格 + 棋盘交错补点（道路两侧/拐弯/下方空白） ---- */
+    this.buildHotspots();
 
     /* ---- 静态画面 ---- */
     this.drawGround();
@@ -36,7 +39,7 @@ class GameScene extends Phaser.Scene {
     this.towers = [];
     this.enemies = [];
     this.projectiles = [];
-    this.occupied = new Map();      // "col,row" -> Tower
+    this.occupied = new Map();      // 热区 key("x_y") -> Tower
     this.selectedType = null;       // 商店选中的塔类型（放置模式）
     this.selectedTower = null;
     this.paused = false;
@@ -119,6 +122,39 @@ class GameScene extends Phaser.Scene {
   }
 
   /* ============================================================
+   * 放塔热区：主网格（cell 间距，奇数对齐）+ 第二组棋盘交错热区
+   * （整体偏移 hotspotOffset，通常 = cell/2）。交错点把道路两侧、
+   * 拐弯内侧/外侧、下方空白处原本落在 80px 网格缝里的可建位置补出来；
+   * 两组热区最近相距 cell·√2/2 ≈ 56.6px > 双塔半径之和(44)，不会重叠。
+   * 每个热点的合法性仍由 canBuildAt 逐个做【边界 + 离路距离 + 占用】校验，
+   * 交错补点永远不会补到路面上。
+   * ============================================================ */
+  buildHotspots() {
+    const cell = TD_CONFIG.build.cell;
+    const off = TD_CONFIG.build.hotspotOffset || 0;
+    this.hotspots = [];
+    const pushLattice = (start) => {
+      for (let cx = start; cx < this.W; cx += cell) {
+        for (let cy = start; cy < this.H; cy += cell) {
+          this.hotspots.push({ x: cx, y: cy, key: cx + '_' + cy });
+        }
+      }
+    };
+    pushLattice(cell / 2);                 // 主网格：40,120,200…
+    if (off > 0) pushLattice(cell / 2 + off); // 交错补点：80,160,240…
+  }
+
+  /** 指针坐标吸附到最近热区（触摸/鼠标共用，保证点击与显示格子完全重合） */
+  snapHotspot(x, y) {
+    let best = null, bestD2 = Infinity;
+    for (const h of this.hotspots) {
+      const d2 = (h.x - x) * (h.x - x) + (h.y - y) * (h.y - y);
+      if (d2 < bestD2) { bestD2 = d2; best = h; }
+    }
+    return best;
+  }
+
+  /* ============================================================
    * 地图绘制（卡通色块占位）
    * ============================================================ */
   drawGround() {
@@ -146,19 +182,17 @@ class GameScene extends Phaser.Scene {
     const fillCol = 0x6be86b;
     const borderCol = 0x2e7d1c;
 
-    for (let row = 0; row * cell < this.H; row++) {
-      for (let col = 0; col * cell < this.W; col++) {
-        const cx = col * cell + cell / 2;
-        const cy = row * cell + cell / 2;
-        if (!this.canBuildAt(cx, cy, col, row)) continue;
-        const x = cx - cell / 2 + pad;
-        const y = cy - cell / 2 + pad;
-        const w = cell - pad * 2, h = cell - pad * 2;
-        g.fillStyle(fillCol, 0.30);
-        g.fillRoundedRect(x, y, w, h, 10);
-        g.lineStyle(2, borderCol, 0.65);
-        g.strokeRoundedRect(x, y, w, h, 10);
-      }
+    /* 遍历全部热区（主网格 + 交错补点），仅绘制通过校验的格子。
+       交错补点后最近热区间距 ≈ cell·√2/2，块尺寸随密度缩小，避免相邻块重叠发花 */
+    const size = (TD_CONFIG.build.hotspotOffset > 0) ? cell * 0.66 : cell - pad * 2;
+    for (const h of this.hotspots) {
+      if (!this.canBuildAt(h.x, h.y, h.key)) continue;
+      const x = h.x - size / 2;
+      const y = h.y - size / 2;
+      g.fillStyle(fillCol, 0.30);
+      g.fillRoundedRect(x, y, size, size, 9);
+      g.lineStyle(2, borderCol, 0.65);
+      g.strokeRoundedRect(x, y, size, size, 9);
     }
   }
 
@@ -294,23 +328,37 @@ class GameScene extends Phaser.Scene {
     this.banner('清场奖励 +' + bonus + ' 金币', 0xbef78a);
   }
 
-  /* 敌人出生：按波数成长缩放血量；BOSS 血量单独按「普通怪当前波血量 × 5」计算。
-     - 普通怪：maxHp = cfg.hp × hpGrowth^waveIndex（复合递增）
-     - BOSS：maxHp = enemyX.hp × hpGrowth^waveIndex × boss.hpMultiplier；
-              leakDamage = enemyX.leakDamage × boss.leakMultiplier（普通怪的 3 倍） */
+  /* 小怪当波血量（JSON 驱动，见 waves 配置）：
+     - 常规波：round(baseHp × hpGrowth^waveIndex)（hpGrowth=1.5 即每波 +50%，复合）；
+     - 末波：先按公式取整得到第 N-1 波（第 4 波）血量，再 × finalWaveHpFactor(=2)
+       ——严格等于"第 4 波实际血量的两倍"，避免连乘带来的 1 点舍入偏差。 */
+  waveSmallHp(baseHp) {
+    const wcfg = this.levelCfg.waves;
+    const total = wcfg.list.length;
+    const growth = (wcfg.hpGrowth != null ? wcfg.hpGrowth : 1.5);
+    const wi = this.waveIndex;
+    if (total >= 2 && wi === total - 1) {
+      const prevHp = Math.round(baseHp * Math.pow(growth, wi - 1));
+      return Math.round(prevHp * (wcfg.finalWaveHpFactor != null ? wcfg.finalWaveHpFactor : 2));
+    }
+    return Math.round(baseHp * Math.pow(growth, wi));
+  }
+
+  /* 敌人出生：按波数成长缩放血量（规则见 waveSmallHp）；
+     BOSS（末波）血量 = 同波小怪(enemyX)血量 × finalBossHpFactor(8)，
+     漏血 = enemyX.leakDamage × boss.leakMultiplier（普通怪的 3 倍）。 */
   spawnEnemy(typeKey) {
     const e = new Enemy(this, typeKey);
-    const growth = this.levelCfg.hpGrowth || 1;
-    const waveFactor = Math.pow(growth, this.waveIndex);
     const isBoss = !!e.cfg.boss;
     if (isBoss) {
-      const bossCfg = TD_CONFIG.boss || { hpMultiplier: 5, leakMultiplier: 3 };
-      const normalBase = TD_CONFIG.enemies.enemyX;
-      e.maxHp = Math.round(normalBase.hp * waveFactor * bossCfg.hpMultiplier);
+      const wcfg = this.levelCfg.waves;
+      const bossCfg = TD_CONFIG.boss || { hpMultiplier: 8, leakMultiplier: 3 };
+      const bossFactor = (wcfg.finalBossHpFactor != null ? wcfg.finalBossHpFactor : bossCfg.hpMultiplier);
+      e.maxHp = this.waveSmallHp(TD_CONFIG.enemies.enemyX.hp) * bossFactor;
       e.hp = e.maxHp;
-      e.leakDamage = normalBase.leakDamage * bossCfg.leakMultiplier;
+      e.leakDamage = TD_CONFIG.enemies.enemyX.leakDamage * bossCfg.leakMultiplier;
     } else {
-      e.maxHp = Math.round(e.cfg.hp * waveFactor);
+      e.maxHp = this.waveSmallHp(e.cfg.hp);
       e.hp = e.maxHp;
       e.drawHpBar(1); // 血量上限变化后重绘满血条宽度
     }
@@ -408,28 +456,23 @@ class GameScene extends Phaser.Scene {
     this.rangeGfx.clear();
   }
 
-  /** 放置模式下的网格吸附 + 校验 + 落子（供左键点击与拖动共用） */
+  /** 放置模式下的热区吸附 + 校验 + 落子（供左键点击与拖动共用） */
   tryPlaceAt(x, y) {
-    const cell = TD_CONFIG.build.cell;
-    const col = Math.floor(x / cell);
-    const row = Math.floor(y / cell);
-    const cx = col * cell + cell / 2;
-    const cy = row * cell + cell / 2;
-    if (this.canBuildAt(cx, cy, col, row)) {
-      this.placeTower(cx, cy, col, row);
+    const h = this.snapHotspot(x, y);
+    if (!h) return;
+    if (this.canBuildAt(h.x, h.y, h.key)) {
+      this.placeTower(h.x, h.y, h.key);
     } else {
-      this.floatText(cx, cy, '✕ 不能放这里', 0xffffff);
+      this.floatText(h.x, h.y, '✕ 不能放这里', 0xffffff);
       this.drawGhost(x, y);
     }
   }
 
-  /** 出售并移除已放置的塔（左键面板按钮、右键直接出售共用） */
+  /** 出售并移除已放置的塔（左键面板按钮出售） */
   sellTower(tower) {
     if (!tower) return;
     this.gold += tower.getSellValue();
-    const col = Math.floor(tower.x / TD_CONFIG.build.cell);
-    const row = Math.floor(tower.y / TD_CONFIG.build.cell);
-    this.occupied.delete(this.cellKey(col, row));
+    this.occupied.delete(tower.hotspotKey);
     this.towers = this.towers.filter((v) => v !== tower);
     tower.destroy();
     if (this.selectedTower === tower) {
@@ -450,12 +493,11 @@ class GameScene extends Phaser.Scene {
     return best;
   }
 
-  cellKey(col, row) { return col + ',' + row; }
-
-  canBuildAt(x, y, col, row) {
+  /** 热区是否可放：画面边界 + 热区未占用 + 塔心离路径中心线足够远（避路） */
+  canBuildAt(x, y, key) {
     const b = TD_CONFIG.build;
     if (x < b.edgeMargin || x > this.W - b.edgeMargin || y < b.edgeMargin || y > this.H - b.edgeMargin) return false;
-    if (this.occupied.has(this.cellKey(col, row))) return false;
+    if (this.occupied.has(key)) return false;
     if (this.distToPath(x, y) < b.minPathDistance) return false;
     return true;
   }
@@ -467,16 +509,15 @@ class GameScene extends Phaser.Scene {
     if (!this.selectedType) return;
     const cfg = TD_CONFIG.towers[this.selectedType];
     const cell = TD_CONFIG.build.cell;
-    const col = Math.floor(x / cell);
-    const row = Math.floor(y / cell);
-    const cx = col * cell + cell / 2;
-    const cy = row * cell + cell / 2;
-    const ok = this.canBuildAt(cx, cy, col, row) && this.gold >= cfg.cost;
+    const h = this.snapHotspot(x, y);
+    const cx = h.x, cy = h.y;
+    const ok = this.canBuildAt(cx, cy, h.key) && this.gold >= cfg.cost;
     const color = ok ? 0x6be86b : 0xff5d5d;
 
-    // 网格落点提示
+    // 热区落点提示（尺寸与放置网格一致：交错密度下用 cell*0.66）
+    const markSize = (TD_CONFIG.build.hotspotOffset > 0) ? cell * 0.66 : cell - 8;
     g.fillStyle(0xffffff, 0.12);
-    g.fillRoundedRect(cx - cell / 2 + 4, cy - cell / 2 + 4, cell - 8, cell - 8, 12);
+    g.fillRoundedRect(cx - markSize / 2, cy - markSize / 2, markSize, markSize, 10);
     // 射程圈
     g.lineStyle(2, color, 0.9);
     g.fillStyle(color, 0.10);
@@ -489,14 +530,15 @@ class GameScene extends Phaser.Scene {
     g.strokeCircle(cx, cy, 22);
   }
 
-  placeTower(x, y, col, row) {
+  placeTower(x, y, key) {
     const typeKey = this.selectedType;
     const cfg = TD_CONFIG.towers[typeKey];
     if (this.gold < cfg.cost) { this.setPlacement(null); return; }
     this.gold -= cfg.cost;
     const tower = new Tower(this, x, y, typeKey);
+    tower.hotspotKey = key;            // 记录所占热区（出售时精确释放，主/交错晶格通用）
     this.towers.push(tower);
-    this.occupied.set(this.cellKey(col, row), tower);
+    this.occupied.set(key, tower);
     this.tweens.add({ targets: tower, scale: { from: 0.4, to: 1 }, duration: 160, ease: 'Back.out' });
     /* 放置后刷新可放置区域：被占的格子从图层中消失，无需手动清空 */
     if (this.selectedType) this.drawPlacementGrid();
@@ -822,7 +864,10 @@ class GameScene extends Phaser.Scene {
    * 时序（脉冲 0–0.5s，间隙 0.5–2.0s，第二次脉冲 2.0–2.5s）：
    *   0.15s 查范围目标集/BOSS免疫/多目标动画（紫闪、炮头朝向、脉冲计数 1）；
    *   0.3s 查首次吸附 + 在路；0.3–0.5s 查 ctrlSlow；
-   *   1.5s 查回弹归位；1.9s 查脉冲间隙；2.15s 查第二次脉冲（计数 2）。
+   *   0.58s 查【烘焙】：pullBack 归零但 pathDist 已改变、位置停留不弹回；
+   *   0.58–1.55s 查小怪从新位置全速继续沿路走；
+   *   1.9s 查脉冲间隙；1.95s 把静止夹具复位到初始里程（模拟继续行走），
+   *   2.2s 查第二次脉冲（计数 2）。
    */
   async runPullTest() {
     const report = { step: 'init', tower: null, phase0: null, phase1: null, ctrlSlow: null,
@@ -937,31 +982,61 @@ class GameScene extends Phaser.Scene {
         D_strictVertical: Math.abs(eD.x - 720) < 0.5
       };
 
-      // ---- t=0.3~0.5s（仍在首个 0.5s 窗口内）：ctrlSlow 压制但仍在前进 ----
+      // ---- t=0.3~0.45s（完全在首个 0.5s 窗口内，避开 0.5s 烘焙帧）：ctrlSlow 压制但仍在前进 ----
       const eC = mkEnemy(420);
       eC.baseSpeed = TD_CONFIG.enemies.enemyX.speed;
       const pdBefore = eC.pathDist;
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, 150));
       const delta = eC.pathDist - pdBefore;
-      const expectedNormal = TD_CONFIG.enemies.enemyX.speed * 0.2;
+      const expectedNormal = TD_CONFIG.enemies.enemyX.speed * 0.15;
       report.ctrlSlow = {
         pathDistDelta: delta,
         expectedNormal,
         expectedCtrlSlow: expectedNormal * 0.5,
         pullBack: eC.pullBack,
         onPathDist: onPath(eC),
-        slowedButMoving: delta > expectedNormal * 0.25 && delta < expectedNormal * 0.7
+        slowedButMoving: delta > expectedNormal * 0.2 && delta < expectedNormal * 0.8
       };
 
-      // ---- t=1.5s：脉冲间隙已 1s，pullBack 应衰减归零（回弹到路径位置继续走） ----
-      await new Promise(r => setTimeout(r, 1050));
-      report.release = { time: 1.5, A_pullBack: eA.pullBack, A_onPathDist: onPath(eA),
-        f1_pullBack: eF1.pullBack, f2_pullBack: eF2.pullBack,
+      /* ---- t=0.58s：窗口刚结束，位移应已【烘焙】进 pathDist：
+         pullBack 全部归零，但小怪停在吸附结束位置（不弹回），且仍在路上 ---- */
+      await new Promise(r => setTimeout(r, 130));
+      const eCpdGap0 = eC.pathDist;
+      const bakedSnapshot = {
+        A: { pullBack: eA.pullBack, pathDist: eA.pathDist, x: eA.x },
+        f1: { pullBack: eF1.pullBack, pathDist: eF1.pathDist, x: eF1.x },
+        f2: { pullBack: eF2.pullBack, pathDist: eF2.pathDist, x: eF2.x }
+      };
+
+      /* ---- t=0.58→1.55s：间隙中小怪从【新位置】全速继续沿原路径前进 ---- */
+      await new Promise(r => setTimeout(r, 970));
+      const eCgapDelta = eC.pathDist - eCpdGap0;
+      const eCExpectedGap = TD_CONFIG.enemies.enemyX.speed * 0.97;
+      report.release = {
+        time: 1.55,
+        baked: bakedSnapshot,
+        A_pullBack: eA.pullBack, A_pathDist: eA.pathDist, A_x: eA.x, A_onPathDist: onPath(eA),
+        f1: { pullBack: eF1.pullBack, pathDist: eF1.pathDist, x: eF1.x, onPathDist: onPath(eF1) },
+        f2: { pullBack: eF2.pullBack, pathDist: eF2.pathDist, x: eF2.x, onPathDist: onPath(eF2) },
         bossPullBack: eBoss.pullBack,
-        returnedToPath: eA.pullBack < 2 && onPath(eA) < 0.5,
-        /* 向前吸引的小怪窗口结束同样回弹归位（未被永久加速/瞬移） */
-        forwardReturned: Math.abs(eF1.pullBack) < 2 && Math.abs(eF2.pullBack) < 2 &&
-                         onPath(eF1) < 0.5 && onPath(eF2) < 0.5 };
+        /* 向后拉的 eA：烘焙后停在塔投影点附近（pathDist≈342/x≈302），
+           没有弹回原位置（420/380），仍严格在道路上 */
+        stayedNoSpringBack: eA.pullBack < 0.5 && eA.pathDist < 360 && eA.x < 330 &&
+                            onPath(eA) < 0.5,
+        /* 向前拉的 eF1/eF2：停在被拉到的新位置（300→≈339、200→≈292），
+           没有退回原里程，且仍在道路上 */
+        forwardStayed: Math.abs(eF1.pullBack) < 0.5 && eF1.pathDist > 320 && eF1.x > 280 &&
+                       Math.abs(eF2.pullBack) < 0.5 && eF2.pathDist > 270 &&
+                       onPath(eF1) < 0.5 && onPath(eF2) < 0.5,
+        /* 烘焙后从新位置全速继续推进（0.97s 应走近 ≈95px，无减速、无回弹） */
+        continuesWalking: eCgapDelta > eCExpectedGap * 0.75 &&
+                          eCgapDelta < eCExpectedGap * 1.25 && onPath(eC) < 0.5
+      };
+      /* eC 验证完毕：移出两座塔射程并停下，避免计入第二次脉冲目标集 */
+      eC.baseSpeed = 0;
+      eC.pathDist = 600;
+      eC.pullBack = 0;
+      eC.update(0);
 
       // ---- t=1.9s：第二次脉冲（2.0s）前的间隙，仍应归零 ----
       await new Promise(r => setTimeout(r, 400));
@@ -969,10 +1044,21 @@ class GameScene extends Phaser.Scene {
         targetsCleared: tower.behavior.targets.length === 0,
         inGap: eA.pullBack < 2 };
 
-      // ---- t=2.15s：第二次脉冲窗口（2.0–2.5s），小怪再次全部被回拉、BOSS 仍免疫 ----
+      /* ---- 静止夹具被烘焙钉在投影点附近：复位到初始里程，模拟真实行军
+         重新走进射程（随后第二次脉冲开窗） ---- */
+      const resetList = [[e1, 380], [e2, 400], [eA, 420], [eEdgeIn, 510],
+                        [eF1, 300], [eF2, 200], [eD, 850]];
+      for (let ri = 0; ri < resetList.length; ri++) {
+        const re = resetList[ri][0];
+        re.pullBack = 0;
+        re.pathDist = resetList[ri][1];
+        re.update(0);
+      }
+
+      // ---- t=2.2s：第二次脉冲窗口（2.0–2.5s），小怪再次全部被吸引、BOSS 仍免疫 ----
       await new Promise(r => setTimeout(r, 250));
       report.secondPulse = {
-        time: 2.15,
+        time: 2.2,
         A_pullBack: eA.pullBack, A_onPathDist: onPath(eA),
         e1_pullBack: e1.pullBack, e2_pullBack: e2.pullBack, boss_pullBack: eBoss.pullBack,
         D_pullBack: eD.pullBack, D_onPathDist: onPath(eD),
@@ -1001,9 +1087,9 @@ class GameScene extends Phaser.Scene {
         smallOnlyFilter: report.tower.smallOnly === true,
         areaMultiTarget: report.phase0.targetsCount === 6 && report.phase0.targetsAllSmall &&
                          report.phase0.allSmallPulled,
-        /* 【本次修复核心】塔投影点前后的小怪都被明显吸引，且双向力度相等 */
+        /* 塔投影点前后的小怪都被明显吸引，且双向力度相等 */
         forwardAttract: report.phase0.forwardHit && report.phase1.forwardHeld &&
-                        report.release.forwardReturned && report.secondPulse.forwardAgain,
+                        report.release.forwardStayed && report.secondPulse.forwardAgain,
         equalForceBothSides: report.phase0.equalForce && report.phase1.equalForceHeld &&
                              report.secondPulse.equalForceAgain,
         edgeBoundary: report.phase0.edgeInsideHit && report.phase0.edgeOutsideSafe &&
@@ -1016,7 +1102,10 @@ class GameScene extends Phaser.Scene {
         alwaysOnPath: report.phase1.allOnPath && report.ctrlSlow.onPathDist < 0.5 &&
                       report.release.A_onPathDist < 0.5 && report.secondPulse.onPath,
         cornerNoSideways: report.phase1.D_strictVertical,
-        returnedToPath: report.release.returnedToPath,
+        /* 【本次修复核心】窗口结束位移烘焙：停在吸附结束位置不弹回，仍在路上，
+           并从新位置全速继续沿原路径前进（向前拉的小怪同样停留） */
+        bakeNoSpringBack: report.release.stayedNoSpringBack && report.release.forwardStayed &&
+                          report.release.continuesWalking,
         pulseGapClear: report.intervalGap.inGap && report.intervalGap.targetsCleared,
         pulseEvery2s: report.secondPulse.firedAgain && report.secondPulse.allSmallAgain &&
                       report.secondPulse.pulseCount2,
@@ -1035,7 +1124,8 @@ class GameScene extends Phaser.Scene {
               report.phase1.bossStillUntouched && report.phase1.edgeOutStillSafe &&
               report.phase1.allOnPath && report.phase1.D_strictVertical &&
               report.phase1.forwardHeld && report.phase1.equalForceHeld &&
-              report.release.returnedToPath && report.release.forwardReturned &&
+              report.release.stayedNoSpringBack && report.release.forwardStayed &&
+              report.release.continuesWalking &&
               report.intervalGap.inGap &&
               report.intervalGap.targetsCleared &&
               report.secondPulse.firedAgain && report.secondPulse.allSmallAgain &&

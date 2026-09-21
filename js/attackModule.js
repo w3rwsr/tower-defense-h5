@@ -110,7 +110,7 @@
    * 不分先后）：投影点之前的小怪向前靠近、越过投影点的小怪被向后拉，
    * 大家一起向塔的沿路投影点汇聚。
    * 每 attractInterval 毫秒触发一次吸附脉冲（建塔即开窗），脉冲持续
-   * attractDuration 毫秒，脉冲间隙敌人位移自然衰减归零、继续沿路前进。
+   * attractDuration 毫秒，脉冲间隙位移烘焙进 pathDist，小怪停在新位置继续前进。
    *
    * 目标规则：
    *   - 射程：欧氏距离 ≤ tower.stats.range（升级 range 即扩大吸引范围）；
@@ -127,9 +127,9 @@
    *      clamp(back, -maxDisplace, +maxDisplace)，远近小怪都能明显靠近；
    *   3. 写入【带符号】的 enemy.pullBack（正=向后、负=向前），Enemy 渲染点取
    *      pathPointAt(pathDist - pullBack) —— 该点【数学上恒在路径上】，
-   *      拐弯处也不会切出道路；pathDist 本身永不回退，脉冲结束 pullBack
-   *      衰减归零即回到当前路径位置继续前进（向前的拉引只是窗口内视觉汇聚，
-   *      窗口结束回弹，不形成永久加速），不卡、不脱轨；
+   *      拐弯处也不会切出道路；窗口结束 Enemy 把 pullBack 烘焙进 pathDist
+   *      （pathDist' = pathDist - pullBack），小怪【停在吸附结束的位置继续
+   *      沿路前进，不弹回、不跳变】，不卡、不脱轨；
    *   4. 每只小怪用同一收敛系数 k=1-exp(-pullStrength·dt)，吸引力度一致。
    * 被显著吸引（|pullBack|>16）的敌人推进减速（Enemy.update 内判定）→ 真控场。
    */
@@ -175,8 +175,8 @@
 
       this.targets = [];
 
-      /* 脉冲间隙：不索敌不标记，Enemy.update 让 pullBack 衰减归位；
-         炮头保持上一次朝向，不产生攻击动画 */
+      /* 脉冲间隙：不索敌不标记，Enemy.update 在首帧把 pullBack 位移烘焙进
+         pathDist（停在吸附结束位置继续前进，不弹回）；炮头保持上一次朝向 */
       if (this.active <= 0) return;
 
       const t = this.tower;
@@ -202,7 +202,7 @@
         const dx = e.x - t.x;
         const dy = e.y - t.y;
         const d2 = dx * dx + dy * dy;
-        if (d2 > r2) continue; // 射程外：不标记，Enemy 自行衰减归位
+        if (d2 > r2) continue; // 射程外：不标记，Enemy 首帧烘焙位移后继续前进
 
         /* 塔在敌人当前路段上的投影（钳在路段内），换算为沿路里程 */
         const seg = this.segmentAt(scene, e.pathDist);

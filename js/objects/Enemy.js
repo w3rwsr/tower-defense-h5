@@ -16,7 +16,9 @@ class Enemy extends Phaser.GameObjects.Container {
     this.maxHp = cfg.hp;
     this.hp = cfg.hp;
     this.baseSpeed = cfg.speed;
-    this.reward = cfg.reward;
+    /* 小怪击杀金币 = 基础 reward + economy.killRewardBonus；BOSS 不享受加成 */
+    const killBonus = (!cfg.boss && TD_CONFIG.economy.killRewardBonus) || 0;
+    this.reward = cfg.reward + killBonus;
     this.leakDamage = cfg.leakDamage;
 
     /* ---- 路径状态 ---- */
@@ -29,13 +31,14 @@ class Enemy extends Phaser.GameObjects.Container {
     this.slowTimer = 0;
     this.slowFactor = 1;
 
-    /* ---- 范围吸引（塔D）：pullBack = 沿路【带符号】的视觉吸引位移（像素）
+    /* ---- 范围吸引（塔D）：pullBack = 沿路【带符号】的吸引位移（像素）
          正=已越过塔投影点被向回拉，负=还在塔之前被向前拉近。
-         渲染点 = pathPointAt(pathDist - pullBack)，数学上恒在道路上，
-         绝不横向偏离路径；pathDist 只增不减，脉冲结束 pullBack 衰减归零
-         后渲染点回到当前路径位置继续前进（向前吸引只是窗口内视觉汇聚）。
+         吸附【窗口内】渲染点 = pathPointAt(pathDist - pullBack)，数学上恒在
+         道路上；【窗口结束/离开射程的第一帧把位移烘焙进 pathDist】：
+         pathDist' = clamp(pathDist - pullBack)，pullBack 归零——渲染点坐标
+         前后完全一致（无跳变、不弹回），小怪停在吸附结束的位置继续沿路前进。
          pullDX/pullDY 为渲染点相对路径基点的派生向量（供自查/判定复用）；
-         pullFresh 由塔D在吸附脉冲窗口内每帧标记，未标记时 pullBack 衰减。 */
+         pullFresh 由塔D在吸附脉冲窗口内每帧标记。 */
     this.pullBack = 0;
     this.pullDX = 0;
     this.pullDY = 0;
@@ -85,10 +88,24 @@ class Enemy extends Phaser.GameObjects.Container {
       }
     }
 
-    /* 沿路径前进；被塔D显著吸引时（向前/向后均算）推进减速
-       （真控场，避免视觉位移叠加正常推进） */
+    /* 吸附窗口结束 / 离开射程的第一帧：把带符号吸引位移【烘焙】进真实进度，
+       pullBack 归零。烘焙前后渲染点 pathPointAt(pathDist - pullBack) 完全重合
+       ——小怪停在吸附结束的位置继续走，不弹回、不跳变；clamp 保证不越过
+       起点/终点，新位置仍是路径上的点，绝不脱离道路。 */
+    const wasPulled = this.pullFresh && Math.abs(this.pullBack) > 16;
+    if (!this.pullFresh && this.pullBack !== 0) {
+      let nd = this.pathDist - this.pullBack;
+      if (nd < 0) nd = 0;
+      else if (nd > this.scene.pathLength) nd = this.scene.pathLength;
+      this.pathDist = nd;
+      this.pullBack = 0;
+    }
+    this.pullFresh = false;
+
+    /* 沿路径前进；窗口内被显著吸引时（向前/向后均算）推进减速
+       （真控场，避免视觉位移叠加正常推进）；烘焙后从新位置全速继续走 */
     const speedNow = this.baseSpeed * (this.slowTimer > 0 ? this.slowFactor : 1);
-    const ctrlSlow = (this.pullFresh && Math.abs(this.pullBack) > 16) ? 0.5 : 1;
+    const ctrlSlow = wasPulled ? 0.5 : 1;
     this.pathDist += speedNow * dt * ctrlSlow;
 
     if (this.pathDist >= this.scene.pathLength) {
@@ -98,15 +115,8 @@ class Enemy extends Phaser.GameObjects.Container {
       return;
     }
 
-    /* 脉冲间隙/离开射程：带符号吸引位移向 0 衰减，敌人回弹到当前路径位置 */
-    if (!this.pullFresh) {
-      this.pullBack *= Math.exp(-9 * dt);
-      if (Math.abs(this.pullBack) < 0.5) this.pullBack = 0;
-    }
-    this.pullFresh = false;
-
-    /* 基点（真实进度）与渲染点（被吸引位移后的路径点）——两者都在路径上，
-       从几何上保证敌人任何时刻都不会离开道路，拐弯同样成立。 */
+    /* 基点（真实进度）与渲染点（窗口内被吸引位移后的路径点）——两者都在
+       路径上，从几何上保证敌人任何时刻都不会离开道路，拐弯同样成立。 */
     const p = this.scene.pathPointAt(this.pathDist);
     const vp = this.scene.pathPointAt(Math.max(0, this.pathDist - this.pullBack));
     this.pullDX = vp.x - p.x;
