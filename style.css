@@ -358,12 +358,20 @@ html.is-mobile.is-portrait.is-held-landscape #orientation-hint {
 /* ============================================================
    视觉横屏：移动端 + 竖屏（微信/QQ 内置 WebView、旋转锁定开启，
    视口物理竖屏且无法真横屏）时，把整个应用旋转 90° 呈现横屏布局。
-   已用 Playwright 数值实验验证（390x844 视口、844x390 布局盒）：
+   数学推导（视口 W=innerWidth, H=innerHeight，竖屏下 W<H；
+   #app 布局盒 width=100dvh=H, height=100dvw=W，transform-origin:0 0）：
    - 顺时针握持（听筒朝右，多数人习惯）：
-     transform: rotate(90deg) translateY(-100vw)，视觉恰好覆盖视口，
-     游戏画面顶部朝屏幕右侧。
-   - 逆时针握持（听筒朝左）：html.td-rot-ccw 时换用
-     matrix(0,1,1,0)（绕 y=x 反射），画面顶部朝屏幕左侧。
+     rotate(90deg) translateY(-100dvw)
+       先 translateY(-W)：#app 从 x∈[0,H],y∈[0,W] 平移到 x∈[0,H],y∈[-W,0]
+       后 rotate(90deg)：(x,y)→(-y,x)，画面落在 x∈[0,W],y∈[0,H]
+       顶部方向 (0,-1) → (1,0)，画面顶部朝屏幕右侧 ✓
+   - 逆时针握持（听筒朝左）：
+     rotate(-90deg) translateX(-100dvh)
+       先 translateX(-H)：#app 平移到 x∈[-H,0],y∈[0,W]
+       后 rotate(-90deg)：(x,y)→(y,-x)，画面落在 x∈[0,W],y∈[0,H]
+       顶部方向 (0,-1) → (-1,0)，画面顶部朝屏幕左侧 ✓
+   关键：必须用 rotate 而非 matrix(0,1,1,0)——后者是绕 y=x 反射，
+   会让画面左右镜像（文字反着写），视觉上像"完全倒置"。
    竖持时画面旋转 90° 显示，用户横放手机后画面即正向。
    触摸坐标逆变换由 main.js 覆盖 Phaser scale.transformX/Y 完成。
    #app 带 transform 后成为 fixed 后代的 containing block，
@@ -379,9 +387,12 @@ html.is-mobile.is-portrait #app {
   transform-origin: 0 0;
 }
 
-/* 逆时针握持（听筒朝左）：画面顶部朝屏幕左侧 */
+/* 逆时针握持（听筒朝左）：画面顶部朝屏幕左侧
+   注意：rotate(-90deg) 是逆时针旋转 90°，保持画面方向不变；
+   matrix(0,1,1,0) 是反射会让画面镜像，不能用。 */
 html.is-mobile.is-portrait.td-rot-ccw #app {
-  transform: matrix(0, 1, 1, 0, 0, 0);
+  transform: rotate(-90deg) translateX(-100vh);
+  transform: rotate(-90deg) translateX(-100dvh);
 }
 
 /* ---------------- 窄横屏手机：压缩内边距，保证全部 HUD 可见 ---------------- */
