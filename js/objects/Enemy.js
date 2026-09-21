@@ -29,6 +29,12 @@ class Enemy extends Phaser.GameObjects.Container {
     this.slowTimer = 0;
     this.slowFactor = 1;
 
+    /* ---- 范围吸引位移场（塔D）：渲染坐标 = 路径基点 + (pullDX,pullDY)
+         pullFresh 由塔 D 每帧标记，未标记时位移向 0 衰减回路径 ---- */
+    this.pullDX = 0;
+    this.pullDY = 0;
+    this.pullFresh = false;
+
     /* ---- 卡通占位贴图 ---- */
     this.body = scene.add.image(0, 0, 'enemy_' + typeKey);
     this.add(this.body);
@@ -73,9 +79,11 @@ class Enemy extends Phaser.GameObjects.Container {
       }
     }
 
-    /* 沿路径前进 */
+    /* 沿路径前进；被塔D显著拉开时推进减速（真控场，避免拉开同时仍正常推进） */
     const speedNow = this.baseSpeed * (this.slowTimer > 0 ? this.slowFactor : 1);
-    this.pathDist += speedNow * dt;
+    const dispMag = Math.hypot(this.pullDX, this.pullDY);
+    const ctrlSlow = (this.pullFresh && dispMag > 16) ? 0.5 : 1;
+    this.pathDist += speedNow * dt * ctrlSlow;
 
     if (this.pathDist >= this.scene.pathLength) {
       this.leaked = true;
@@ -85,7 +93,14 @@ class Enemy extends Phaser.GameObjects.Container {
     }
 
     const p = this.scene.pathPointAt(this.pathDist);
-    this.setPosition(p.x, p.y);
+    /* 未被塔D标记时位移向 0 衰减（敌人离开吸引范围后回归路径） */
+    if (!this.pullFresh) {
+      const decay = Math.exp(-9 * dt);
+      this.pullDX *= decay;
+      this.pullDY *= decay;
+    }
+    this.pullFresh = false;
+    this.setPosition(p.x + this.pullDX, p.y + this.pullDY);
     /* 让下方的敌人盖住上方的，制造一点层次 */
     this.setDepth(20 + Math.floor(p.y));
   }
@@ -93,7 +108,7 @@ class Enemy extends Phaser.GameObjects.Container {
   drawHpBar(ratio) {
     const g = this.barBg;
     const w = this.barW;
-    const h = 5;
+    const h = this.cfg.barThickness || 5;   // BOSS 更粗血条（barThickness）
     g.clear();
     g.fillStyle(0x000000, 0.35);
     g.fillRoundedRect(-w / 2 - 1, -1, w + 2, h + 2, 3);

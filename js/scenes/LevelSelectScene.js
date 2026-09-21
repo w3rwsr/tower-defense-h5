@@ -100,10 +100,10 @@ class LevelSelectScene extends Phaser.Scene {
     /* ---- 关卡数据 ---- */
     const levelInfo = [
       { name: '新手教程', desc: '学习基础操作', emoji: '🎓' },
+      { name: '蜿蜒小径', desc: '多拐弯·BOSS', emoji: '🐉' },
       { name: '未知之地', desc: '敬请期待', emoji: '🌲' },
       { name: '未知之地', desc: '敬请期待', emoji: '🏜' },
-      { name: '未知之地', desc: '敬请期待', emoji: '🌋' },
-      { name: '未知之地', desc: '敬请期待', emoji: '🏰' }
+      { name: '未知之地', desc: '敬请期待', emoji: '🌋' }
     ];
 
     const positions = this.computeCardPositions(vl);
@@ -119,7 +119,7 @@ class LevelSelectScene extends Phaser.Scene {
     }
 
     /* ---- 底部提示 ---- */
-    this.add.text(W / 2, vl.hintY, '仅第 1 关已开放，其余关卡即将到来', {
+    this.add.text(W / 2, vl.hintY, '通关第 1 关解锁第 2 关，更多关卡持续到来', {
       fontFamily: TD_FONT_STACK,
       fontSize: this.ls(13) + 'px', color: '#1e4620'
     }).setOrigin(0.5).setStroke('#e6f7d8', 3);

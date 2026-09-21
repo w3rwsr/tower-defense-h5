@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>卡通塔防 H5（Phaser 3）</title>
-  <link rel="stylesheet" href="style.css?v=20260921m" />
+  <link rel="stylesheet" href="style.css?v=20260921n" />
   <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js） -->
   <script src="vendor/phaser.min.js?v=20260920h"></script>
 </head>
@@ -44,6 +44,9 @@
         </button>
         <button class="btn btn-tower towerC" data-type="towerC" type="button">
           <span class="t-name">塔C</span><span class="t-desc">攻速快</span><span class="t-cost">🪙80</span>
+        </button>
+        <button class="btn btn-tower towerD" data-type="towerD" type="button">
+          <span class="t-name">塔D</span><span class="t-desc">范围吸引</span><span class="t-cost">🪙110</span>
         </button>
       </div>
     </div>
@@ -84,15 +87,15 @@
   <div id="dbg-panel" hidden>方向诊断：等待检测…</div>
 
   <!-- ===== 脚本按依赖顺序加载 ===== -->
-  <script src="js/config.js?v=20260920h"></script>
-  <script src="js/storage.js?v=20260920h"></script>
-  <script src="js/attackModule.js?v=20260920h"></script>
-  <script src="js/objects/Enemy.js?v=20260920h"></script>
+  <script src="js/config.js?v=20260921n"></script>
+  <script src="js/storage.js?v=20260921n"></script>
+  <script src="js/attackModule.js?v=20260921n"></script>
+  <script src="js/objects/Enemy.js?v=20260921n"></script>
   <script src="js/objects/Projectile.js?v=20260920h"></script>
-  <script src="js/objects/Tower.js?v=20260920h"></script>
-  <script src="js/scenes/BootScene.js?v=20260920h"></script>
-  <script src="js/scenes/LevelSelectScene.js?v=20260921l"></script>
-  <script src="js/scenes/GameScene.js?v=20260921h"></script>
-  <script src="js/main.js?v=20260921m"></script>
+  <script src="js/objects/Tower.js?v=20260921n"></script>
+  <script src="js/scenes/BootScene.js?v=20260921n"></script>
+  <script src="js/scenes/LevelSelectScene.js?v=20260921n"></script>
+  <script src="js/scenes/GameScene.js?v=20260921n"></script>
+  <script src="js/main.js?v=20260921n"></script>
 </body>
 </html>

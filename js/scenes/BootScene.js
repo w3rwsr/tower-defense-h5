@@ -51,6 +51,16 @@ class BootScene extends Phaser.Scene {
           g.fillTriangle(c - 11, c - e.radius + 5, c - 5, c - e.radius - 9, c - 1, c - e.radius + 4);
           g.fillTriangle(c + 11, c - e.radius + 5, c + 5, c - e.radius - 9, c + 1, c - e.radius + 4);
         }
+        // BOSS 头顶金皇冠（5 齿 + 底座），与大体型/粗血条一起作视觉区分
+        if (key === 'enemyBoss') {
+          const cy = c - e.radius - 8;
+          g.fillStyle(0xffd84a, 1);
+          for (let i = -2; i <= 2; i++) {
+            g.fillTriangle(c + i * 8 - 4, cy + 9, c + i * 8 + 4, cy + 9, c + i * 8, cy);
+          }
+          g.fillStyle(0xe8b421, 1);
+          g.fillRoundedRect(c - 20, cy + 6, 40, 6, 2);
+        }
         // 身体
         g.fillStyle(e.color, 1);
         g.fillCircle(c, c, e.radius);
@@ -73,7 +83,7 @@ class BootScene extends Phaser.Scene {
 
     /* ---------- 弹道（按颜色生成，圆弹 + 白芯） ---------- */
     const projColors = new Set();
-    Object.values(C.towers).forEach((t) => projColors.add(t.projectile.color));
+    Object.values(C.towers).forEach((t) => { if (t.projectile) projColors.add(t.projectile.color); });
     projColors.forEach((color) => {
       const key = 'proj_' + color.toString(16);
       this.makeTexture(key, 20, 20, (g) => {

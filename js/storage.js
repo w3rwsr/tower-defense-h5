@@ -13,8 +13,12 @@
   const TOTAL_LEVELS = 5;
 
   const storage = {
-    /** 当前版本开放的最大关卡编号（需求：仅第1关可进入） */
-    get maxUnlocked() { return 1; },
+    /** 当前版本开放的最大关卡编号（第 2 关通关第 1 关后解锁，以此类推） */
+    get maxUnlocked() {
+      let n = 1;
+      while (n < TOTAL_LEVELS && this.isCompleted(n)) n++;
+      return n;
+    },
 
     get total() { return TOTAL_LEVELS; },
 
@@ -49,9 +53,11 @@
       }
     },
 
-    /** 某关是否可进入（只有开放范围内的关才能进） */
+    /** 某关是否可进入：第 1 关恒开放；第 N 关需第 N-1 关已通关 */
     isUnlocked(level) {
-      return level >= 1 && level <= this.maxUnlocked;
+      if (level < 1 || level > TOTAL_LEVELS) return false;
+      if (level === 1) return true;
+      return this.isCompleted(level - 1);
     },
 
     /** 重置全部进度（调试用） */

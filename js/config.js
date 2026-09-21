@@ -173,10 +173,37 @@ window.TD_CONFIG = {
         "range": 1.08,
         "cooldown": 0.85
       }
+    },
+
+    /* 塔D —— 范围吸引·控场：不发射弹道，每帧把射程内敌人向自身位移
+       （lerp 收敛 + maxDisplace 上限），被显著拉开时敌人推进减速，
+       实现真控场。数值见 effect，升级提高 stats.range 即扩大吸引范围。 */
+    "towerD": {
+      "name": "塔D",
+      "desc": "范围吸引·控场",
+      "cost": 110,
+      "color": 0xb07bea,
+      "darkColor": 0x7a4fb0,
+      "targeting": "nearest",
+      "stats": {
+        "damage": 0,
+        "range": 140,
+        "cooldown": 0
+      },
+      "effect": {
+        "type": "pull",
+        "pullStrength": 7,     // 位移收敛速率（越大越快被拉拢，1/秒）
+        "maxDisplace": 95      // 距路径中心线最大位移（不堆叠到塔心）
+      },
+      "upgrade": {
+        "maxLevel": 3,
+        "costFactor": 0.80,
+        "damage": 1,
+        "range": 1.12,
+        "cooldown": 1
+      }
     }
   },
-
-  /* ---------- 敌人配置（2 种占位敌人） ---------- */
   "enemies": {
     "enemyX": {
       "name": "敌人X",
@@ -197,6 +224,71 @@ window.TD_CONFIG = {
       "leakDamage": 2,
       "color": 0xa06cd5,
       "darkColor": 0x7447a6
+    },
+
+    /* BOSS —— 第 2 关末波末敌。血量/漏血在 GameScene.spawnEnemy
+       按「普通怪(enemyX)当前波血量 × boss.hpMultiplier」动态覆盖，
+       这里 hp/leakDamage 仅作兜底占位。boss=true 标记触发大体型/
+       更粗血条/特殊贴图（皇冠角）。 */
+    "enemyBoss": {
+      "name": "BOSS",
+      "hp": 460,
+      "speed": 38,
+      "radius": 30,
+      "reward": 120,
+      "leakDamage": 3,
+      "color": 0xff3b3b,
+      "darkColor": 0x8a1212,
+      "boss": true,
+      "barThickness": 8
+    }
+  },
+
+  /* ---------- BOSS 全局系数 ---------- */
+  "boss": {
+    "hpMultiplier": 5,      // BOSS 血量 = 普通怪(enemyX)当前波血量 × 此值
+    "leakMultiplier": 3,    // BOSS 漏怪扣生命 = 普通怪(enemyX)漏血 × 此值
+    "rewardBonus": 0       // 击杀额外金币（已含在 enemyBoss.reward）
+  },
+
+  /* ---------- 关卡独立配置 ----------
+   * 每关一份：path(路径点)/waves(波次)/hpGrowth(每波血量递增系数)/
+   * economy(起始金币生命)。Level 1 不在此登记，GameScene 回退到顶层
+   * path/waves/economy（零改动保持已正常体验）。
+   * hpGrowth=1.0 表示无递增；1.20 = 每波 +20%（复合）。 */
+  "levels": {
+    "2": {
+      "economy": { "startGold": 300, "startLives": 20 },
+      "hpGrowth": 1.20,
+      "path": {
+        "waypoints": [
+          { "x": -40, "y": 100 },
+          { "x": 720, "y": 100 },
+          { "x": 720, "y": 250 },
+          { "x": 460, "y": 250 },
+          { "x": 460, "y": 400 },
+          { "x": 820, "y": 400 },
+          { "x": 820, "y": 580 }
+        ],
+        "borderColor": 0xc99a54,
+        "fillColor": 0xeac58f
+      },
+      "waves": {
+        "intermission": 15,
+        "clearBonus": [40, 55, 70, 90, 120],
+        "list": [
+          [ { "type": "enemyX", "count": 8,  "interval": 0.80, "delay": 0 } ],
+          [ { "type": "enemyX", "count": 12, "interval": 0.60, "delay": 0 } ],
+          [ { "type": "enemyY", "count": 4,  "interval": 1.50, "delay": 0 },
+            { "type": "enemyX", "count": 10, "interval": 0.55, "delay": 6 } ],
+          [ { "type": "enemyX", "count": 14, "interval": 0.45, "delay": 0 },
+            { "type": "enemyY", "count": 5,  "interval": 1.30, "delay": 6 } ],
+          /* 末波末敌 = BOSS（delay=10 落在所有小怪之后，spawnList 排序后为最后一个） */
+          [ { "type": "enemyX", "count": 16, "interval": 0.40, "delay": 0 },
+            { "type": "enemyY", "count": 3,  "interval": 1.50, "delay": 4 },
+            { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 10 } ]
+        ]
+      }
     }
   },
 

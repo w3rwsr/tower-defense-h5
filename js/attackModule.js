@@ -104,6 +104,50 @@
     }
   }
 
+  /**
+   * 范围吸引行为（塔D）：不发射弹道，每帧把射程内敌人向塔方向位移。
+   * 直接修改 enemy.pullDX/pullDY（位移场），由 Enemy.update 合成最终坐标：
+   *   pos = pathPointAt(pathDist) + (pullDX, pullDY)
+   * - 目标位移 = clamp(塔坐标 - 路径基点, maxDisplace)，使敌人被拉向塔但
+   *   不堆叠到塔心；lerp 收敛速率 = pullStrength（越大拉拢越快）。
+   * - 被显著位移（|D|>16）的敌人推进减速（Enemy.update 内判定）→ 真控场。
+   * - 射程随塔等级提升（读 tower.stats.range），升级即扩大吸引范围。
+   */
+  class PullBehavior {
+    constructor(tower, cfg) {
+      this.tower = tower;
+      this.cfg = cfg;
+      this.eff = cfg.effect;
+    }
+
+    update(dt, ctx) {
+      const t = this.tower;
+      const range = t.stats.range;
+      const r2 = range * range;
+      const strength = this.eff.pullStrength;
+      const maxD = this.eff.maxDisplace;
+      const k = 1 - Math.exp(-strength * dt); // 帧率无关 lerp 系数
+
+      for (let i = 0; i < ctx.enemies.length; i++) {
+        const e = ctx.enemies[i];
+        if (e.dead) continue;
+        const dx = e.x - t.x;
+        const dy = e.y - t.y;
+        if (dx * dx + dy * dy > r2) continue; // 射程外：不标记 pullFresh，Enemy 自行衰减归位
+        // 反推路径基点（渲染坐标 - 当前位移），目标位移 = 朝塔方向、限幅 maxD
+        const bx = e.x - e.pullDX;
+        const by = e.y - e.pullDY;
+        let tx = t.x - bx;
+        let ty = t.y - by;
+        const td = Math.hypot(tx, ty);
+        if (td > maxD) { tx = tx / td * maxD; ty = ty / td * maxD; }
+        e.pullDX += (tx - e.pullDX) * k;
+        e.pullDY += (ty - e.pullDY) * k;
+        e.pullFresh = true;
+      }
+    }
+  }
+
   /* 对外接口 */
-  window.TDAttack = { AttackBehavior, Targeting };
+  window.TDAttack = { AttackBehavior, PullBehavior, Targeting };
 })();

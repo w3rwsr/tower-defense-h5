@@ -29,8 +29,11 @@ class Tower extends Phaser.GameObjects.Container {
     scene.add.existing(this);
 
     this.recalcStats();
-    // 攻击逻辑独立模块：以后加新塔无需改本类
-    this.behavior = new TDAttack.AttackBehavior(this, this.cfg);
+    // 攻击逻辑：按 effect.type 选择行为（pull → 范围吸引；否则 → 普通弹道攻击）
+    const eff = this.cfg.effect;
+    this.behavior = (eff && eff.type === 'pull')
+      ? new TDAttack.PullBehavior(this, this.cfg)
+      : new TDAttack.AttackBehavior(this, this.cfg);
     this.aimAngle = -Math.PI / 2;
     this.turret.rotation = this.aimAngle;
   }

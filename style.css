@@ -196,6 +196,7 @@ html, body {
 .btn-tower.towerA { background: #dfeeff; border-color: #4a90e2; }
 .btn-tower.towerB { background: #dcfbff; border-color: #37b8c8; }
 .btn-tower.towerC { background: #fff0d4; border-color: #f5a623; }
+.btn-tower.towerD { background: #ede0fa; border-color: #b07bea; }
 .btn-tower.active {
   border-color: #ff5d5d;
   background: #fff;

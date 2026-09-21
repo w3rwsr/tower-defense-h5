@@ -17,6 +17,10 @@ class GameScene extends Phaser.Scene {
     /* 当前关卡编号（来自关卡选择场景），默认第 1 关 */
     this.levelId = (data && data.levelId) || 1;
 
+    /* 关卡独立配置：Level 1 回退到顶层 path/waves/economy（零改动保持已正常体验） */
+    this.levelCfg = TD_CONFIG.levels[this.levelId] ||
+      { path: TD_CONFIG.path, waves: TD_CONFIG.waves, hpGrowth: 1, economy: TD_CONFIG.economy };
+
     /* ---- 路径几何预计算 ---- */
     this.buildPathGeometry();
 
@@ -26,8 +30,9 @@ class GameScene extends Phaser.Scene {
     this.drawDecor();
 
     /* ---- 游戏状态 ---- */
-    this.gold = TD_CONFIG.economy.startGold;
-    this.lives = TD_CONFIG.economy.startLives;
+    const econ = this.levelCfg.economy || TD_CONFIG.economy;
+    this.gold = econ.startGold;
+    this.lives = econ.startLives;
     this.towers = [];
     this.enemies = [];
     this.projectiles = [];
@@ -70,7 +75,7 @@ class GameScene extends Phaser.Scene {
    * 路径几何
    * ============================================================ */
   buildPathGeometry() {
-    const wp = TD_CONFIG.path.waypoints;
+    const wp = this.levelCfg.path.waypoints;
     this.waypoints = wp;
     this.segments = [];
     this.totalLength = 0;
@@ -170,10 +175,11 @@ class GameScene extends Phaser.Scene {
   drawPath() {
     const g = this.add.graphics().setDepth(1);
     const wp = this.waypoints;
+    const pcfg = this.levelCfg.path;
     const w = TD_CONFIG.world.pathWidth;
     // 深色描边 + 浅色路面
-    this.fatStroke(g, wp, w + 10, TD_CONFIG.path.borderColor);
-    this.fatStroke(g, wp, w, TD_CONFIG.path.fillColor);
+    this.fatStroke(g, wp, w + 10, pcfg.borderColor);
+    this.fatStroke(g, wp, w, pcfg.fillColor);
 
     // 起点（绿色传送门）/ 终点（红色洞穴）
     const st = wp[0], ed = wp[wp.length - 1];
@@ -216,14 +222,16 @@ class GameScene extends Phaser.Scene {
     if (dt > 0) {
       this.updateWaves(dt);
 
-      for (const e of this.enemies) e.update(dt);
-      this.enemies = this.enemies.filter((e) => !e.removed);
-
       const ctx = {
         enemies: this.enemies,
         fire: (tower, target) => this.fireProjectile(tower, target)
       };
+      /* 塔先于敌更新：塔D（PullBehavior）先标记 pullFresh/写位移，敌再据其位移；
+         普通 AttackBehavior 同样先于敌，1 帧索敌延迟不可见 */
       for (const t of this.towers) t.update(dt, ctx);
+
+      for (const e of this.enemies) e.update(dt);
+      this.enemies = this.enemies.filter((e) => !e.removed);
 
       for (const p of this.projectiles) p.update(dt);
       this.projectiles = this.projectiles.filter((p) => !p.done);
@@ -255,7 +263,7 @@ class GameScene extends Phaser.Scene {
 
   startWave() {
     if (this.state !== 'ready') return;
-    const groups = TD_CONFIG.waves.list[this.waveIndex];
+    const groups = this.levelCfg.waves.list[this.waveIndex];
     this.spawnList = [];
     groups.forEach((grp) => {
       for (let i = 0; i < grp.count; i++) {
@@ -271,20 +279,39 @@ class GameScene extends Phaser.Scene {
   }
 
   onWaveCleared() {
-    const bonus = TD_CONFIG.waves.clearBonus[this.waveIndex] || 0;
+    const bonus = this.levelCfg.waves.clearBonus[this.waveIndex] || 0;
     this.gold += bonus;
     this.waveIndex++;
-    if (this.waveIndex >= TD_CONFIG.waves.list.length) {
+    if (this.waveIndex >= this.levelCfg.waves.list.length) {
       this.endGame(true);
       return;
     }
     this.state = 'ready';
-    this.countdown = TD_CONFIG.waves.intermission;
+    this.countdown = this.levelCfg.waves.intermission;
     this.banner('清场奖励 +' + bonus + ' 金币', 0xbef78a);
   }
 
+  /* 敌人出生：按波数成长缩放血量；BOSS 血量单独按「普通怪当前波血量 × 5」计算。
+     - 普通怪：maxHp = cfg.hp × hpGrowth^waveIndex（复合递增）
+     - BOSS：maxHp = enemyX.hp × hpGrowth^waveIndex × boss.hpMultiplier；
+              leakDamage = enemyX.leakDamage × boss.leakMultiplier（普通怪的 3 倍） */
   spawnEnemy(typeKey) {
-    this.enemies.push(new Enemy(this, typeKey));
+    const e = new Enemy(this, typeKey);
+    const growth = this.levelCfg.hpGrowth || 1;
+    const waveFactor = Math.pow(growth, this.waveIndex);
+    const isBoss = !!e.cfg.boss;
+    if (isBoss) {
+      const bossCfg = TD_CONFIG.boss || { hpMultiplier: 5, leakMultiplier: 3 };
+      const normalBase = TD_CONFIG.enemies.enemyX;
+      e.maxHp = Math.round(normalBase.hp * waveFactor * bossCfg.hpMultiplier);
+      e.hp = e.maxHp;
+      e.leakDamage = normalBase.leakDamage * bossCfg.leakMultiplier;
+    } else {
+      e.maxHp = Math.round(e.cfg.hp * waveFactor);
+      e.hp = e.maxHp;
+      e.drawHpBar(1); // 血量上限变化后重绘满血条宽度
+    }
+    this.enemies.push(e);
   }
 
   onEnemyKilled(e) {
@@ -544,10 +571,13 @@ class GameScene extends Phaser.Scene {
     if (!tower) return;
     const p = this.panel;
     p._title.setText(tower.cfg.name + '  Lv.' + tower.level + (tower.canUpgrade ? '' : '（满级）'));
+    const isPull = tower.cfg.effect && tower.cfg.effect.type === 'pull';
     p._stats.setText(
-      '伤害 ' + tower.stats.damage +
-      '   射程 ' + tower.stats.range +
-      '\n攻速 ' + (1 / tower.stats.cooldown).toFixed(2) + ' 次/秒'
+      isPull
+        ? '类型 范围吸引·控场\n射程 ' + tower.stats.range + '   伤害 ' + tower.stats.damage
+        : ('伤害 ' + tower.stats.damage +
+           '   射程 ' + tower.stats.range +
+           '\n攻速 ' + (1 / tower.stats.cooldown).toFixed(2) + ' 次/秒')
     );
 
     const upCost = tower.getUpgradeCost();
@@ -858,7 +888,7 @@ class GameScene extends Phaser.Scene {
     document.getElementById('hud-gold').textContent = this.gold;
     document.getElementById('hud-lives').textContent = this.lives;
     document.getElementById('hud-wave').textContent =
-      Math.min(this.waveIndex + 1, TD_CONFIG.waves.list.length) + '/' + TD_CONFIG.waves.list.length;
+      Math.min(this.waveIndex + 1, this.levelCfg.waves.list.length) + '/' + this.levelCfg.waves.list.length;
 
     // 商店按钮：金币不足置灰，选中高亮
     document.querySelectorAll('.btn-tower').forEach((btn) => {
