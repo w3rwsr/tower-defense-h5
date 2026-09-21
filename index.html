@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>卡通塔防 H5（Phaser 3）</title>
-  <link rel="stylesheet" href="style.css?v=20260921b" />
+  <link rel="stylesheet" href="style.css?v=20260921c" />
   <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js） -->
   <script src="vendor/phaser.min.js?v=20260920h"></script>
 </head>
@@ -82,6 +82,13 @@
        任何握持角度下面板始终横向、完整可读（真机排查用，#dbg 时显示） -->
   <div id="dbg-panel" hidden>方向诊断：等待检测…</div>
 
+  <!-- 画面方向手动翻转：放在 #app 外部不跟随旋转。
+       部分微信/QQ X5 内核报告的 gamma 符号与 W3C 标准相反，
+       自动判定会把横置方向选反（画面 180° 颠倒），
+       用户点此按钮可一键切换旋转方向，选择持久化到 localStorage。
+       仅在移动端视觉横屏 + 物理横置时显示。 -->
+  <button id="rot-flip" type="button" aria-label="画面方向不对？点此翻转">⟳ 翻转画面</button>
+
   <!-- ===== 脚本按依赖顺序加载 ===== -->
   <script src="js/config.js?v=20260920h"></script>
   <script src="js/storage.js?v=20260920h"></script>
@@ -92,6 +99,6 @@
   <script src="js/scenes/BootScene.js?v=20260920h"></script>
   <script src="js/scenes/LevelSelectScene.js?v=20260920h"></script>
   <script src="js/scenes/GameScene.js?v=20260920h"></script>
-  <script src="js/main.js?v=20260921b"></script>
+  <script src="js/main.js?v=20260921c"></script>
 </body>
 </html>

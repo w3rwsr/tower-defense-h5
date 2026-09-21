@@ -25,6 +25,14 @@
     } catch (e) { /* 忽略 */ }
   })();
 
+  /* 手动翻转标志（X5 内核 γ 符号反相机型的兜底，最终方向=自动XOR此值）。
+     必须在 Orientation 模块之前用 let 声明并完成初始化：Orientation IIFE
+     初始化时会同步调用 apply()→updateDebug() 引用本变量，若声明在其后，
+     同步调用瞬间变量仍处于 TDZ，抛 ReferenceError 会中断整个主 IIFE，
+     导致 Phaser 游戏与 deviceorientation 监听全部无法注册。 */
+  let manualFlip = false;
+  try { manualFlip = localStorage.getItem('tdRotFlip') === '1'; } catch (e) { /* 忽略 */ }
+
   /* ============================================================
    * 可靠的设备方向检测模块。
    *
@@ -105,6 +113,7 @@
         ' | 倾斜=β' + (mo.beta === undefined ? '-' : mo.beta) + '/γ' + (mo.gamma === undefined ? '-' : mo.gamma) +
         ' | 横置=' + (html.classList.contains('is-held-landscape') ? '是' : '否') +
         ' | 握持=' + (html.classList.contains('td-rot-ccw') ? '听筒左' : '听筒右') +
+        ' | 翻转=' + (manualFlip ? '开' : '关') +
         ' | 事件=' + eventCount + ' 轮询=' + pollCount +
         ' | 更新=' + lastUpdate;
     };
@@ -381,7 +390,16 @@
    *   这是 W3C 规范限制：β 失效时竖持和平放在 γ 上都是 0，
    *   浏览器无法区分。建议用户在这些机型上重新横置一次以"重置"。
    *
-   * 若真机出现方向反相，可通过 #dbg 面板观察 γ 值校正。
+   * γ 符号反相机型的兜底（手动翻转）：
+   *   实测部分微信/QQ X5 内核在听筒朝左横置时报告 γ>0（与 W3C
+   *   标准相反），自动方向判定会把旋转方向选反——系统表面旋转
+   *   与 CSS 旋转叠加成 180°，画面上下左右全颠倒。此问题无法用
+   *   统一符号约定修复（各内核实现不一致），因此提供「翻转画面」
+   *   按钮（#rot-flip）：最终方向 = 自动判定 XOR 手动翻转，
+   *   用户点一次即可纠正，选择持久化到 localStorage。
+   *
+   * 若真机出现方向反相，可通过 #dbg 面板观察 γ 值，
+   *   或直接点屏幕角落的「翻转画面」按钮。
    * ============================================================ */
   let lastTiltState = null;
   let tiltTimer = null;
@@ -414,8 +432,10 @@
        时 γ 已接近 0，符号会随噪声来回跳变，直接沿用会让 td-rot-ccw
        切换、画面 180° 来回翻转。 */
     if (heldLandscape && g > 10) latchedCcw = m.gamma < 0;
-    /* γ<0：听筒朝左 → 逆时针握持；γ>0：听筒朝右 → 默认方向 */
-    const ccw = heldLandscape && latchedCcw;
+    /* γ<0：听筒朝左 → 逆时针握持；γ>0：听筒朝右 → 默认方向。
+       再与手动翻转（X5 内核 γ 符号反相兜底）做异或：
+       用户点过「翻转画面」后，无论自动判定结果如何都取反。 */
+    const ccw = heldLandscape && (latchedCcw !== manualFlip);
     if (wasHeld !== heldLandscape) {
       htmlEl.classList.toggle('is-held-landscape', heldLandscape);
     }
@@ -442,6 +462,25 @@
   try {
     document.addEventListener('visibilitychange', applyHeldState);
     window.addEventListener('pageshow', applyHeldState);
+  } catch (e) { /* 忽略 */ }
+
+  /* 「翻转画面」按钮：γ 符号反相的 X5 内核机型兜底。
+     点击切换 manualFlip 并持久化，随后立即重算握持状态——
+     applyHeldState 内部检测到最终 ccw 变化时会切换 td-rot-ccw
+     并同步触摸坐标逆变换（applyVisualLandscapeInput），
+     画面与点击热区一起翻转，无需刷新页面。 */
+  try {
+    const flipBtn = document.getElementById('rot-flip');
+    if (flipBtn) {
+      flipBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        manualFlip = !manualFlip;
+        try { localStorage.setItem('tdRotFlip', manualFlip ? '1' : '0'); } catch (e) { /* 忽略 */ }
+        lastTiltState = null;   // 强制 class 重算，确保立即切换
+        applyHeldState();
+      }, true);
+    }
   } catch (e) { /* 忽略 */ }
   window.addEventListener('orientationchange', forceRelayout);
   window.addEventListener('resize', forceRelayout);

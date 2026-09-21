@@ -424,3 +424,43 @@ html.is-mobile.is-portrait.td-rot-ccw #app {
 
 /* #dbg hash 时显示诊断面板（由 JS 写入，hidden 属性默认隐藏） */
 html.has-dbg #dbg-panel { display: block; }
+
+/* ============================================================
+   画面方向手动翻转按钮（#app 外部，不跟随视觉横屏旋转）
+   竖屏表面右上角；系统把锁竖屏表面旋转贴到物理横屏后，
+   按钮自然落在物理屏角落（听筒朝左→右下，听筒朝右→左上），
+   用户任何握持方向看到的文字都是正向的。
+   仅「移动端 + 视觉横屏 + 已物理横置（提示层已隐藏）」时显示，
+   竖持被提示层遮住期间不显示。
+   ============================================================ */
+#rot-flip {
+  display: none;
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 99990;
+  min-width: 44px;
+  min-height: 44px;            /* 触控热区 >= 44px */
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, .35);
+  border-radius: 22px;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  backdrop-filter: blur(4px);
+}
+#rot-flip:active {
+  background: rgba(0, 0, 0, .8);
+  transform: scale(.94);
+}
+html.is-mobile.is-portrait.is-held-landscape #rot-flip {
+  display: block;
+}
