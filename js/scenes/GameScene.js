@@ -21,14 +21,22 @@ class GameScene extends Phaser.Scene {
     this.levelCfg = TD_CONFIG.levels[this.levelId] ||
       { path: TD_CONFIG.path, waves: TD_CONFIG.waves, economy: TD_CONFIG.economy };
 
+    /* 放塔规则：顶层 build 为底，关卡 build 覆盖（如第 2 关更密的采样间距）；
+       第 1 关新手教程单独用 tutorialCell（点更少、更简单） */
+    this.buildCfg = Object.assign({}, TD_CONFIG.build, this.levelCfg.build || {});
+
     /* ---- 路径几何预计算 ---- */
     this.buildPathGeometry();
 
-    /* ---- 放塔热区：沿路径两侧均匀分布的两排整齐点（不再铺满全图） ---- */
+    /* ---- 道路火力点：沿路径两侧均匀分布的两排整齐点（绿色方格） ---- */
     this.buildHotspots();
 
     /* ---- 障碍物：放塔无效区（离路太远、放塔打不到路面）摆卡通障碍物 ---- */
     this.spawnObstacles();
+
+    /* ---- 障碍物据点：为每个障碍物补一个“放塔就能够到它”的专属火力点
+       （琥珀色方格，可与道路点共存、可被多个障碍物共享） ---- */
+    this.buildObstacleSpots();
 
     /* ---- 静态画面 ---- */
     this.drawGround();
@@ -126,18 +134,19 @@ class GameScene extends Phaser.Scene {
   }
 
   /* ============================================================
-   * 放塔热区：由路径几何直接生成【沿道路两侧均匀分布的两排整齐点】。
-   * 沿路径每 cell(80px) 采样一次，向两侧法向各偏移 roadGap(62px)：
+   * 道路火力点：由路径几何直接生成【沿道路两侧均匀分布的两排整齐点】。
+   * 沿路径每 step 采样一次，向两侧法向各偏移 roadGap(62px)：
    *   - 每个点距路心恒 ≈62px，小于最短塔射程(125)——放塔必能打到路面，
-     杜绝"放了塔也打不到怪"的白放点位；
+   *     杜绝"放了塔也打不到怪"的白放点位；
    *   - 出界点、离路过近（<minPathDistance，拐弯处法向点可能贴到相邻
-     路段）的点直接剔除，绝不压路面；
+   *     路段）的点直接剔除，绝不压路面、不阻碍小怪行进；
    *   - 拐弯内侧两排过近的点按 minSpacing(56) 去重，保持整齐不堆叠。
+   * 第 1 关新手教程使用更大的 tutorialCell（点更少、更简单）。
    * ============================================================ */
   buildHotspots() {
-    const b = TD_CONFIG.build;
+    const b = this.buildCfg;
     const gap = (b.roadGap != null) ? b.roadGap : 62;
-    const step = b.cell;
+    const step = (this.levelId === 1 && b.tutorialCell) ? b.tutorialCell : b.cell;
     const minSpacing = b.minSpacing || 56;
     const raw = [];
     for (const s of this.segments) {
@@ -164,7 +173,97 @@ class GameScene extends Phaser.Scene {
       }
       if (dup) continue;
       const rx = Math.round(p.x), ry = Math.round(p.y);
-      this.hotspots.push({ x: rx, y: ry, key: rx + '_' + ry });
+      this.hotspots.push({ x: rx, y: ry, key: rx + '_' + ry, kind: 'road' });
+    }
+  }
+
+  /* ============================================================
+   * 障碍物据点（琥珀色专属火力点）
+   * 规则（全部 JSON 配置驱动，见 TD_CONFIG.obstacles）：
+   *   - 每个障碍物附近【至少】有一个据点，据点距障碍物中心 ≤ coverRange，
+   *     保证最短射程的塔（塔C 125，攻击口径 reach=射程+radius=145）直接
+   *     放据点也一定打得到该障碍物；
+   *   - 据点可以不覆盖道路（在环带内），但绝不压路面（distToPath 硬校验）；
+   *   - 相邻障碍物在 spotShare 内共享同一据点，避免地图过挤；
+   *   - 据点与已有道路点/据点保持 spotSpacing 间距，布局整齐不堆叠。
+   * ============================================================ */
+
+  /** 求离 (x,y) 最近的路径点（各线段投影取最小），用于据点朝路方向定位 */
+  nearestPathPoint(x, y) {
+    let bx = 0, by = 0, bd = Infinity;
+    for (const s of this.segments) {
+      const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+      const len2 = dx * dx + dy * dy;
+      let t = ((x - s.x1) * dx + (y - s.y1) * dy) / len2;
+      t = Phaser.Math.Clamp(t, 0, 1);
+      const px = s.x1 + dx * t, py = s.y1 + dy * t;
+      const d = Math.hypot(x - px, y - py);
+      if (d < bd) { bd = d; bx = px; by = py; }
+    }
+    return { x: bx, y: by, d: bd };
+  }
+
+  buildObstacleSpots() {
+    const oc = TD_CONFIG.obstacles;
+    if (!oc || !oc.coverSpot) return;
+    const b = this.buildCfg;
+    const coverRange = oc.coverRange || 132;
+    const coverGap = oc.coverGap || 92;
+    const share = oc.spotShare || 112;
+    const spacing = oc.spotSpacing || 50;
+
+    /* 候选点合法性：界内 + 不压路 + 与全部已有热区保持间距 + 不贴其他障碍物。
+       minSpace 可放宽（首选失败时兜底），但避路/界内/覆盖距离永不放宽。 */
+    const validSpot = (p, self, minSpace) => {
+      if (p.x < b.edgeMargin || p.x > this.W - b.edgeMargin ||
+          p.y < b.edgeMargin || p.y > this.H - b.edgeMargin) return false;
+      if (this.distToPath(p.x, p.y) < b.minPathDistance) return false;
+      if (Math.hypot(p.x - self.x, p.y - self.y) > coverRange) return false;
+      for (const h of this.hotspots) {
+        if (Math.hypot(h.x - p.x, h.y - p.y) < minSpace) return false;
+      }
+      for (const o of this.obstacles) {
+        if (o === self) continue;
+        if (Math.hypot(o.x - p.x, o.y - p.y) < o.radius + 24) return false;
+      }
+      return true;
+    };
+
+    for (const ob of this.obstacles) {
+      /* 1) 共享：已有据点若在 share（且不超 coverRange）内，直接复用 */
+      let reused = false;
+      for (const h of this.hotspots) {
+        if (h.kind !== 'ob') continue;
+        const d = Math.hypot(h.x - ob.x, h.y - ob.y);
+        if (d <= Math.min(share, coverRange)) { reused = true; break; }
+      }
+      if (reused) continue;
+
+      /* 2) 新据点：沿"朝路方向 + 沿路切向"生成候选扇区，首选朝路 coverGap、
+            横向偏移最小的点（最整齐）；首选全失败再放宽热区间距兜底 */
+      const foot = this.nearestPathPoint(ob.x, ob.y);
+      let nx = foot.x - ob.x, ny = foot.y - ob.y;
+      const nl = Math.hypot(nx, ny) || 1;
+      nx /= nl; ny /= nl;                       // 朝路单位法向
+      const tx = -ny, ty = nx;                  // 沿路切向
+      const dists = [coverGap, coverGap - 20, coverGap + 20, coverGap - 40,
+                     coverGap + 40, coverGap - 60, coverGap + 60];
+      const lats = [0, 26, -26, 52, -52, 80, -80, 104, -104];
+      let picked = null;
+      for (let pass = 0; pass < 2 && !picked; pass++) {
+        const ms = pass === 0 ? spacing : spacing - 12;
+        for (const d of dists) {
+          for (const lat of lats) {
+            const p = { x: ob.x + nx * d + tx * lat, y: ob.y + ny * d + ty * lat };
+            if (validSpot(p, ob, ms)) { picked = p; break; }
+          }
+          if (picked) break;
+        }
+      }
+      if (picked) {
+        const rx = Math.round(picked.x), ry = Math.round(picked.y);
+        this.hotspots.push({ x: rx, y: ry, key: rx + '_' + ry, kind: 'ob' });
+      }
     }
   }
 
@@ -195,20 +294,30 @@ class GameScene extends Phaser.Scene {
   }
 
   /* ============================================================
-   * 可放置区域图层：仅在每个合法放置点画一个绿色圆点标记，
-   * 沿道路两侧排成整齐两排——不再铺满全图的网格块/网格线。
+   * 可放置区域图层：每个合法放置点画一个【带边框的圆角方块】，
+   * 视觉饱满、明显，且两类火力点颜色区分：
+   *   - 道路火力点 kind='road'：绿色（放塔打路面）；
+   *   - 障碍物据点 kind='ob'  ：琥珀色（专为打附近障碍物，可不覆盖路面）。
+   * 不再铺满全图网格线，也不用旧的稀疏小绿圈。
    * ============================================================ */
   drawPlacementGrid() {
     const g = this.placementGridGfx;
     g.clear();
+    const b = this.buildCfg;
+    const size = b.spotSize || 36, r = b.spotRadius || 10;
+    const drawSpot = (h, st) => {
+      const x0 = h.x - size / 2, y0 = h.y - size / 2;
+      g.fillStyle(st.fill, st.fillAlpha);
+      g.fillRoundedRect(x0, y0, size, size, r);
+      g.lineStyle(3, st.border, st.borderAlpha);
+      g.strokeRoundedRect(x0, y0, size, size, r);
+      /* 中心白色高光点，让方格更立体醒目（卡通感） */
+      g.fillStyle(0xffffff, 0.85);
+      g.fillCircle(h.x, h.y, 4);
+    };
     for (const h of this.hotspots) {
       if (!this.canBuildAt(h.x, h.y, h.key)) continue;
-      g.fillStyle(0x5fe35f, 0.42);
-      g.fillCircle(h.x, h.y, 17);
-      g.lineStyle(2, 0x2e7d1c, 0.7);
-      g.strokeCircle(h.x, h.y, 17);
-      g.fillStyle(0xeaffea, 0.9);
-      g.fillCircle(h.x, h.y, 4.5);
+      drawSpot(h, h.kind === 'ob' ? b.campSpot : b.roadSpot);
     }
   }
 
@@ -249,7 +358,7 @@ class GameScene extends Phaser.Scene {
       return seed / 4294967296;
     };
     const keys = ['decor_bush', 'decor_bush', 'decor_flower', 'decor_rock'];
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 40; i++) {
       const x = 20 + rnd() * (this.W - 40);
       const y = 20 + rnd() * (this.H - 40);
       if (this.distToPath(x, y) < 46) continue; // 不压在路面上
@@ -259,6 +368,12 @@ class GameScene extends Phaser.Scene {
         if (Math.abs(o.x - x) < 52 && Math.abs(o.y - y) < 52) { nearOb = true; break; }
       }
       if (nearOb) continue;
+      /* 避开火力点：花草石头不盖住圆角方格、不干扰放塔点击（热区在方格内） */
+      let nearSpot = false;
+      for (const h of this.hotspots) {
+        if (Math.hypot(h.x - x, h.y - y) < 28) { nearSpot = true; break; }
+      }
+      if (nearSpot) continue;
       const key = keys[Math.floor(rnd() * keys.length)];
       const img = this.add.image(x, y, key).setDepth(2);
       img.setScale(0.8 + rnd() * 0.5);
@@ -713,9 +828,13 @@ class GameScene extends Phaser.Scene {
     const ok = this.canBuildAt(cx, cy, h.key) && this.gold >= cfg.cost;
     const color = ok ? 0x6be86b : 0xff5d5d;
 
-    // 放置点提示（与放置网格同款圆形标记）
-    g.fillStyle(0xffffff, 0.20);
-    g.fillCircle(cx, cy, 17);
+    // 放置点提示（与放置网格同款圆角方格，非法时半透明红描边）
+    const b = this.buildCfg;
+    const size = b.spotSize || 36, sr = b.spotRadius || 10;
+    g.fillStyle(0xffffff, 0.22);
+    g.fillRoundedRect(cx - size / 2, cy - size / 2, size, size, sr);
+    g.lineStyle(3, color, 0.95);
+    g.strokeRoundedRect(cx - size / 2, cy - size / 2, size, size, sr);
     // 射程圈
     g.lineStyle(2, color, 0.9);
     g.fillStyle(color, 0.10);
