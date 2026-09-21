@@ -729,6 +729,115 @@ class GameScene extends Phaser.Scene {
         s.setPlacement(s.selectedType === type ? null : type);
       });
     });
+
+    /* 塔 D 真实运行时自查钩子：控制台调用 window.__tdPullTest() 即可。
+       在当前已运行的 GameScene 内构造真实 Tower D + 真实 Enemy，
+       让真实 update 循环跑 800ms，读真实 pullDX/DY 验证吸引生效。 */
+    window.__tdPullTest = () => this.runPullTest();
+  }
+
+  /** 塔 D 范围吸引真实运行时自查（控制台 window.__tdPullTest() 触发）。
+   *  构造真实 Tower + 真实 Enemy，由本场景真实 update 循环驱动，
+   *  读真实 pullDX/DY 验证：范围内被拉拢、范围外不被拉、ctrlSlow 压制推进。 */
+  async runPullTest() {
+    const report = { step: 'init', tower: null, enemyA: null, enemyB: null, ctrlSlow: null, conclusion: null, error: null };
+    try {
+      // 清残留测试对象（重复调用时）
+      this._pullTestObjs = this._pullTestObjs || { towers: [], enemies: [] };
+      this._pullTestObjs.towers.forEach(t => { try { t.destroy(); } catch(_){} });
+      this._pullTestObjs.enemies.forEach(e => { try { e.destroyImmediately && e.destroyImmediately(); } catch(_){ try{e.destroy&&e.destroy();}catch(_){} } });
+      this._pullTestObjs = { towers: [], enemies: [] };
+
+      // 路径段 1（Level 2：(-40,100)→(720,100)）或 Level 1 第 1 段都是水平线 y=100
+      // 塔放 (300,200)：距路径 100px，range=140>100，路径上 x∈[202,398] 的敌人进入射程
+      const tower = new Tower(this, 300, 200, 'towerD');
+      this.towers.push(tower);
+      this._pullTestObjs.towers.push(tower);
+      report.tower = {
+        type: tower.typeKey,
+        behaviorClass: tower.behavior ? tower.behavior.constructor.name : 'none',
+        isPullBehavior: tower.behavior && tower.behavior.constructor.name === 'PullBehavior',
+        stats: tower.stats,
+        effect: tower.cfg.effect
+      };
+
+      // 敌人 A：射程内（pathDist=320 → x=280, 距塔≈102<140），baseSpeed=0 不走，纯测位移累积
+      const eA = new Enemy(this, 'enemyX');
+      eA.pathDist = 320;
+      eA.baseSpeed = 0;
+      eA.pullDX = 0; eA.pullDY = 0;
+      this.enemies.push(eA);
+      this._pullTestObjs.enemies.push(eA);
+
+      // 敌人 B：射程外（pathDist=740 → x=700, 距塔≈412>140）
+      const eB = new Enemy(this, 'enemyX');
+      eB.pathDist = 740;
+      eB.baseSpeed = 0;
+      eB.pullDX = 0; eB.pullDY = 0;
+      this.enemies.push(eB);
+      this._pullTestObjs.enemies.push(eB);
+
+      const distToTower = (e) => Math.hypot(e.x - 300, e.y - 200);
+      const before = {
+        A: { x: eA.x, y: eA.y, pullDX: eA.pullDX, pullDY: eA.pullDY, dist: distToTower(eA) },
+        B: { x: eB.x, y: eB.y, pullDX: eB.pullDX, pullDY: eB.pullDY, dist: distToTower(eB) }
+      };
+
+      // 让真实 update 循环跑 800ms（≈48帧@60fps）：PullBehavior 每帧改 pullDX，Enemy.update 合成新位置
+      await new Promise(r => setTimeout(r, 800));
+
+      const after = {
+        A: { x: eA.x, y: eA.y, pullDX: eA.pullDX, pullDY: eA.pullDY, dist: distToTower(eA) },
+        B: { x: eB.x, y: eB.y, pullDX: eB.pullDX, pullDY: eB.pullDY, dist: distToTower(eB) }
+      };
+      report.enemyA = { before, after,
+        pullMag: Math.hypot(after.A.pullDX, after.A.pullDY),
+        pulled: Math.hypot(after.A.pullDX, after.A.pullDY) > 10,
+        movedCloser: after.A.dist < before.A.dist };
+
+      report.enemyB = { before, after,
+        pullMag: Math.hypot(after.B.pullDX, after.B.pullDY),
+        notPulled: Math.hypot(after.B.pullDX, after.B.pullDY) < 5 };
+
+      // ctrlSlow 验证：重置 A 位移，恢复正常速度，跑 600ms 看 pathDist 增量
+      // 正常增量 = speed*0.6 ≈ 46*0.6=27.6；被 ctrlSlow(0.5) 压制应 ≈13.8
+      eA.pullDX = 0; eA.pullDY = 0;
+      eA.pathDist = 320;
+      eA.baseSpeed = TD_CONFIG.enemies.enemyX.speed;
+      const pdBefore = eA.pathDist;
+      await new Promise(r => setTimeout(r, 600));
+      const pdAfter = eA.pathDist;
+      const dispNow = Math.hypot(eA.pullDX, eA.pullDY);
+      report.ctrlSlow = {
+        pathDistDelta: pdAfter - pdBefore,
+        expectedNormal: TD_CONFIG.enemies.enemyX.speed * 0.6,
+        expectedCtrlSlow: TD_CONFIG.enemies.enemyX.speed * 0.6 * 0.5,
+        dispNow, pullFresh: eA.pullFresh,
+        ctrlSlowTriggered: dispNow > 16,
+        note: '若 dispNow>16 且增量≈expectedCtrlSlow（约一半），ctrlSlow 生效'
+      };
+
+      report.conclusion = {
+        behaviorIsPull: report.tower.isPullBehavior,
+        A_pulled: report.enemyA.pulled,
+        B_notPulled: report.enemyB.notPulled,
+        A_movedCloser: report.enemyA.movedCloser,
+        ctrlSlowActive: report.ctrlSlow.ctrlSlowTriggered && report.ctrlSlow.pathDistDelta < report.ctrlSlow.expectedNormal * 0.7,
+        pass: report.tower.isPullBehavior && report.enemyA.pulled && report.enemyB.notPulled
+      };
+      report.step = 'done';
+    } catch (e) {
+      report.error = String(e) + (e.stack ? '\n' + e.stack.split('\n').slice(0,3).join('\n') : '');
+      report.step = 'error';
+    } finally {
+      // 清理测试对象
+      if (this._pullTestObjs) {
+        this._pullTestObjs.towers.forEach(t => { try { this.towers = this.towers.filter(v => v !== t); t.destroy(); } catch(_){} });
+        this._pullTestObjs.enemies.forEach(e => { try { this.enemies = this.enemies.filter(v => v !== e); e.destroyImmediately && e.destroyImmediately(); } catch(_){} });
+        this._pullTestObjs = null;
+      }
+    }
+    return report;
   }
 
   /** 进入 / 退出放置模式（由商店按钮触发）
