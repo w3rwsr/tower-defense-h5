@@ -18,11 +18,14 @@ class Enemy extends Phaser.GameObjects.Container {
     this.maxHp = cfg.hp;
     this.hp = cfg.hp;
     this.baseSpeed = cfg.speed;
-    /* 小怪击杀金币 = 基础 reward + economy.killRewardBonus - 关卡惩罚；
-       BOSS 不享受加成/惩罚；关卡惩罚最低扣到 0 */
+    /* 小怪击杀金币 = 基础 reward + economy.killRewardBonus + 关卡调整值；
+       关卡调整值 killRewardAdjust 可正（奖励）可负（惩罚，旧字段 killRewardPenalty 仍兼容）；
+       BOSS 不享受任何加成/调整；最低保 0 */
     const killBonus = (!cfg.boss && TD_CONFIG.economy.killRewardBonus) || 0;
-    const penalty = (!cfg.boss && scene.levelCfg.killRewardPenalty) || 0;
-    this.reward = Math.max(0, cfg.reward + killBonus - penalty);
+    const adjust = (!cfg.boss && (scene.levelCfg.killRewardAdjust != null
+      ? scene.levelCfg.killRewardAdjust
+      : -(scene.levelCfg.killRewardPenalty || 0))) || 0;
+    this.reward = Math.max(0, cfg.reward + killBonus + adjust);
     this.leakDamage = cfg.leakDamage;
 
     /* 伤害减免（0=无减免）：末波小怪可配 finalWaveDmgReduction，
