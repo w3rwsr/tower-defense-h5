@@ -31,6 +31,10 @@ class GameScene extends Phaser.Scene {
     /* ---- 路径几何预计算 ---- */
     this.buildPathGeometry();
 
+    /* ---- 传送门预计算（第 4 关等含 portals 配置的关卡）：
+       把 JSON 的「路线号+路径点索引」解析为沿路里程与坐标 ---- */
+    this.buildPortals();
+
     /* ---- 道路火力点：沿路径两侧均匀分布的两排整齐点（绿色方格） ---- */
     this.buildHotspots();
 
@@ -44,6 +48,7 @@ class GameScene extends Phaser.Scene {
     /* ---- 静态画面 ---- */
     this.drawGround();
     this.drawPath();
+    this.drawPortals();
     this.drawDecor();
 
     /* ---- 游戏状态 ---- */
@@ -421,6 +426,205 @@ class GameScene extends Phaser.Scene {
     g.lineStyle(5, 0x7a2a2a, 1); g.fillStyle(0x5d3328, 1);
     g.fillCircle(ed.x, ed.y, 26); g.strokeCircle(ed.x, ed.y, 26);
     g.fillStyle(0x2e1812, 1); g.fillCircle(ed.x, ed.y, 16);
+  }
+
+  /* ============================================================
+   * 传送门（第 4 关机制，全部 JSON 驱动：levelCfg.portals）
+   *
+   * 数据模型：pairs[] 每对含 a（入口）/b（出口）两个「路线号+路径点索引」，
+   * buildPortals 预解析为沿路里程（entryDist/exitDist）与世界坐标。
+   *   - direction "oneway"：仅 A→B；"bidirectional"：A↔B 双向各生效一次。
+   * 传送在 Enemy.update 推进 pathDist 后检测：当前进【跨越】入口里程时，
+   * 把敌人 pathDist 跳到出口里程（可跨路线），位置恒为路径上的点，不脱轨；
+   * 每个传送规则对每只怪只生效一次（enemy.usedPortals），向后传送/双向
+   * 都不会死循环；传送后给 invulnTime(0.5s) 无敌且不可被索敌。
+   * 与塔D：传送优先——传送瞬间清空 pullBack 位移场，出口处重新被索敌后
+   * 才继续吸引。
+   * ============================================================ */
+  buildPortals() {
+    this.portals = [];
+    this.portalEndpoints = [];
+    const pc = this.levelCfg.portals;
+    if (!pc || !Array.isArray(pc.pairs)) return;
+
+    /* 「路线号+路径点索引」→ { route, dist(沿路累计里程), x, y }；
+       索引即路径点，坐标几何上恒在道路中心线上，绝不会传到道路外 */
+    const resolve = (ep) => {
+      const route = ep.route || 0;
+      const rg = this.routeGeoms[route];
+      if (!rg) return null;
+      const wi = Phaser.Math.Clamp(ep.waypoint, 0, rg.waypoints.length - 1);
+      const wp = rg.waypoints[wi];
+      let dist = 0;
+      for (let i = 0; i < wi; i++) dist += rg.segments[i].len;
+      return { route, waypoint: wi, dist, x: wp.x, y: wp.y };
+    };
+
+    const drawn = {};
+    for (const pair of pc.pairs) {
+      const a = resolve(pair.a);
+      const b = resolve(pair.b);
+      if (!a || !b) continue;
+      const pid = pair.id || 'p';
+      const affectBoss = pair.affectBoss !== false;
+      this.portals.push({
+        key: pid + '>A',
+        entryRoute: a.route, entryDist: a.dist, entryX: a.x, entryY: a.y,
+        exitRoute: b.route, exitDist: b.dist, affectBoss: affectBoss
+      });
+      if (pair.direction === 'bidirectional') {
+        this.portals.push({
+          key: pid + '>B',
+          entryRoute: b.route, entryDist: b.dist, entryX: b.x, entryY: b.y,
+          exitRoute: a.route, exitDist: a.dist, affectBoss: affectBoss
+        });
+      }
+      /* 视觉端点去重（双向时 A/B 各只画一次） */
+      const ka = a.route + ':' + a.waypoint, kb = b.route + ':' + b.waypoint;
+      if (!drawn[ka]) { drawn[ka] = 1; this.portalEndpoints.push({ x: a.x, y: a.y, role: 'a' }); }
+      if (!drawn[kb]) { drawn[kb] = 1; this.portalEndpoints.push({ x: b.x, y: b.y, role: 'b' }); }
+    }
+  }
+
+  /** 传送门卡通外观：呼吸光晕 + 双环反向旋转 + 脉冲核心 + 环绕粒子 + A/B 标签 */
+  drawPortals() {
+    if (!this.portalEndpoints || this.portalEndpoints.length === 0) return;
+    for (const ep of this.portalEndpoints) {
+      const color = ep.role === 'a' ? 0xff5ad1 : 0x4be0ff; // A 入口品红 / B 出口青蓝
+      const c = this.add.container(ep.x, ep.y).setDepth(6);
+
+      /* 底盘光晕（呼吸） */
+      const glow = this.add.graphics();
+      glow.fillStyle(color, 0.16).fillCircle(0, 0, 32);
+      glow.fillStyle(color, 0.10).fillCircle(0, 0, 24);
+      this.tweens.add({ targets: glow, alpha: 0.55, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+
+      /* 外环：三段弧整体匀速旋转 */
+      const ringA = this.add.graphics();
+      ringA.lineStyle(4, color, 0.95);
+      for (let i = 0; i < 3; i++) {
+        const s = -Math.PI / 2 + i * (Math.PI * 2 / 3);
+        ringA.beginPath();
+        ringA.arc(0, 0, 22, s + 0.18, s + Math.PI / 3 - 0.18);
+        ringA.strokePath();
+      }
+      this.tweens.add({ targets: ringA, angle: 360, duration: 2400, repeat: -1, ease: 'Linear' });
+
+      /* 内环：两段白弧反向旋转 */
+      const ringB = this.add.graphics();
+      ringB.lineStyle(3, 0xffffff, 0.9);
+      for (let i = 0; i < 2; i++) {
+        const s = i * Math.PI;
+        ringB.beginPath();
+        ringB.arc(0, 0, 15, s + 0.3, s + Math.PI - 0.3);
+        ringB.strokePath();
+      }
+      this.tweens.add({ targets: ringB, angle: -360, duration: 1700, repeat: -1, ease: 'Linear' });
+
+      /* 中心旋涡核心（脉冲缩放） */
+      const core = this.add.graphics();
+      core.fillStyle(0xffffff, 0.9).fillCircle(0, 0, 8);
+      core.fillStyle(color, 0.55).fillCircle(0, 0, 5);
+      this.tweens.add({ targets: core, scale: 1.35, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+
+      /* 环绕粒子：两圈亮点反向公转 */
+      const spark = this.add.container(0, 0);
+      for (let i = 0; i < 4; i++) {
+        const ang = i * Math.PI / 2;
+        const d = this.add.graphics();
+        d.fillStyle(0xffffff, 0.95).fillCircle(0, 0, 2.8);
+        d.setPosition(Math.cos(ang) * 27, Math.sin(ang) * 27);
+        spark.add(d);
+      }
+      this.tweens.add({ targets: spark, angle: 360, duration: 1500, repeat: -1, ease: 'Linear' });
+      const spark2 = this.add.container(0, 0);
+      for (let i = 0; i < 3; i++) {
+        const ang = i * (Math.PI * 2 / 3) + 0.5;
+        const d = this.add.graphics();
+        d.fillStyle(color, 0.9).fillCircle(0, 0, 2.2);
+        d.setPosition(Math.cos(ang) * 27, Math.sin(ang) * 27);
+        spark2.add(d);
+      }
+      this.tweens.add({ targets: spark2, angle: -360, duration: 1100, repeat: -1, ease: 'Linear' });
+
+      /* A/B 标签（轻微上下浮动） */
+      const label = this.add.text(0, -40, ep.role === 'a' ? 'A' : 'B', {
+        fontFamily: TD_FONT_STACK, fontSize: '18px', fontStyle: 'bold', color: '#ffffff'
+      }).setOrigin(0.5).setStroke('#3a2350', 4);
+      this.tweens.add({ targets: label, y: -46, duration: 650, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+
+      c.add([glow, ringA, ringB, core, spark, spark2, label]);
+    }
+  }
+
+  /**
+   * 传送检测：Enemy.update 沿路推进后调用。
+   * @param {Enemy} e           敌人（可能被原地改写 routeId/pathDist）
+   * @param {number} distBefore 本帧推进前的真实沿路里程（塔D 位移已烘焙）
+   * 仅【前进跨越】入口里程触发；塔D 回拉导致的倒退不触发。
+   */
+  checkPortalTeleport(e, distBefore) {
+    if (!this.portals || this.portals.length === 0) return;
+    for (const p of this.portals) {
+      if (p.entryRoute !== e.routeId) continue;
+      if (!p.affectBoss && e.cfg && e.cfg.boss) continue;
+      if (e.usedPortals && e.usedPortals[p.key]) continue;
+      if (distBefore < p.entryDist && e.pathDist >= p.entryDist) {
+        if (!e.usedPortals) e.usedPortals = {};
+        e.usedPortals[p.key] = true;
+        const from = { x: p.entryX, y: p.entryY };
+
+        /* 传送优先于塔D：清空吸附位移场与本帧标记，出口处由塔重新索敌 */
+        e.pullBack = 0;
+        e.pullDX = 0;
+        e.pullDY = 0;
+        e.pullFresh = false;
+
+        /* 跳到出口里程（支持跨路线），clamp 保证不越界，渲染点恒在路径上 */
+        e.routeId = p.exitRoute;
+        e.pathDist = Phaser.Math.Clamp(p.exitDist, 0, this.routeLength(p.exitRoute));
+
+        /* 0.5s 无敌 + 不可选中（索敌/伤害均跳过），避免刚出现就被秒或卡住 */
+        const inv = (this.levelCfg.portals && this.levelCfg.portals.invulnTime) || 0.5;
+        e.invulnTimer = inv;
+        e.body.setAlpha(0.55);
+        e.setScale(0.45);
+        this.tweens.add({ targets: e, scaleX: 1, scaleY: 1, duration: 260, ease: 'Back.out' });
+
+        const to = this.pathPointAt(e.pathDist, e.routeId);
+        this.playPortalTeleportFx(from, { x: to.x, y: to.y });
+        return;
+      }
+    }
+  }
+
+  /** 传送瞬间特效：入口/出口各一次扩散光环 + 放射星点 */
+  playPortalTeleportFx(from, to) {
+    this.makePortalBurst(from.x, from.y, 0xff5ad1);
+    this.makePortalBurst(to.x, to.y, 0x4be0ff);
+  }
+
+  makePortalBurst(x, y, color) {
+    const ring = this.add.graphics().setDepth(200);
+    ring.lineStyle(4, color, 0.95).strokeCircle(0, 0, 12);
+    ring.fillStyle(0xffffff, 0.85).fillCircle(0, 0, 8);
+    ring.setPosition(x, y);
+    this.tweens.add({
+      targets: ring, scaleX: 3.2, scaleY: 3.2, alpha: 0,
+      duration: 360, ease: 'Quad.out', onComplete: () => ring.destroy()
+    });
+    for (let i = 0; i < 6; i++) {
+      const ang = (i / 6) * Math.PI * 2;
+      const dot = this.add.graphics().setDepth(200);
+      dot.fillStyle(0xffffff, 0.9).fillCircle(0, 0, 3.2);
+      dot.setPosition(x, y);
+      this.tweens.add({
+        targets: dot,
+        x: x + Math.cos(ang) * 34, y: y + Math.sin(ang) * 34,
+        alpha: 0, scale: 0.3, duration: 380, ease: 'Quad.out',
+        onComplete: () => dot.destroy()
+      });
+    }
   }
 
   drawDecor() {

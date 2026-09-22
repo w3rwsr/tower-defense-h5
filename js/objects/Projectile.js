@@ -62,7 +62,7 @@ class Projectile extends Phaser.GameObjects.Image {
         if (!this.target.dead) this.target.takeDamage(this.damage);
       } else {
         scene.enemies.forEach((e) => {
-          if (e.dead) return;
+          if (e.dead || e.invulnTimer > 0) return; // 传送无敌中：不受伤也不吃减速
           if (Phaser.Math.Distance.Between(this.tx, this.ty, e.x, e.y) <= r + e.radius) {
             e.takeDamage(this.damage);
             if (!e.dead) e.applySlow(this.effect.slowFactor, this.effect.slowDuration);

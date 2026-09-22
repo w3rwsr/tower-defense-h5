@@ -23,7 +23,7 @@
       const r2 = tower.stats.range * tower.stats.range;
       for (let i = 0; i < enemies.length; i++) {
         const e = enemies[i];
-        if (e.dead) continue;
+        if (e.dead || e.invulnTimer > 0) continue; // 传送后短暂无敌：不可被索敌/吸引
         const dx = e.x - tower.x;
         const dy = e.y - tower.y;
         if (dx * dx + dy * dy <= r2 && e.pathDist > bestDist) {
@@ -41,7 +41,7 @@
       const r2 = tower.stats.range * tower.stats.range;
       for (let i = 0; i < enemies.length; i++) {
         const e = enemies[i];
-        if (e.dead) continue;
+        if (e.dead || e.invulnTimer > 0) continue; // 传送后短暂无敌：不可被索敌/吸引
         const dx = e.x - tower.x;
         const dy = e.y - tower.y;
         const d2 = dx * dx + dy * dy;
@@ -59,7 +59,7 @@
       const r2 = tower.stats.range * tower.stats.range;
       for (let i = 0; i < enemies.length; i++) {
         const e = enemies[i];
-        if (e.dead) continue;
+        if (e.dead || e.invulnTimer > 0) continue; // 传送后短暂无敌：不可被索敌/吸引
         const dx = e.x - tower.x;
         const dy = e.y - tower.y;
         if (dx * dx + dy * dy <= r2 && (!best || e.hp < best.hp)) best = e;
@@ -231,7 +231,7 @@
 
       for (let i = 0; i < ctx.enemies.length; i++) {
         const e = ctx.enemies[i];
-        if (e.dead) continue;
+        if (e.dead || e.invulnTimer > 0) continue; // 传送后短暂无敌：不可被索敌/吸引
         /* 小怪过滤：nonBoss 模式下 BOSS（cfg.boss===true）免疫吸引 */
         if (this.smallOnly && e.cfg && e.cfg.boss) continue;
 
@@ -343,7 +343,7 @@
         let next = null;
         let bestD2 = chainRange * chainRange;
         for (const e of ctx.enemies) {
-          if (e.dead || hit.has(e)) continue;
+          if (e.dead || e.invulnTimer > 0 || hit.has(e)) continue; // 传送无敌中不参与弹跳
           const dx = e.x - current.x, dy = e.y - current.y;
           const d2 = dx * dx + dy * dy;
           if (d2 < bestD2) { bestD2 = d2; next = e; }

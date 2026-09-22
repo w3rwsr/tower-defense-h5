@@ -102,7 +102,7 @@ class LevelSelectScene extends Phaser.Scene {
       { name: '新手教程', desc: '学习基础操作', emoji: '🎓' },
       { name: '蜿蜒小径', desc: '多拐弯·BOSS', emoji: '🐉' },
       { name: '双线汇流', desc: '双出怪·双BOSS', emoji: '🔀' },
-      { name: '未知之地', desc: '敬请期待', emoji: '🏜' },
+      { name: '传送迷域', desc: '传送门·三BOSS', emoji: '🌀' },
       { name: '未知之地', desc: '敬请期待', emoji: '🌋' }
     ];
 
@@ -238,7 +238,7 @@ class LevelSelectScene extends Phaser.Scene {
   }
 
   onSelectLevel(level, unlocked, x, y) {
-    /* 未设计关卡（4/5）：敬请期待，不进入游戏 */
+    /* 未设计关卡（第 5 关）：敬请期待，不进入游戏 */
     if (!TDStorage.isDesigned(level)) {
       this.showToast('敬请期待', x, y);
       return;

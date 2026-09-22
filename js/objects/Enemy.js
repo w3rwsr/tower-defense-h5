@@ -38,6 +38,10 @@ class Enemy extends Phaser.GameObjects.Container {
     this.removed = false;  // 已从场景移除（数组过滤用）
     this.leaked = false;   // 到达终点
 
+    /* ---- 传送门（第 4 关） ---- */
+    this.invulnTimer = 0;    // 传送后无敌/不可选中剩余秒数（期间索敌与伤害均跳过）
+    this.usedPortals = null; // 已对本怪生效的传送规则 key 集合（每门每怪仅一次，防循环）
+
     /* ---- 减速状态 ---- */
     this.slowTimer = 0;
     this.slowFactor = 1;
@@ -80,7 +84,8 @@ class Enemy extends Phaser.GameObjects.Container {
   }
 
   takeDamage(value) {
-    if (this.dead) return;
+    /* 传送后 0.5s 无敌：伤害与索敌均跳过（含单体/溅射/电链） */
+    if (this.dead || this.invulnTimer > 0) return;
     /* 伤害减免：dmgReduction > 0 时受击实际伤害 = 原伤害 × (1 - 减免) */
     const dmg = value * (1 - (this.dmgReduction || 0));
     this.hp -= dmg;
@@ -90,6 +95,15 @@ class Enemy extends Phaser.GameObjects.Container {
 
   update(dt) {
     if (this.dead) return;
+
+    /* 传送后无敌计时：期间本体半透明提示，结束恢复不透明 */
+    if (this.invulnTimer > 0) {
+      this.invulnTimer -= dt;
+      if (this.invulnTimer <= 0) {
+        this.invulnTimer = 0;
+        this.body.setAlpha(1);
+      }
+    }
 
     /* 减速计时 */
     if (this.slowTimer > 0) {
@@ -120,9 +134,17 @@ class Enemy extends Phaser.GameObjects.Container {
        （真控场，避免视觉位移叠加正常推进）；烘焙后从新位置全速继续走 */
     const speedNow = this.baseSpeed * (this.slowTimer > 0 ? this.slowFactor : 1);
     const ctrlSlow = wasPulled ? 0.5 : 1;
+    const distBefore = this.pathDist;
     this.pathDist += speedNow * dt * ctrlSlow;
 
-    if (this.pathDist >= myLen) {
+    /* 传送门检测（第 4 关）：前进跨越入口里程即跳到出口（可能切换路线）；
+       传送优先于塔D（checkPortalTeleport 内清空 pullBack）。无传送门关卡
+       该方法立即返回，零开销、零影响 */
+    this.scene.checkPortalTeleport(this, distBefore);
+    /* 传送可能切换 routeId，终点里程按当前路线重新取 */
+    const curLen = this.scene.routeLength(this.routeId);
+
+    if (this.pathDist >= curLen) {
       this.leaked = true;
       this.dead = true;
       this.scene.onEnemyLeak(this);
