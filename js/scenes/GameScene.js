@@ -372,39 +372,68 @@ class GameScene extends Phaser.Scene {
 
   /**
    * 构建道路轮廓多边形：取中心线 waypoints，向左右法向各偏移 halfWidth，
-   * 返回闭合多边形顶点数组（左边缘正向 + 右边缘逆向）。
-   * 拐角处用斜接（miter）：取入/出切线方向的平均值作为该点切线，
-   * 法向偏移后左右边缘自然交汇填满拐角——无需在路径点画圆点，
-   * 拐角处无缺口、无可见圆圈。多路线汇合处各路多边形重叠（同色无痕）。
+   * 返回闭合多边形顶点数组（边缘A正向 + 边缘B逆向）。
+   * 拐角处用圆弧（round join）采样：以路径点为圆心、halfWidth 为半径，
+   * 在入/出法线之间插入 arcSteps 个弧线点，实现圆润拐角。
+   * 道路宽度恒定（两弧对径距离=2×halfWidth），拐角不变粗变细。
+   * 多路线汇合处各路多边形重叠填充（同色无痕）。
    */
   buildRoadPolygon(waypoints, halfWidth) {
     if (waypoints.length < 2) return [];
-    const left = [], right = [];
+    const arcSteps = 8;       // 圆角弧线采样点数（越大越平滑）
+    const edgeA = [], edgeB = []; // 道路两侧边缘点
     for (let i = 0; i < waypoints.length; i++) {
       const p = waypoints[i];
-      let dx, dy;
       if (i === 0) {
-        dx = waypoints[1].x - p.x;
-        dy = waypoints[1].y - p.y;
+        /* 起点：平直边（法向偏移） */
+        const dx = waypoints[1].x - p.x, dy = waypoints[1].y - p.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len, ny = dx / len;
+        edgeA.push({ x: p.x + nx * halfWidth, y: p.y + ny * halfWidth });
+        edgeB.push({ x: p.x - nx * halfWidth, y: p.y - ny * halfWidth });
       } else if (i === waypoints.length - 1) {
-        dx = p.x - waypoints[i - 1].x;
-        dy = p.y - waypoints[i - 1].y;
+        /* 终点：平直边 */
+        const dx = p.x - waypoints[i - 1].x, dy = p.y - waypoints[i - 1].y;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len, ny = dx / len;
+        edgeA.push({ x: p.x + nx * halfWidth, y: p.y + ny * halfWidth });
+        edgeB.push({ x: p.x - nx * halfWidth, y: p.y - ny * halfWidth });
       } else {
-        /* miter：入/出切线单位向量之和 */
-        const inLen = Math.hypot(p.x - waypoints[i - 1].x, p.y - waypoints[i - 1].y);
-        const outLen = Math.hypot(waypoints[i + 1].x - p.x, waypoints[i + 1].y - p.y);
-        dx = (p.x - waypoints[i - 1].x) / (inLen || 1) + (waypoints[i + 1].x - p.x) / (outLen || 1);
-        dy = (p.y - waypoints[i - 1].y) / (inLen || 1) + (waypoints[i + 1].y - p.y) / (outLen || 1);
+        /* 拐角：圆弧过渡——以 p 为圆心、halfWidth 为半径，
+           在入法线→出法线之间插入弧线点，实现圆润拐角 */
+        const d1x = p.x - waypoints[i - 1].x, d1y = p.y - waypoints[i - 1].y;
+        const d2x = waypoints[i + 1].x - p.x, d2y = waypoints[i + 1].y - p.y;
+        const l1 = Math.hypot(d1x, d1y) || 1;
+        const l2 = Math.hypot(d2x, d2y) || 1;
+        /* 入/出方向单位向量 */
+        const t1x = d1x / l1, t1y = d1y / l1;
+        const t2x = d2x / l2, t2y = d2y / l2;
+        /* 入/出法线（左侧 = 旋转 90°） */
+        const n1x = -t1y, n1y = t1x;
+        const n2x = -t2y, n2y = t2x;
+        /* 边缘A：从 n1 到 n2 的最短弧 */
+        const a1 = Math.atan2(n1y, n1x);
+        const a2 = Math.atan2(n2y, n2x);
+        let delta = a2 - a1;
+        if (delta > Math.PI) delta -= 2 * Math.PI;
+        if (delta < -Math.PI) delta += 2 * Math.PI;
+        for (let s = 0; s <= arcSteps; s++) {
+          const a = a1 + delta * (s / arcSteps);
+          edgeA.push({ x: p.x + Math.cos(a) * halfWidth, y: p.y + Math.sin(a) * halfWidth });
+        }
+        /* 边缘B：从 -n1 到 -n2 的最短弧（对径，在道路另一侧） */
+        const ra1 = Math.atan2(-n1y, -n1x);
+        const ra2 = Math.atan2(-n2y, -n2x);
+        let rdelta = ra2 - ra1;
+        if (rdelta > Math.PI) rdelta -= 2 * Math.PI;
+        if (rdelta < -Math.PI) rdelta += 2 * Math.PI;
+        for (let s = 0; s <= arcSteps; s++) {
+          const a = ra1 + rdelta * (s / arcSteps);
+          edgeB.push({ x: p.x + Math.cos(a) * halfWidth, y: p.y + Math.sin(a) * halfWidth });
+        }
       }
-      const len = Math.hypot(dx, dy);
-      if (len > 0.001) { dx /= len; dy /= len; }
-      else { dx = 1; dy = 0; }
-      /* 法向量（左侧） */
-      const nx = -dy, ny = dx;
-      left.push({ x: p.x + nx * halfWidth, y: p.y + ny * halfWidth });
-      right.push({ x: p.x - nx * halfWidth, y: p.y - ny * halfWidth });
     }
-    return left.concat(right.reverse());
+    return edgeA.concat(edgeB.reverse());
   }
 
   drawPath() {
@@ -415,8 +444,9 @@ class GameScene extends Phaser.Scene {
     const fillColor = (pcfg.fillColor != null) ? pcfg.fillColor : 0xeac58f;
 
     /* 道路绘制：用填充多边形代替粗线+圆点，消除路径点处的可见圆圈。
-       每条路线构建左右边缘多边形（法向偏移 halfWidth），拐角处斜接（miter）
-       自然填满，汇合处两路多边形重叠填充（同色无痕），无圆圈、无缺口。
+       每条路线构建两侧边缘多边形（法向偏移 halfWidth），拐角处圆弧过渡
+       （round join），道路宽度恒定，拐角圆润平滑不变粗细。
+       汇合处两路多边形重叠填充（同色无痕），无圆圈、无缺口。
        先画全部描边多边形（更宽 w+10），再画全部路面多边形（更窄 w），
        描边在路面之下形成边缘，颜色自然过渡。 */
     for (const rg of this.routeGeoms) {
