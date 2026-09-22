@@ -508,8 +508,9 @@ window.TD_CONFIG = {
      *   route 3（汇合尾段）：仅 (480,340)→(480,580) 一段，起点即交汇点 =
      *                     传送门 B（出口），坐标与 route 0/1 尾段重合。
      * 出怪：常规 5 波 spawnRoutes=[0,1]，左右同配置同时出怪；
-     *       sideWaves 在第 2 波清场后额外插入 1 波，仅 route 2（右侧岔路）
-     *       出怪，左路/右主线均不出（JSON 驱动 groups/hpWaveIndex/clearBonus）。
+     *       branchSpawns 从第 2 波起每波在 route 2（右侧岔路）追加一批
+     *       小怪（第 1 波不加），与主波同场清场（JSON 驱动 list/startWave，
+     *       血量按当前波水平、速度与普通怪一致，左路/右主线均不追加）。
      * 传送门：仅 1 对 A→B（岔路末端 → 交汇点），单向；小怪传送后 0.5s
      *       无敌且不可被索敌；位置全部取自路径点索引，绝不会传到道路外。
      * 血量/BOSS：每波小怪血量复合 +60%（hpGrowth=1.6，无末波特例翻倍）；
@@ -517,10 +518,23 @@ window.TD_CONFIG = {
     "4": {
       "economy": { "startGold": 320, "startLives": 20 },
       "build": {
-        "cell": 76
-        /* 火力点由「沿路双排自动生成」覆盖：4 条路线全部线段两侧的法向点
-           已覆盖交叉/交汇/岔路/直线段（buildHotspots 自动去重避路），
-           无需额外 extraSpots */
+        "cell": 76,
+        /* 第 4 关专属额外火力点（buildHotspots 统一做界内/避路/去重硬校验）：
+           自动双排点在多路平行道之间（路间距 80~90）存在几何空白带，
+           这里补 13 个点——重点覆盖两处「躺着的 L」拐弯及其上方边缘区，
+           另补交汇点西南、钩弯两侧、传送门 A 周边与汇合尾段；
+           全部距路心 60~118（最短射程塔也打得到路面），绝不压路。 */
+        "extraSpots": [
+          { "x": 300, "y": 44 },  { "x": 356, "y": 52 },  // 左主线拐弯(230,80)上方
+          { "x": 640, "y": 44 },                            // 右主线拐弯(720,80)上方
+          { "x": 92, "y": 380 },  { "x": 100, "y": 444 },  // 右主线拐弯(150,340)左下方
+          { "x": 420, "y": 400 },                           // 交汇点(480,340)西南
+          { "x": 856, "y": 212 }, { "x": 912, "y": 248 },  // 岔路竖段右侧
+          { "x": 640, "y": 316 },                           // 钩弯(720,290)西侧
+          { "x": 632, "y": 388 },                           // 传送门 A 西北
+          { "x": 620, "y": 452 },                           // 汇合尾段东侧
+          { "x": 844, "y": 496 }, { "x": 900, "y": 476 }   // 钩弯/门户路右下方
+        ]
       },
       "path": {
         "borderColor": 0xc99a54,
@@ -585,25 +599,28 @@ window.TD_CONFIG = {
         "finalWaveSpecial": false,    // 不走末波特例翻倍，纯 1.6 复合成长
         "finalBossHpFactor": 50,      // 末波 BOSS 兜底 50 倍（per-group 同值显式驱动）
         "clearBonus": [50, 100, 150, 200, 250],
-        /* 右侧岔路【支线波】（JSON 驱动，sideWaves 机制仅本关启用，其他关零影响）：
-           afterWave=2 → 第 2 波清场后、第 3 波倒计时前插入；
+        /* 右侧岔路【每波追加批次】（JSON 驱动 branchSpawns，机制仅本关启用）：
+           startWave=2 → 第 1 波不加，从第 2 波起每波都额外来一批；
            routes=[2] → 仅右侧岔路出怪，左路不额外加怪；
-           hpWaveIndex=2 → 血量按第 3 波水平（比第 2 波 +60%，与全关成长一致）；
+           list 与主波 list 逐波对齐（null=该波不追加）；
+           速度与普通小怪完全一致（同 enemyX/enemyY，无任何加速）；
+           数量 JSON 配置，血量自动按【当前波】水平计算（hpWaveIndex
+           留空 → waveSmallHp 取当前 waveIndex，天然遵循每波 +60%）；
            怪物沿右路进入岔路 → 传送门 → 交汇点 → 汇合段终点。 */
-        "sideWaves": [
-          {
-            "id": "rightBranch",
-            "afterWave": 2,
-            "routes": [2],
-            "hpWaveIndex": 2,
-            "clearBonus": 80,
-            "banner": "⚠ 右侧岔路发现奇兵！",
-            "groups": [
-              { "type": "enemyX", "count": 9, "interval": 0.60, "delay": 0 },
-              { "type": "enemyY", "count": 2, "interval": 1.40, "delay": 4 }
-            ]
-          }
-        ],
+        "branchSpawns": {
+          "startWave": 2,
+          "routes": [2],
+          "list": [
+            null,                       // 第 1 波：不追加
+            [ { "type": "enemyX", "count": 6, "interval": 0.70, "delay": 1 } ],
+            [ { "type": "enemyX", "count": 8, "interval": 0.60, "delay": 0 },
+              { "type": "enemyY", "count": 2, "interval": 1.40, "delay": 5 } ],
+            [ { "type": "enemyX", "count": 9, "interval": 0.55, "delay": 0 },
+              { "type": "enemyY", "count": 3, "interval": 1.20, "delay": 5 } ],
+            [ { "type": "enemyY", "count": 3, "interval": 1.20, "delay": 0 },
+              { "type": "enemyX", "count": 10, "interval": 0.50, "delay": 3 } ]
+          ]
+        },
         /* 两路怪物配置完全相同、同时出怪（startWave 按 spawnRoutes 复制）；
            BOSS 波左右各出一只，交叉/交汇后在汇合段合流 */
         "list": [

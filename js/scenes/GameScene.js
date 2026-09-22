@@ -747,6 +747,20 @@ class GameScene extends Phaser.Scene {
     }
     if (this.waveIndex === 0 && wcfg.firstWaveRouteOnly) routeIds = routeIds.slice(0, 1);
     this.spawnList = this.expandWaveSpawns(groups, routeIds, null);
+    /* 第 4 关「右侧岔路追加批次」（JSON 驱动 waves.branchSpawns）：
+       从 startWave（2）起，每波主波出怪表上再追加一批仅走岔路 routes 的
+       小怪（第 1 波 list[0]=null 不追加）。与主波同场出怪、同场清场；
+       hpWaveIndex 留空 → 自动按当前波 waveSmallHp 计算，与主波同血量水平。
+       其他关卡无 branchSpawns，零影响。 */
+    const bs = wcfg.branchSpawns;
+    if (bs && bs.list && this.waveIndex + 1 >= (bs.startWave || 2)) {
+      const bGroups = bs.list[this.waveIndex];
+      if (bGroups && bGroups.length) {
+        this.spawnList = this.spawnList.concat(
+          this.expandWaveSpawns(bGroups, bs.routes || [2], null));
+        this.spawnList.sort((a, b) => a.t - b.t);
+      }
+    }
     this.spawnIdx = 0;
     this.spawnClock = 0;
     this.countdown = null;
