@@ -412,7 +412,7 @@ window.TD_CONFIG = {
      * （per-group bossHpFactor 驱动，覆盖 finalBossHpFactor 兜底）。 */
     "3": {
       "economy": { "startGold": 320, "startLives": 25 },
-      "killRewardAdjust": 5,   // 第 3 关小怪击杀金币 +5（叠加在 killRewardBonus 之上；正向=奖励，不影响 BOSS/其他关）
+      "killRewardAdjust": 0,   // 第 3 关小怪击杀金币调整值（0=标准，与第1-2关一致；reward=基础+killRewardBonus+此值）
       "build": {
         "cell": 76,
         /* 第 3 关专属额外火力点：覆盖道路间的空地，不压路、不阻碍行进，
