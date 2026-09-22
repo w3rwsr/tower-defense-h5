@@ -370,6 +370,43 @@ class GameScene extends Phaser.Scene {
     for (const p of pts) g.fillCircle(p.x, p.y, width / 2);
   }
 
+  /**
+   * 构建道路轮廓多边形：取中心线 waypoints，向左右法向各偏移 halfWidth，
+   * 返回闭合多边形顶点数组（左边缘正向 + 右边缘逆向）。
+   * 拐角处用斜接（miter）：取入/出切线方向的平均值作为该点切线，
+   * 法向偏移后左右边缘自然交汇填满拐角——无需在路径点画圆点，
+   * 拐角处无缺口、无可见圆圈。多路线汇合处各路多边形重叠（同色无痕）。
+   */
+  buildRoadPolygon(waypoints, halfWidth) {
+    if (waypoints.length < 2) return [];
+    const left = [], right = [];
+    for (let i = 0; i < waypoints.length; i++) {
+      const p = waypoints[i];
+      let dx, dy;
+      if (i === 0) {
+        dx = waypoints[1].x - p.x;
+        dy = waypoints[1].y - p.y;
+      } else if (i === waypoints.length - 1) {
+        dx = p.x - waypoints[i - 1].x;
+        dy = p.y - waypoints[i - 1].y;
+      } else {
+        /* miter：入/出切线单位向量之和 */
+        const inLen = Math.hypot(p.x - waypoints[i - 1].x, p.y - waypoints[i - 1].y);
+        const outLen = Math.hypot(waypoints[i + 1].x - p.x, waypoints[i + 1].y - p.y);
+        dx = (p.x - waypoints[i - 1].x) / (inLen || 1) + (waypoints[i + 1].x - p.x) / (outLen || 1);
+        dy = (p.y - waypoints[i - 1].y) / (inLen || 1) + (waypoints[i + 1].y - p.y) / (outLen || 1);
+      }
+      const len = Math.hypot(dx, dy);
+      if (len > 0.001) { dx /= len; dy /= len; }
+      else { dx = 1; dy = 0; }
+      /* 法向量（左侧） */
+      const nx = -dy, ny = dx;
+      left.push({ x: p.x + nx * halfWidth, y: p.y + ny * halfWidth });
+      right.push({ x: p.x - nx * halfWidth, y: p.y - ny * halfWidth });
+    }
+    return left.concat(right.reverse());
+  }
+
   drawPath() {
     const g = this.add.graphics().setDepth(1);
     const pcfg = this.levelCfg.path || {};
@@ -377,54 +414,20 @@ class GameScene extends Phaser.Scene {
     const borderColor = (pcfg.borderColor != null) ? pcfg.borderColor : 0xc99a54;
     const fillColor = (pcfg.fillColor != null) ? pcfg.fillColor : 0xeac58f;
 
-    /* 跨路线段去重：相同端点的段只画一次，消除共享段（如汇合后到终点）
-       的双绘重叠。多路线在汇合点交叉时不再产生多余线条。 */
-    const drawnKeys = new Set();
-    const segKey = (a, b) => {
-      const ka = a.x + ',' + a.y, kb = b.x + ',' + b.y;
-      return ka < kb ? ka + '|' + kb : kb + '|' + ka;
-    };
-    const allSegs = [];
+    /* 道路绘制：用填充多边形代替粗线+圆点，消除路径点处的可见圆圈。
+       每条路线构建左右边缘多边形（法向偏移 halfWidth），拐角处斜接（miter）
+       自然填满，汇合处两路多边形重叠填充（同色无痕），无圆圈、无缺口。
+       先画全部描边多边形（更宽 w+10），再画全部路面多边形（更窄 w），
+       描边在路面之下形成边缘，颜色自然过渡。 */
     for (const rg of this.routeGeoms) {
-      const wp = rg.waypoints;
-      for (let i = 0; i < wp.length - 1; i++) {
-        const key = segKey(wp[i], wp[i + 1]);
-        if (drawnKeys.has(key)) continue;
-        drawnKeys.add(key);
-        allSegs.push({ a: wp[i], b: wp[i + 1] });
-      }
-    }
-
-    /* 收集所有路径点（用于端点圆角平滑）；汇合点自然包含在内 */
-    const points = [];
-    const seenPts = new Set();
-    for (const rg of this.routeGeoms) {
-      for (const p of rg.waypoints) {
-        const k = p.x + ',' + p.y;
-        if (!seenPts.has(k)) { seenPts.add(k); points.push(p); }
-      }
-    }
-
-    /* 1) 先画所有描边（粗线），再画所有路面（细线）：保证路面总在描边之上，
-          汇合处不会出现描边色"吃掉"另一条路路面的毛刺 */
-    for (const s of allSegs) {
-      g.lineStyle(w + 10, borderColor, 1);
-      g.lineBetween(s.a.x, s.a.y, s.b.x, s.b.y);
-    }
-    for (const s of allSegs) {
-      g.lineStyle(w, fillColor, 1);
-      g.lineBetween(s.a.x, s.a.y, s.b.x, s.b.y);
-    }
-
-    /* 2) 路径点圆角：描边圆 + 路面圆，让拐角/汇合处圆润平滑无毛刺。
-          统一处理所有点（含汇合点），视觉一致，连接处像一条完整道路 */
-    for (const p of points) {
+      const pts = this.buildRoadPolygon(rg.waypoints, (w + 10) / 2);
       g.fillStyle(borderColor, 1);
-      g.fillCircle(p.x, p.y, (w + 10) / 2);
+      g.fillPoints(pts, true);
     }
-    for (const p of points) {
+    for (const rg of this.routeGeoms) {
+      const pts = this.buildRoadPolygon(rg.waypoints, w / 2);
       g.fillStyle(fillColor, 1);
-      g.fillCircle(p.x, p.y, w / 2);
+      g.fillPoints(pts, true);
     }
 
     /* 起点（绿色传送门）：每条路线各画一个（多出怪点） */
