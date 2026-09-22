@@ -476,9 +476,18 @@ window.TD_CONFIG = {
             { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 12, "bossHpFactor": 16 } ],
           [ { "type": "enemyY", "count": 6,  "interval": 1.20, "delay": 0 },
             { "type": "enemyX", "count": 20, "interval": 0.40, "delay": 3 },
+            { "type": "enemyX", "count": 12, "interval": 0.45, "delay": 8 },
             { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 14, "bossHpFactor": 40 } ]
         ]
       }
+    },
+
+    /* ---------- 第 5 关：小怪血量额外 +50%（JSON 驱动） ----------
+     * 第 5 关回退到顶层 path/waves/economy（GameScene 合并），仅叠加
+     * enemyHpMul=1.5：小怪（非 BOSS）血量在现有成长基础上再 ×1.5。
+     * BOSS 不受此影响（spawnEnemy 仅对非 BOSS 乘此系数）。 */
+    "5": {
+      "enemyHpMul": 1.5
     }
   },
 

@@ -171,14 +171,26 @@
       this.smallOnly = this.eff.targetFilter === 'nonBoss';
     }
 
-    /** 按沿路里程找当前路径段（取敌人所属路线的 segments，多路线关卡每敌独立） */
-  segmentAt(scene, dist, routeId) {
+    /** 塔在敌人所属路线【整条路径】上的沿路投影（最近点里程）。
+     *  旧版只投影到敌人当前段：拐角处小怪切段后，塔在另一段的投影被
+     *  钳到段端=拐角点，吸附目标恒为拐角而非塔的真实路径投影，小怪只被
+     *  拉到拐角就停。全段扫描取最近 → 拐角小怪也能被拉过拐角到塔附近。 */
+  towerFootDist(scene, routeId) {
     const rg = scene.routeGeoms[routeId || 0] || scene.routeGeoms[0];
     const segs = rg.segments;
+    let bestD2 = Infinity, bestFoot = 0;
     for (let i = 0; i < segs.length; i++) {
-      if (dist <= segs[i].start + segs[i].len) return segs[i];
+      const s = segs[i];
+      const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+      const len2 = dx * dx + dy * dy || 1;
+      let f = ((this.tower.x - s.x1) * dx + (this.tower.y - s.y1) * dy) / len2;
+      f = f < 0 ? 0 : (f > 1 ? 1 : f);
+      const fx = s.x1 + dx * f, fy = s.y1 + dy * f;
+      const ddx = this.tower.x - fx, ddy = this.tower.y - fy;
+      const d2 = ddx * ddx + ddy * ddy;
+      if (d2 < bestD2) { bestD2 = d2; bestFoot = s.start + f * s.len; }
     }
-    return segs[segs.length - 1];
+    return bestFoot;
   }
 
     update(dt, ctx) {
@@ -228,12 +240,9 @@
         const d2 = dx * dx + dy * dy;
         if (d2 > r2) continue; // 射程外：不标记，Enemy 首帧烘焙位移后继续前进
 
-        /* 塔在敌人当前路段上的投影（钳在路段内），换算为沿路里程 */
-        const seg = this.segmentAt(scene, e.pathDist, e.routeId);
-        const inv = 1 / seg.len;
-        let f = ((t.x - seg.x1) * (seg.x2 - seg.x1) + (t.y - seg.y1) * (seg.y2 - seg.y1)) * inv * inv;
-        f = f < 0 ? 0 : (f > 1 ? 1 : f);
-        const footDist = seg.start + f * seg.len;
+        /* 塔在敌人所属路线整条路径上的投影（全段扫描取最近点里程），
+           拐角处也不钳到段端：小怪能被拉过拐角到塔附近 */
+        const footDist = this.towerFootDist(scene, e.routeId);
 
         /* 沿路双向吸引（带符号，永无横向分量）：
            back>0 已越过投影点→pullBack 正向塔回拉；
