@@ -412,10 +412,13 @@ class GameScene extends Phaser.Scene {
       for (let i = 0; i < wp.length; i++) g.fillCircle(wp[i].x, wp[i].y, w / 2);
     }
 
-    /* 起点（绿色传送门）：每条路线各画一个（多出怪点） */
-    for (const rg of this.routeGeoms) {
-      const wp = rg.waypoints;
-      const st = wp[0];
+    /* 起点（绿色传送门）：每条【出怪】路线各画一个（多出怪点）；
+       waves.spawnRoutes 之外的路线（第 4 关传送后汇合段 route 2/3）
+       不画出怪点，避免与传送门出口视觉冲突。缺省 = 全部路线（1~3 关兼容） */
+    const spawnRoutes = (this.levelCfg.waves && this.levelCfg.waves.spawnRoutes) || null;
+    for (let ri = 0; ri < this.routeGeoms.length; ri++) {
+      if (spawnRoutes && spawnRoutes.indexOf(ri) === -1) continue;
+      const st = this.routeGeoms[ri].waypoints[0];
       g.lineStyle(5, 0x3f9e34, 1); g.fillStyle(0x8be86b, 0.9);
       g.fillCircle(st.x, st.y, 26); g.strokeCircle(st.x, st.y, 26);
       g.fillStyle(0xffffff, 0.5); g.fillCircle(st.x - 4, st.y - 5, 7);
@@ -461,10 +464,10 @@ class GameScene extends Phaser.Scene {
     };
 
     const drawn = {};
-    for (const pair of pc.pairs) {
+    pc.pairs.forEach((pair, pi) => {
       const a = resolve(pair.a);
       const b = resolve(pair.b);
-      if (!a || !b) continue;
+      if (!a || !b) return;
       const pid = pair.id || 'p';
       const affectBoss = pair.affectBoss !== false;
       this.portals.push({
@@ -479,11 +482,14 @@ class GameScene extends Phaser.Scene {
           exitRoute: a.route, exitDist: a.dist, affectBoss: affectBoss
         });
       }
-      /* 视觉端点去重（双向时 A/B 各只画一次） */
+      /* 视觉端点去重（双向时 A/B 各只画一次）；
+         标签按对编号递增：第 1 对 A/B，第 2 对 C/D，第 3 对 E/F… */
+      const labelA = String.fromCharCode(65 + pi * 2);
+      const labelB = String.fromCharCode(66 + pi * 2);
       const ka = a.route + ':' + a.waypoint, kb = b.route + ':' + b.waypoint;
-      if (!drawn[ka]) { drawn[ka] = 1; this.portalEndpoints.push({ x: a.x, y: a.y, role: 'a' }); }
-      if (!drawn[kb]) { drawn[kb] = 1; this.portalEndpoints.push({ x: b.x, y: b.y, role: 'b' }); }
-    }
+      if (!drawn[ka]) { drawn[ka] = 1; this.portalEndpoints.push({ x: a.x, y: a.y, role: 'a', label: labelA }); }
+      if (!drawn[kb]) { drawn[kb] = 1; this.portalEndpoints.push({ x: b.x, y: b.y, role: 'b', label: labelB }); }
+    });
   }
 
   /** 传送门卡通外观：呼吸光晕 + 双环反向旋转 + 脉冲核心 + 环绕粒子 + A/B 标签 */
@@ -548,7 +554,7 @@ class GameScene extends Phaser.Scene {
       this.tweens.add({ targets: spark2, angle: -360, duration: 1100, repeat: -1, ease: 'Linear' });
 
       /* A/B 标签（轻微上下浮动） */
-      const label = this.add.text(0, -40, ep.role === 'a' ? 'A' : 'B', {
+      const label = this.add.text(0, -40, ep.label || (ep.role === 'a' ? 'A' : 'B'), {
         fontFamily: TD_FONT_STACK, fontSize: '18px', fontStyle: 'bold', color: '#ffffff'
       }).setOrigin(0.5).setStroke('#3a2350', 4);
       this.tweens.add({ targets: label, y: -46, duration: 650, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
@@ -722,13 +728,19 @@ class GameScene extends Phaser.Scene {
     const wcfg = this.levelCfg.waves;
     const groups = wcfg.list[this.waveIndex];
     const routeCount = this.routeGeoms.length;
-    /* 第 1 波仅上路（route 0）出怪（JSON 驱动开关 firstWaveRouteOnly）；
-       第 2 波起恢复全部路线同时出怪。单路线关卡 routeCount=1，无影响。 */
-    const firstOnly = (this.waveIndex === 0 && wcfg.firstWaveRouteOnly);
-    const routesToSpawn = firstOnly ? 1 : routeCount;
+    /* 出怪路线：JSON 可配 waves.spawnRoutes（如第 4 关双出怪路线 [0,1]，
+       route 2/3 为传送后汇合段不出怪）；缺省 = 全部路线（第 1~3 关兼容）。
+       第 1 波仅首条出怪路线出怪（JSON 驱动 firstWaveRouteOnly，第 3 关用），
+       其余波次全部出怪路线同时出怪。单路线关卡 routeCount=1，无影响。 */
+    let routeIds = (wcfg.spawnRoutes && wcfg.spawnRoutes.length)
+      ? wcfg.spawnRoutes.slice() : [];
+    if (routeIds.length === 0) {
+      for (let r = 0; r < routeCount; r++) routeIds.push(r);
+    }
+    if (this.waveIndex === 0 && wcfg.firstWaveRouteOnly) routeIds = routeIds.slice(0, 1);
     this.spawnList = [];
     groups.forEach((grp) => {
-      for (let r = 0; r < routesToSpawn; r++) {
+      for (const r of routeIds) {
         for (let i = 0; i < grp.count; i++) {
           this.spawnList.push({
             t: grp.delay + i * grp.interval,
@@ -789,7 +801,8 @@ class GameScene extends Phaser.Scene {
 
   /* 敌人出生：按波数成长缩放血量（规则见 waveSmallHp）；
      BOSS 血量 = 同波小怪(enemyX)血量 × bossFactor，bossFactor 优先级：
-     group.bossHpFactor（per-group，第 3 关第 3/4 波 16×、第 5 波 40×）
+     group.bossHpFactor（per-group，第 3 关第 3/4 波 16×/第 5 波 40×，
+     第 4 关第 3/4 波 16×/第 5 波 50×）
      > wcfg.finalBossHpFactor（末波兜底） > boss.hpMultiplier（全局兜底）；
      漏血 = enemyX.leakDamage × boss.leakMultiplier（普通怪的 3 倍）。
      entry.route 指定敌人所属路线（多路线关卡），缺省 0。 */
@@ -812,10 +825,15 @@ class GameScene extends Phaser.Scene {
       /* 第 5 关等关卡可配 enemyHpMul：小怪（非 BOSS）血量在波次成长基础上再乘此系数 */
       const hpMul = this.levelCfg.enemyHpMul || 1;
       const fwcfg = this.levelCfg.waves;
+      /* 关卡可配 waveHpMul 数组：按波次下标（0 起）给小怪血量再乘系数
+         （第 3 关 [1,2,2,2,1] = 第 2/3/4 波小怪血量翻倍，第 1/5 波不变）；
+         仅非 BOSS 生效，BOSS 血量公式不变（不受 waveHpMul 影响） */
+      const wHpMul = (fwcfg.waveHpMul && fwcfg.waveHpMul[this.waveIndex] != null)
+        ? fwcfg.waveHpMul[this.waveIndex] : 1;
       /* 末波小怪额外血量倍率（如第 3 关 finalWaveHpMul=2：翻倍），
          仅末波非 BOSS 生效，不影响 BOSS/其他波次/其他关卡 */
       const fwHpMul = (this.waveIndex === fwcfg.list.length - 1 && fwcfg.finalWaveHpMul) ? fwcfg.finalWaveHpMul : 1;
-      e.maxHp = Math.round(this.waveSmallHp(e.cfg.hp) * hpMul * fwHpMul);
+      e.maxHp = Math.round(this.waveSmallHp(e.cfg.hp) * hpMul * wHpMul * fwHpMul);
       e.hp = e.maxHp;
       e.drawHpBar(1); // 血量上限变化后重绘满血条宽度
       /* 末波小怪伤害减免（如第 3 关 finalWaveDmgReduction=0.10：受击 ×90%），

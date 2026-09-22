@@ -466,6 +466,7 @@ window.TD_CONFIG = {
       "waves": {
         "intermission": 15,
         "hpGrowth": 1.5,
+        "waveHpMul": [1, 2, 2, 2, 1],  // 按波次(0起)小怪血量额外乘数：第 2/3/4 波 ×2（翻倍），第 1/5 波不变；仅非 BOSS，BOSS 血量公式不变
         "finalWaveSpecial": false,
         "finalWaveHpMul": 2,           // 第 3 关末波小怪血量额外 ×2（翻倍），仅末波非 BOSS
         "finalWaveDmgReduction": 0.10, // 第 3 关末波小怪 10% 伤害减免（受击伤害 ×90%）
@@ -491,41 +492,58 @@ window.TD_CONFIG = {
       }
     },
 
-    /* ---------- 第 4 关：传送迷域（传送门机制） ----------
-     * 单路线蛇形路径，路上成对设置传送门 A（入口）/B（出口）：
-     * 小怪沿路前进经过 A 时瞬间从 B 出现，继续沿原路径前进；
-     * B 位于 A 的前段，敌人会重走 B→A 一段（每个传送门对每只怪
-     * 仅生效一次，usedPortals 防循环），全路径都会被踏及、无火力废区。
-     * 传送门位置用「路线号 + 路径点索引」配置，几何上恒在道路中心线上。
+    /* ---------- 第 4 关：传送迷域（双路线 + 传送门 + 汇合） ----------
+     * 共 4 条路线几何：
+     *   route 0（左）：左侧出发 → 右行 → 下折，末端 = 传送门 A（入口）
+     *   route 1（右）：右侧出发 → 左行 → 下折，末端 = 传送门 C（入口）
+     *   route 2（汇合段左支）：传送门 B（出口）→ 右行 → 汇合点 (480,340)
+     *   route 3（汇合段右支）：传送门 D（出口）→ 左行 → 汇合点 (480,340)
+     * route 2/3 共享汇合点之后的下行段直至底部终点（同坐标重叠绘制，
+     * 粗线 + 拐角同色圆点保证汇合处平滑无断裂、宽度统一）。
+     * 出怪仅 route 0/1（waves.spawnRoutes），两路怪物配置相同、同时出怪；
+     * route 2/3 只承接传送后的敌人，一起沿汇合路径走向底部终点。
+     * 传送门两对：A→B（左）、C→D（右），单向，位置恒在道路中心线上。
      * 小怪血量每波复合 +60%（hpGrowth=1.6，不走末波特例翻倍）；
-     * BOSS：第 3、4 波 = 当波小怪 ×16，第 5 波 = ×50（per-group 驱动）。 */
+     * BOSS：第 3、4 波 = 当波小怪 ×16，第 5 波 = ×50（per-group 驱动，
+     * 双路同时出怪 → 每个 BOSS 波左右各一只，传送后在汇合段合流）。 */
     "4": {
       "economy": { "startGold": 320, "startLives": 20 },
       "build": {
-        "cell": 76,
-        /* 额外火力点：自动双排点已覆盖蛇形路两侧，这里只补自动点的空白口袋，
-           全部经距路≥56/距其他点≥56 校验（buildHotspots 二次过滤） */
-        "extraSpots": [
-          { "x": 120, "y": 330 },  // 左侧口袋，覆盖 (240,350) 横路与 (240,220→350) 竖路
-          { "x": 870, "y": 250 },  // 右上口袋，覆盖 y=220/y=350 两条横路末端
-          { "x": 70,  "y": 460 }   // 底部横路左端入口附近
-        ]
+        "cell": 76
+        /* 火力点由「沿路双排自动生成」覆盖：地图紧凑，4 条路线全部线段
+           两侧的法向点已覆盖拐弯/汇合/直线段（buildHotspots 自动去重），
+           无需额外 extraSpots */
       },
       "path": {
-        "waypoints": [
-          { "x": -40, "y": 100 },
-          { "x": 760, "y": 100 },
-          { "x": 760, "y": 220 },
-          { "x": 240, "y": 220 },
-          { "x": 240, "y": 350 },   // [4] 传送门 B（出口）
-          { "x": 820, "y": 350 },
-          { "x": 820, "y": 470 },   // [6] 传送门 A（入口）
-          { "x": 140, "y": 470 },
-          { "x": 140, "y": 580 }
-        ],
         "borderColor": 0xc99a54,
         "fillColor": 0xeac58f
       },
+      "paths": [
+        /* route 0：左路线（左侧出发，向右、向下折返，末端传送门 A） */
+        [
+          { "x": -40, "y": 90 },
+          { "x": 400, "y": 90 },
+          { "x": 400, "y": 250 }
+        ],
+        /* route 1：右路线（右侧出发，向左、向下折返，末端传送门 C） */
+        [
+          { "x": 1000, "y": 90 },
+          { "x": 560, "y": 90 },
+          { "x": 560, "y": 250 }
+        ],
+        /* route 2：汇合段左支（传送门 B 出口 → 汇合点 → 底部终点） */
+        [
+          { "x": 400, "y": 340 },
+          { "x": 480, "y": 340 },
+          { "x": 480, "y": 580 }
+        ],
+        /* route 3：汇合段右支（传送门 D 出口 → 汇合点 → 底部终点） */
+        [
+          { "x": 560, "y": 340 },
+          { "x": 480, "y": 340 },
+          { "x": 480, "y": 580 }
+        ]
+      ],
       /* 传送门配置（全部 JSON 驱动）：
          pairs[].a/b = { route 路线号, waypoint 路径点索引 }（恒在道路上）；
          direction: "oneway" 仅 A→B；"bidirectional" 为 A↔B（两个方向各生效一次）；
@@ -535,9 +553,16 @@ window.TD_CONFIG = {
         "invulnTime": 0.5,
         "pairs": [
           {
-            "id": "main",
-            "a": { "route": 0, "waypoint": 6 },
-            "b": { "route": 0, "waypoint": 4 },
+            "id": "left",
+            "a": { "route": 0, "waypoint": 2 },
+            "b": { "route": 2, "waypoint": 0 },
+            "direction": "oneway",
+            "affectBoss": true
+          },
+          {
+            "id": "right",
+            "a": { "route": 1, "waypoint": 2 },
+            "b": { "route": 3, "waypoint": 0 },
             "direction": "oneway",
             "affectBoss": true
           }
@@ -545,23 +570,26 @@ window.TD_CONFIG = {
       },
       "waves": {
         "intermission": 15,
+        "spawnRoutes": [0, 1],        // 仅 route 0/1 出怪（route 2/3 为传送后汇合段，不出怪）
         "hpGrowth": 1.6,              // 每波小怪血量 +60%（复合）
         "finalWaveSpecial": false,    // 不走末波特例翻倍，纯 1.6 复合成长
         "finalBossHpFactor": 50,      // 末波 BOSS 兜底 50 倍（per-group 同值显式驱动）
         "clearBonus": [50, 100, 150, 200, 250],
+        /* 两路怪物配置完全相同、同时出怪（startWave 按 spawnRoutes 复制）；
+           BOSS 波左右各出一只，传送后在汇合段合流 */
         "list": [
-          [ { "type": "enemyX", "count": 8,  "interval": 0.80, "delay": 0 } ],
-          [ { "type": "enemyX", "count": 12, "interval": 0.60, "delay": 0 },
-            { "type": "enemyY", "count": 3,  "interval": 1.50, "delay": 5 } ],
-          [ { "type": "enemyX", "count": 14, "interval": 0.50, "delay": 0 },
-            { "type": "enemyY", "count": 4,  "interval": 1.30, "delay": 5 },
+          [ { "type": "enemyX", "count": 5,  "interval": 0.80, "delay": 0 } ],
+          [ { "type": "enemyX", "count": 8,  "interval": 0.60, "delay": 0 },
+            { "type": "enemyY", "count": 2,  "interval": 1.50, "delay": 5 } ],
+          [ { "type": "enemyX", "count": 9,  "interval": 0.50, "delay": 0 },
+            { "type": "enemyY", "count": 3,  "interval": 1.30, "delay": 5 },
             { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 12, "bossHpFactor": 16 } ],
-          [ { "type": "enemyX", "count": 16, "interval": 0.45, "delay": 0 },
-            { "type": "enemyY", "count": 5,  "interval": 1.20, "delay": 5 },
+          [ { "type": "enemyX", "count": 10, "interval": 0.45, "delay": 0 },
+            { "type": "enemyY", "count": 3,  "interval": 1.20, "delay": 5 },
             { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 12, "bossHpFactor": 16 } ],
-          [ { "type": "enemyY", "count": 6,  "interval": 1.20, "delay": 0 },
-            { "type": "enemyX", "count": 20, "interval": 0.40, "delay": 3 },
-            { "type": "enemyX", "count": 12, "interval": 0.45, "delay": 9 },
+          [ { "type": "enemyY", "count": 4,  "interval": 1.20, "delay": 0 },
+            { "type": "enemyX", "count": 12, "interval": 0.40, "delay": 3 },
+            { "type": "enemyX", "count": 7,  "interval": 0.45, "delay": 9 },
             { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 14, "bossHpFactor": 50 } ]
         ]
       }
