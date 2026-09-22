@@ -198,6 +198,22 @@ class GameScene extends Phaser.Scene {
       const rx = Math.round(p.x), ry = Math.round(p.y);
       this.hotspots.push({ x: rx, y: ry, key: rx + '_' + ry, kind: 'road' });
     }
+
+    /* 关卡专属额外火力点（JSON 驱动 build.extraSpots，仅部分关卡如第 3 关）：
+       覆盖道路、不压路、与已有热区去重，保证布局整齐不杂乱 */
+    const extra = b.extraSpots || [];
+    for (const p of extra) {
+      if (p.x < b.edgeMargin || p.x > this.W - b.edgeMargin ||
+          p.y < b.edgeMargin || p.y > this.H - b.edgeMargin) continue;
+      if (this.distToPath(p.x, p.y) < b.minPathDistance) continue;
+      let dup = false;
+      for (const h of this.hotspots) {
+        if (Math.abs(h.x - p.x) < minSpacing && Math.abs(h.y - p.y) < minSpacing) { dup = true; break; }
+      }
+      if (dup) continue;
+      const rx = Math.round(p.x), ry = Math.round(p.y);
+      this.hotspots.push({ x: rx, y: ry, key: rx + '_' + ry, kind: 'road' });
+    }
   }
 
   /* ============================================================
@@ -360,11 +376,57 @@ class GameScene extends Phaser.Scene {
     const w = TD_CONFIG.world.pathWidth;
     const borderColor = (pcfg.borderColor != null) ? pcfg.borderColor : 0xc99a54;
     const fillColor = (pcfg.fillColor != null) ? pcfg.fillColor : 0xeac58f;
-    /* 逐条路线描边 + 路面（多路线共享段会重叠绘制，视觉无差异） */
+
+    /* 跨路线段去重：相同端点的段只画一次，消除共享段（如汇合后到终点）
+       的双绘重叠。多路线在汇合点交叉时不再产生多余线条。 */
+    const drawnKeys = new Set();
+    const segKey = (a, b) => {
+      const ka = a.x + ',' + a.y, kb = b.x + ',' + b.y;
+      return ka < kb ? ka + '|' + kb : kb + '|' + ka;
+    };
+    const allSegs = [];
     for (const rg of this.routeGeoms) {
-      this.fatStroke(g, rg.waypoints, w + 10, borderColor);
-      this.fatStroke(g, rg.waypoints, w, fillColor);
+      const wp = rg.waypoints;
+      for (let i = 0; i < wp.length - 1; i++) {
+        const key = segKey(wp[i], wp[i + 1]);
+        if (drawnKeys.has(key)) continue;
+        drawnKeys.add(key);
+        allSegs.push({ a: wp[i], b: wp[i + 1] });
+      }
     }
+
+    /* 收集所有路径点（用于端点圆角平滑）；汇合点自然包含在内 */
+    const points = [];
+    const seenPts = new Set();
+    for (const rg of this.routeGeoms) {
+      for (const p of rg.waypoints) {
+        const k = p.x + ',' + p.y;
+        if (!seenPts.has(k)) { seenPts.add(k); points.push(p); }
+      }
+    }
+
+    /* 1) 先画所有描边（粗线），再画所有路面（细线）：保证路面总在描边之上，
+          汇合处不会出现描边色"吃掉"另一条路路面的毛刺 */
+    for (const s of allSegs) {
+      g.lineStyle(w + 10, borderColor, 1);
+      g.lineBetween(s.a.x, s.a.y, s.b.x, s.b.y);
+    }
+    for (const s of allSegs) {
+      g.lineStyle(w, fillColor, 1);
+      g.lineBetween(s.a.x, s.a.y, s.b.x, s.b.y);
+    }
+
+    /* 2) 路径点圆角：描边圆 + 路面圆，让拐角/汇合处圆润平滑无毛刺。
+          统一处理所有点（含汇合点），视觉一致，连接处像一条完整道路 */
+    for (const p of points) {
+      g.fillStyle(borderColor, 1);
+      g.fillCircle(p.x, p.y, (w + 10) / 2);
+    }
+    for (const p of points) {
+      g.fillStyle(fillColor, 1);
+      g.fillCircle(p.x, p.y, w / 2);
+    }
+
     /* 起点（绿色传送门）：每条路线各画一个（多出怪点） */
     for (const rg of this.routeGeoms) {
       const wp = rg.waypoints;
@@ -429,7 +491,9 @@ class GameScene extends Phaser.Scene {
         fire: (tower, target) => this.fireProjectile(tower, target),
         /* 塔D 范围吸引脉冲：开窗瞬间由 PullBehavior 回调一次，targets 为本脉冲
            锁定的全部小怪，播放多目标攻击动画（纯视觉，不写数值/伤害） */
-        pullPulse: (tower, range, targets) => this.playPullPulse(tower, range, targets)
+        pullPulse: (tower, range, targets) => this.playPullPulse(tower, range, targets),
+        /* 塔E 电链弹跳：由 ChainBehavior 回调，绘制折线闪电连线 + 被击中怪高亮 */
+        spawnChainFx: (points, color, duration) => this.spawnChainFx(points, color, duration)
       };
       /* 塔先于敌更新：塔D（PullBehavior）先标记 pullFresh/写位移，敌再据其位移；
          普通 AttackBehavior 同样先于敌，1 帧索敌延迟不可见 */
@@ -471,13 +535,16 @@ class GameScene extends Phaser.Scene {
 
   startWave() {
     if (this.state !== 'ready') return;
-    const groups = this.levelCfg.waves.list[this.waveIndex];
+    const wcfg = this.levelCfg.waves;
+    const groups = wcfg.list[this.waveIndex];
     const routeCount = this.routeGeoms.length;
+    /* 第 1 波仅上路（route 0）出怪（JSON 驱动开关 firstWaveRouteOnly）；
+       第 2 波起恢复全部路线同时出怪。单路线关卡 routeCount=1，无影响。 */
+    const firstOnly = (this.waveIndex === 0 && wcfg.firstWaveRouteOnly);
+    const routesToSpawn = firstOnly ? 1 : routeCount;
     this.spawnList = [];
-    /* 多路线：每波 group 在【全部路线】同时复制一份出怪（数量/血量/间隔一致）。
-       单路线 routeCount=1，等价于原逻辑（route 字段缺省 0）。 */
     groups.forEach((grp) => {
-      for (let r = 0; r < routeCount; r++) {
+      for (let r = 0; r < routesToSpawn; r++) {
         for (let i = 0; i < grp.count; i++) {
           this.spawnList.push({
             t: grp.delay + i * grp.interval,
@@ -497,16 +564,24 @@ class GameScene extends Phaser.Scene {
   }
 
   onWaveCleared() {
-    const bonus = this.levelCfg.waves.clearBonus[this.waveIndex] || 0;
+    const wcfg = this.levelCfg.waves;
+    const bonus = wcfg.clearBonus[this.waveIndex] || 0;
     this.gold += bonus;
+    /* 第 1 波结束额外一次性奖励（JSON 驱动 firstWaveClearBonus，仅第 1 波触发） */
+    const firstBonus = (this.waveIndex === 0 && wcfg.firstWaveClearBonus) ? wcfg.firstWaveClearBonus : 0;
+    if (firstBonus) this.gold += firstBonus;
     this.waveIndex++;
-    if (this.waveIndex >= this.levelCfg.waves.list.length) {
+    if (this.waveIndex >= wcfg.list.length) {
       this.endGame(true);
       return;
     }
     this.state = 'ready';
-    this.countdown = this.levelCfg.waves.intermission;
-    this.banner('清场奖励 +' + bonus + ' 金币', 0xbef78a);
+    this.countdown = wcfg.intermission;
+    if (firstBonus) {
+      this.banner('清场 +' + bonus + '  首波通关 +' + firstBonus + ' 金币', 0xbef78a);
+    } else {
+      this.banner('清场奖励 +' + bonus + ' 金币', 0xbef78a);
+    }
   }
 
   /* 小怪当波血量（JSON 驱动，见 waves 配置）：
@@ -589,7 +664,9 @@ class GameScene extends Phaser.Scene {
       ? ('第 ' + this.levelId + ' 关通过！' +
          (this.levelId === 1
            ? ' 教程完成，🔓 新塔「塔D·范围吸引控场」已解锁，第 2 关起即可使用！'
-           : ''))
+           : this.levelId === 2
+             ? ' 🔓 新塔「塔E·电链弹跳」已解锁，第 3 关起即可使用！'
+             : ''))
       : ('坚持到了第 ' + (this.waveIndex + 1) + ' 波，再试一次吧！');
     ov.classList.remove('hidden');
   }
@@ -988,14 +1065,22 @@ class GameScene extends Phaser.Scene {
     if (!tower) return;
     const p = this.panel;
     p._title.setText(tower.cfg.name + '  Lv.' + tower.level + (tower.canUpgrade ? '' : '（满级）'));
-    const isPull = tower.cfg.effect && tower.cfg.effect.type === 'pull';
-    p._stats.setText(
-      isPull
-        ? '类型 范围吸引·控场\n射程 ' + tower.stats.range + '   伤害 ' + tower.stats.damage
-        : ('伤害 ' + tower.stats.damage +
-           '   射程 ' + tower.stats.range +
-           '\n攻速 ' + (1 / tower.stats.cooldown).toFixed(2) + ' 次/秒')
-    );
+    const effType = tower.cfg.effect && tower.cfg.effect.type;
+    if (effType === 'pull') {
+      p._stats.setText('类型 范围吸引·控场\n射程 ' + tower.stats.range + '   伤害 ' + tower.stats.damage);
+    } else if (effType === 'chain') {
+      p._stats.setText(
+        '伤害 ' + tower.stats.damage +
+        '   射程 ' + tower.stats.range +
+        '\n电链弹跳 ' + tower.stats.jumps + ' 次'
+      );
+    } else {
+      p._stats.setText(
+        '伤害 ' + tower.stats.damage +
+        '   射程 ' + tower.stats.range +
+        '\n攻速 ' + (1 / tower.stats.cooldown).toFixed(2) + ' 次/秒'
+      );
+    }
 
     const upCost = tower.getUpgradeCost();
     if (tower.canUpgrade) {
@@ -1117,6 +1202,83 @@ class GameScene extends Phaser.Scene {
     this.tweens.add({
       targets: g, scaleX: radius / 10, scaleY: radius / 10, alpha: 0,
       duration: 320, onComplete: () => g.destroy()
+    });
+  }
+
+  /* ============================================================
+   * 塔E 电链弹跳视觉：折线闪电连线 + 被击中怪短暂高亮。
+   * points = [{x,y}, ...] 从塔头到每个被击中怪的路径点；
+   * 用折线（每段中点加随机偏移）模拟锯齿闪电，持续 visualDuration 秒后淡出。
+   * ============================================================ */
+  spawnChainFx(points, color, duration) {
+    if (!points || points.length < 2) return;
+    const dur = Math.round((duration || 0.25) * 1000);
+    const g = this.add.graphics().setDepth(46);
+    /* 绘制锯齿折线：每对相邻点之间插入 2 个偏移中点模拟闪电分叉 */
+    const drawLightning = (alpha) => {
+      g.clear();
+      /* 外发光（粗、半透明） */
+      g.lineStyle(8, color, alpha * 0.30);
+      for (let i = 0; i < points.length - 1; i++) {
+        const a = points[i], b = points[i + 1];
+        const mx = (a.x + b.x) / 2 + (Math.random() - 0.5) * 18;
+        const my = (a.y + b.y) / 2 + (Math.random() - 0.5) * 18;
+        g.lineBetween(a.x, a.y, mx, my);
+        g.lineBetween(mx, my, b.x, b.y);
+      }
+      /* 内芯（细、亮、白色） */
+      g.lineStyle(3, 0xffffff, alpha);
+      for (let i = 0; i < points.length - 1; i++) {
+        const a = points[i], b = points[i + 1];
+        const mx = (a.x + b.x) / 2 + (Math.random() - 0.5) * 14;
+        const my = (a.y + b.y) / 2 + (Math.random() - 0.5) * 14;
+        g.lineBetween(a.x, a.y, mx, my);
+        g.lineBetween(mx, my, b.x, b.y);
+      }
+      /* 被击中怪位置画一个小爆点（除起点塔头外） */
+      g.fillStyle(color, alpha * 0.7);
+      for (let i = 1; i < points.length; i++) {
+        g.fillCircle(points[i].x, points[i].y, 6);
+      }
+    };
+
+    drawLightning(1);
+    /* 闪电持续闪烁后淡出（duration 内重绘 2 次制造闪烁感） */
+    this.time.delayedCall(Math.round(dur * 0.4), () => { try { drawLightning(0.85); } catch(_){} });
+    this.time.delayedCall(Math.round(dur * 0.7), () => { try { drawLightning(0.5); } catch(_){} });
+
+    /* 被击中怪短暂高亮（白色 tint + 轻微缩放），路径点从 index 1 起 = 被击中怪 */
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i];
+      /* 在敌人列表中找位置最接近的敌人做高亮 */
+      let best = null, bestD = 20;
+      for (const e of this.enemies) {
+        if (e.dead || !e.body) continue;
+        const d = Math.hypot(e.x - p.x, e.y - p.y);
+        if (d < bestD) { bestD = d; best = e; }
+      }
+      if (best) {
+        best.body.setTint(0xffff99);
+        this.tweens.add({
+          targets: best, scaleX: 1.12, scaleY: 1.12,
+          duration: 80, yoyo: true,
+          onComplete: () => { try { best.setScale(1); } catch(_){} }
+        });
+        this.time.delayedCall(dur, () => {
+          try {
+            if (best.dead) return;
+            if (best.slowTimer > 0) best.body.setTint(0xbbeeff);
+            else best.body.clearTint();
+          } catch(_){}
+        });
+      }
+    }
+
+    /* 淡出后销毁 */
+    this.tweens.add({
+      targets: g, alpha: 0,
+      duration: dur, delay: Math.round(dur * 0.5),
+      onComplete: () => g.destroy()
     });
   }
 

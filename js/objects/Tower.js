@@ -31,11 +31,15 @@ class Tower extends Phaser.GameObjects.Container {
     scene.add.existing(this);
 
     this.recalcStats();
-    // 攻击逻辑：按 effect.type 选择行为（pull → 范围吸引；否则 → 普通弹道攻击）
+    // 攻击逻辑：按 effect.type 选择行为
+    //   pull  → 范围吸引（塔D）
+    //   chain → 电链弹跳（塔E）
+    //   其他  → 普通弹道攻击（塔A/B/C）
     const eff = this.cfg.effect;
-    this.behavior = (eff && eff.type === 'pull')
-      ? new TDAttack.PullBehavior(this, this.cfg)
-      : new TDAttack.AttackBehavior(this, this.cfg);
+    let BehaviorClass = TDAttack.AttackBehavior;
+    if (eff && eff.type === 'pull') BehaviorClass = TDAttack.PullBehavior;
+    else if (eff && eff.type === 'chain') BehaviorClass = TDAttack.ChainBehavior;
+    this.behavior = new BehaviorClass(this, this.cfg);
     this.aimAngle = -Math.PI / 2;
     this.turret.rotation = this.aimAngle;
   }
@@ -44,16 +48,20 @@ class Tower extends Phaser.GameObjects.Container {
   recalcStats() {
     const base = this.cfg.stats;
     const up = this.cfg.upgrade;
-    let dmgMul = 1, rangeMul = 1, cdMul = 1;
+    let dmgMul = 1, rangeMul = 1, cdMul = 1, jumpsAdd = 0;
     for (let i = 1; i < this.level; i++) {
       dmgMul *= up.damage;
       rangeMul *= up.range;
       cdMul *= up.cooldown;
+      if (up.jumps) jumpsAdd += up.jumps; // 塔E：每升 1 级弹跳 +1
     }
+    const eff = this.cfg.effect || {};
+    const baseJumps = (eff.jumps != null) ? eff.jumps : 0;
     this.stats = {
       damage: Math.round(base.damage * dmgMul),
       range: Math.round(base.range * rangeMul),
-      cooldown: +(base.cooldown * cdMul).toFixed(3)
+      cooldown: +(base.cooldown * cdMul).toFixed(3),
+      jumps: baseJumps + jumpsAdd // 当前弹跳次数（塔E 专用，其他塔为 0）
     };
   }
 

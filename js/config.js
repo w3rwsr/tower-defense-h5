@@ -273,6 +273,42 @@ window.TD_CONFIG = {
         "range": 1.12,
         "cooldown": 1
       }
+    },
+
+    /* 塔E —— 电链弹跳·群伤：射出一道电链，在小怪之间弹跳，最多弹跳 jumps 次。
+       弹跳规则：只在小怪中"尚未被本次电链击中过"的目标间传递，不重复弹同一只；
+       每次弹跳优先选择距当前目标最近、且未被击中过的小怪（chainRange 内）。
+       每升 1 级弹跳次数 +1（upgrade.jumps=1）；每次弹跳伤害递减 10%（×jumpDecay）。
+       闪电视觉：折线闪电连线 + 被击中怪短暂高亮，持续 visualDuration 秒。
+       解锁条件：通关第 2 关后永久解锁，第 3 关及之后关卡可用。 */
+    "towerE": {
+      "name": "塔E",
+      "desc": "电链弹跳·群伤",
+      "cost": 200,
+      "color": 0xffe23b,
+      "darkColor": 0xd9a81c,
+      "unlock": { "unlockLevel": 3 },
+      "targeting": "furthest",
+      "stats": {
+        "damage": 28,
+        "range": 140,
+        "cooldown": 1.10
+      },
+      "effect": {
+        "type": "chain",
+        "jumps": 3,            // 基础弹跳次数（1 级时 3 跳）
+        "jumpDecay": 0.90,     // 每跳伤害衰减 10%（伤害 = 上一跳 × 0.90）
+        "chainRange": 130,     // 弹跳搜索范围：上一目标到此范围内的最近未被击中怪
+        "visualDuration": 0.25 // 闪电视觉持续秒数（0.2~0.3，避免画面杂乱）
+      },
+      "upgrade": {
+        "maxLevel": 3,
+        "costFactor": 0.80,
+        "damage": 1.55,
+        "range": 1.10,
+        "cooldown": 0.88,
+        "jumps": 1             // 每升 1 级弹跳次数 +1（1级3跳/2级4跳/3级5跳）
+      }
     }
   },
   "enemies": {
@@ -376,7 +412,18 @@ window.TD_CONFIG = {
      * （per-group bossHpFactor 驱动，覆盖 finalBossHpFactor 兜底）。 */
     "3": {
       "economy": { "startGold": 320, "startLives": 25 },
-      "build": { "cell": 76 },
+      "build": {
+        "cell": 76,
+        /* 第 3 关专属额外火力点：覆盖道路间的空地，不压路、不阻碍行进，
+           布局整齐（多在两路之间中带），方便玩家放塔E与其他塔 */
+        "extraSpots": [
+          { "x": 90, "y": 200 }, { "x": 90, "y": 340 },
+          { "x": 250, "y": 270 },
+          { "x": 590, "y": 270 },
+          { "x": 780, "y": 200 }, { "x": 780, "y": 340 },
+          { "x": 680, "y": 230 }, { "x": 680, "y": 310 }
+        ]
+      },
       "path": {
         "borderColor": 0xc99a54,
         "fillColor": 0xeac58f
@@ -415,6 +462,8 @@ window.TD_CONFIG = {
         "finalWaveSpecial": false,
         "finalBossHpFactor": 40,
         "clearBonus": [50, 100, 150, 200, 250],
+        "firstWaveRouteOnly": true,   // 第 1 波仅上路（route 0）出怪，下路不出
+        "firstWaveClearBonus": 200,    // 第 1 波结束额外一次性奖励 200 金币
         "list": [
           [ { "type": "enemyX", "count": 8,  "interval": 0.80, "delay": 0 } ],
           [ { "type": "enemyX", "count": 12, "interval": 0.60, "delay": 0 },

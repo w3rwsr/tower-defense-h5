@@ -259,6 +259,100 @@
     }
   }
 
+  /* ============================================================
+   * 电链弹跳行为（塔E）：射出一道电链，在小怪间弹跳。
+   * 规则（全部 JSON 驱动，见 config.towers.towerE.effect）：
+   *   - 索敌：射程内走得最远的敌人作为电链起点（targeting='furthest'）；
+   *   - 弹跳次数 = tower.stats.jumps（1 级 3 跳，每升 1 级 +1）；
+   *   - 每次弹跳只选【尚未被本次电链击中过】的目标，不重复弹同一只怪；
+   *   - 优先选距当前目标最近、且未被击中过的小怪（chainRange 范围内）；
+   *   - 每次弹跳伤害递减 10%（×jumpDecay=0.90）；
+   *   - 视觉：折线闪电连线 + 被击中怪短暂高亮，持续 visualDuration 秒。
+   * 障碍物转火：与 AttackBehavior 一致（reach = 射程 + 半径）。
+   * ============================================================ */
+  class ChainBehavior {
+    constructor(tower, cfg) {
+      this.tower = tower;
+      this.cfg = cfg;
+      this.eff = cfg.effect || {};
+      this.strategyName = cfg.targeting || 'furthest';
+      this.cooldown = 0; // 出生即可攻击
+    }
+
+    update(dt, ctx) {
+      if (this.cooldown > 0) this.cooldown -= dt;
+
+      /* 【障碍物转火】与 AttackBehavior 完全一致：锁定期间不索敌小怪 */
+      const ob = this.tower.obstacleTarget;
+      if (ob) {
+        if (ob.dead) {
+          this.tower.obstacleTarget = null;
+        } else {
+          this.tower.setTarget(ob);
+          const ddx = ob.x - this.tower.x, ddy = ob.y - this.tower.y;
+          const reach = this.tower.stats.range + (ob.radius || 0);
+          if (ddx * ddx + ddy * ddy <= reach * reach && this.cooldown <= 0) {
+            ctx.fire(this.tower, ob);
+            this.cooldown = this.tower.stats.cooldown;
+          }
+          return;
+        }
+      }
+
+      /* 索敌：选射程内走得最远的敌人作为电链起点 */
+      const strategy = Targeting[this.strategyName] || Targeting.furthest;
+      const target = strategy(this.tower, ctx.enemies);
+      this.tower.setTarget(target);
+
+      if (!target || this.cooldown > 0) return;
+
+      /* ---- 电链弹跳 ---- */
+      const jumps = this.tower.stats.jumps || 0;
+      const decay = this.eff.jumpDecay != null ? this.eff.jumpDecay : 0.90;
+      const chainRange = this.eff.chainRange || 130;
+      const visualDuration = this.eff.visualDuration || 0.25;
+      const baseDmg = this.tower.stats.damage;
+
+      /* 本次电链已击中的敌人集合（绝不重复弹同一只怪） */
+      const hit = new Set();
+      /* 电链路径点：起点 = 塔头，后续 = 每个被击中怪的位置 */
+      const chainPoints = [{ x: this.tower.x, y: this.tower.y - 4 }];
+      let current = target;
+      let dmg = baseDmg;
+
+      /* 循环 jumps 次（弹跳次数）：i=0 为初始击中，i=jumps 为最后一跳 */
+      for (let i = 0; i <= jumps; i++) {
+        hit.add(current);
+        /* 造成伤害（鸭子类型：小怪 / 障碍物通用 takeDamage） */
+        if (!current.dead) current.takeDamage(Math.round(dmg));
+        chainPoints.push({ x: current.x, y: current.y });
+
+        /* 最后一次后不再搜索下一目标 */
+        if (i === jumps) break;
+
+        /* 找最近的未被击中过的敌人，在 chainRange 内 */
+        let next = null;
+        let bestD2 = chainRange * chainRange;
+        for (const e of ctx.enemies) {
+          if (e.dead || hit.has(e)) continue;
+          const dx = e.x - current.x, dy = e.y - current.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestD2) { bestD2 = d2; next = e; }
+        }
+        if (!next) break; // 没有可弹跳的目标，电链提前结束
+        current = next;
+        dmg *= decay; // 每跳伤害递减 10%
+      }
+
+      /* 闪电视觉：折线闪电连线 + 被击中怪短暂高亮 */
+      if (typeof ctx.spawnChainFx === 'function') {
+        ctx.spawnChainFx(chainPoints, this.tower.cfg.color, visualDuration);
+      }
+
+      this.cooldown = this.tower.stats.cooldown;
+    }
+  }
+
   /* 对外接口 */
-  window.TDAttack = { AttackBehavior, PullBehavior, Targeting };
+  window.TDAttack = { AttackBehavior, PullBehavior, ChainBehavior, Targeting };
 })();

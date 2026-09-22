@@ -119,7 +119,7 @@ class LevelSelectScene extends Phaser.Scene {
     }
 
     /* ---- 底部提示 ---- */
-    this.add.text(W / 2, vl.hintY, '通关第 1 关解锁第 2 关与新塔「塔D·范围吸引」，更多关卡持续到来', {
+    this.add.text(W / 2, vl.hintY, '通关第 1 关解锁塔D，通关第 2 关解锁塔E·电链弹跳', {
       fontFamily: TD_FONT_STACK,
       fontSize: this.ls(13) + 'px', color: '#1e4620'
     }).setOrigin(0.5).setStroke('#e6f7d8', 3);
@@ -238,6 +238,11 @@ class LevelSelectScene extends Phaser.Scene {
   }
 
   onSelectLevel(level, unlocked, x, y) {
+    /* 未设计关卡（4/5）：敬请期待，不进入游戏 */
+    if (!TDStorage.isDesigned(level)) {
+      this.showToast('敬请期待', x, y);
+      return;
+    }
     if (!unlocked) {
       this.showToast('此关卡暂未开放', x, y);
       return;
@@ -248,7 +253,7 @@ class LevelSelectScene extends Phaser.Scene {
   showToast(msg, x, y) {
     const t = this.add.text(x, y - 70, msg, {
       fontFamily: TD_FONT_STACK,
-      fontSize: 18 + 'px', fontStyle: 'bold', color: '#7a2810'
+      fontSize: 20 + 'px', fontStyle: 'bold', color: '#7a2810'
     }).setOrigin(0.5).setStroke('#ffffff', 4).setAlpha(0).setDepth(100);
 
     this.tweens.chain({

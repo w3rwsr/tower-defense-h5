@@ -15,6 +15,9 @@
 
   const KEY = 'td_levels_progress_v1';
   const TOTAL_LEVELS = 5;
+  /* 当前已设计完成的关卡数：第 4、5 关尚未设计，不可进入（敬请期待）。
+     选关界面保留按钮但灰显，点击只弹"敬请期待"提示。 */
+  const TOTAL_DESIGNED = 3;
 
   const storage = {
     /**
@@ -34,6 +37,14 @@
     },
 
     get total() { return TOTAL_LEVELS; },
+
+    /** 当前已设计完成并可游玩的最大关卡编号（4/5 关敬请期待） */
+    get designed() { return TOTAL_DESIGNED; },
+
+    /** 某关是否已设计完成（可游玩）；超出设计范围的关卡不可进入 */
+    isDesigned(level) {
+      return level >= 1 && level <= TOTAL_DESIGNED;
+    },
 
     load() {
       try {
@@ -69,10 +80,12 @@
       this.refreshTowerUnlocks();
     },
 
-    /** 某关是否可进入：第 1 关恒开放；第 N 关需第 N-1 关已通关 */
+    /** 某关是否可进入：未设计关卡（4/5）恒不可进入；第 1 关恒开放；
+     *  第 N 关需第 N-1 关已通关 */
     isUnlocked(level) {
       if (level < 1 || level > TOTAL_LEVELS) return false;
       if (this.__debugAllUnlocked) return true; // 调试态：全关卡放行（不落盘）
+      if (level > TOTAL_DESIGNED) return false; // 未设计关卡：敬请期待，不可进入
       if (level === 1) return true;
       return this.isCompleted(level - 1);
     },
