@@ -607,9 +607,18 @@ class GameScene extends Phaser.Scene {
     } else {
       /* 第 5 关等关卡可配 enemyHpMul：小怪（非 BOSS）血量在波次成长基础上再乘此系数 */
       const hpMul = this.levelCfg.enemyHpMul || 1;
-      e.maxHp = Math.round(this.waveSmallHp(e.cfg.hp) * hpMul);
+      const fwcfg = this.levelCfg.waves;
+      /* 末波小怪额外血量倍率（如第 3 关 finalWaveHpMul=2：翻倍），
+         仅末波非 BOSS 生效，不影响 BOSS/其他波次/其他关卡 */
+      const fwHpMul = (this.waveIndex === fwcfg.list.length - 1 && fwcfg.finalWaveHpMul) ? fwcfg.finalWaveHpMul : 1;
+      e.maxHp = Math.round(this.waveSmallHp(e.cfg.hp) * hpMul * fwHpMul);
       e.hp = e.maxHp;
       e.drawHpBar(1); // 血量上限变化后重绘满血条宽度
+      /* 末波小怪伤害减免（如第 3 关 finalWaveDmgReduction=0.10：受击 ×90%），
+         仅末波非 BOSS 生效，不影响其他波次/其他关卡 */
+      if (this.waveIndex === fwcfg.list.length - 1 && fwcfg.finalWaveDmgReduction) {
+        e.dmgReduction = fwcfg.finalWaveDmgReduction;
+      }
     }
     this.enemies.push(e);
   }

@@ -412,6 +412,7 @@ window.TD_CONFIG = {
      * （per-group bossHpFactor 驱动，覆盖 finalBossHpFactor 兜底）。 */
     "3": {
       "economy": { "startGold": 320, "startLives": 25 },
+      "killRewardPenalty": 5,   // 第 3 关小怪击杀金币 -5（最低 0，不影响 BOSS/其他关）
       "build": {
         "cell": 76,
         /* 第 3 关专属额外火力点：覆盖道路间的空地，不压路、不阻碍行进，
@@ -460,6 +461,8 @@ window.TD_CONFIG = {
         "intermission": 15,
         "hpGrowth": 1.5,
         "finalWaveSpecial": false,
+        "finalWaveHpMul": 2,           // 第 3 关末波小怪血量额外 ×2（翻倍），仅末波非 BOSS
+        "finalWaveDmgReduction": 0.10, // 第 3 关末波小怪 10% 伤害减免（受击伤害 ×90%）
         "finalBossHpFactor": 40,
         "clearBonus": [50, 100, 150, 200, 250],
         "firstWaveRouteOnly": true,   // 第 1 波仅上路（route 0）出怪，下路不出

@@ -18,10 +18,16 @@ class Enemy extends Phaser.GameObjects.Container {
     this.maxHp = cfg.hp;
     this.hp = cfg.hp;
     this.baseSpeed = cfg.speed;
-    /* 小怪击杀金币 = 基础 reward + economy.killRewardBonus；BOSS 不享受加成 */
+    /* 小怪击杀金币 = 基础 reward + economy.killRewardBonus - 关卡惩罚；
+       BOSS 不享受加成/惩罚；关卡惩罚最低扣到 0 */
     const killBonus = (!cfg.boss && TD_CONFIG.economy.killRewardBonus) || 0;
-    this.reward = cfg.reward + killBonus;
+    const penalty = (!cfg.boss && scene.levelCfg.killRewardPenalty) || 0;
+    this.reward = Math.max(0, cfg.reward + killBonus - penalty);
     this.leakDamage = cfg.leakDamage;
+
+    /* 伤害减免（0=无减免）：末波小怪可配 finalWaveDmgReduction，
+       受击实际伤害 = 原伤害 × (1 - dmgReduction) */
+    this.dmgReduction = 0;
 
     /* ---- 路径状态 ---- */
     this.pathDist = 0;
@@ -72,7 +78,9 @@ class Enemy extends Phaser.GameObjects.Container {
 
   takeDamage(value) {
     if (this.dead) return;
-    this.hp -= value;
+    /* 伤害减免：dmgReduction > 0 时受击实际伤害 = 原伤害 × (1 - 减免) */
+    const dmg = value * (1 - (this.dmgReduction || 0));
+    this.hp -= dmg;
     this.drawHpBar(Math.max(0, this.hp / this.maxHp));
     if (this.hp <= 0) this.scene.onEnemyKilled(this);
   }
