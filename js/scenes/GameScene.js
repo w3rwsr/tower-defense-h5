@@ -88,33 +88,56 @@ class GameScene extends Phaser.Scene {
 
   /* ============================================================
    * 路径几何
+   * 支持多路线（第 3 关双出怪路线）：levelCfg.paths 为多组 waypoints，
+   * 每组一条独立路线；单路线关卡仍用 levelCfg.path.waypoints（包成 1 条）。
+   * routeGeoms[routeId] = { waypoints, segments, pathLength }；
+   * this.segments = 全部路线线段的扁平并集（供 distToPath /
+   * buildHotspots / nearestPathPoint 遍历所有道路，放塔合法性覆盖全线）；
+   * 敌人持 routeId，pathPointAt / 路程 / 吸引段查询按各自路线计算。
    * ============================================================ */
   buildPathGeometry() {
-    const wp = this.levelCfg.path.waypoints;
-    this.waypoints = wp;
+    const routeWpLists = this.levelCfg.paths
+      ? this.levelCfg.paths
+      : [this.levelCfg.path.waypoints];
+    this.routeGeoms = routeWpLists.map((wp) => {
+      const segments = [];
+      let totalLength = 0;
+      for (let i = 0; i < wp.length - 1; i++) {
+        const len = Phaser.Math.Distance.Between(wp[i].x, wp[i].y, wp[i + 1].x, wp[i + 1].y);
+        segments.push({
+          x1: wp[i].x, y1: wp[i].y, x2: wp[i + 1].x, y2: wp[i + 1].y,
+          start: totalLength, len
+        });
+        totalLength += len;
+      }
+      return { waypoints: wp, segments, totalLength, pathLength: totalLength };
+    });
+    /* 单一路线向后兼容：this.waypoints / this.pathLength 指向 route 0 */
+    this.waypoints = this.routeGeoms[0].waypoints;
     this.segments = [];
-    this.totalLength = 0;
-    for (let i = 0; i < wp.length - 1; i++) {
-      const len = Phaser.Math.Distance.Between(wp[i].x, wp[i].y, wp[i + 1].x, wp[i + 1].y);
-      this.segments.push({
-        x1: wp[i].x, y1: wp[i].y, x2: wp[i + 1].x, y2: wp[i + 1].y,
-        start: this.totalLength, len
-      });
-      this.totalLength += len;
-    }
-    this.pathLength = this.totalLength;
+    for (const rg of this.routeGeoms) this.segments = this.segments.concat(rg.segments);
+    this.totalLength = this.routeGeoms[0].totalLength;
+    this.pathLength = this.routeGeoms[0].pathLength;
   }
 
-  /** 按“已走距离”取路径坐标 */
-  pathPointAt(dist) {
-    if (dist <= 0) return { x: this.waypoints[0].x, y: this.waypoints[0].y };
-    for (const s of this.segments) {
+  /** 某条路线的总长（敌人按自己的 routeId 判定是否到达终点） */
+  routeLength(routeId) {
+    const rg = this.routeGeoms[routeId || 0];
+    return rg ? rg.pathLength : this.pathLength;
+  }
+
+  /** 按“已走距离”取路径坐标；routeId 缺省 = 0（单路线关卡兼容） */
+  pathPointAt(dist, routeId) {
+    const rg = this.routeGeoms[routeId || 0] || this.routeGeoms[0];
+    const wp = rg.waypoints, segs = rg.segments;
+    if (dist <= 0) return { x: wp[0].x, y: wp[0].y };
+    for (const s of segs) {
       if (dist <= s.start + s.len) {
         const t = (dist - s.start) / s.len;
         return { x: s.x1 + (s.x2 - s.x1) * t, y: s.y1 + (s.y2 - s.y1) * t };
       }
     }
-    const last = this.waypoints[this.waypoints.length - 1];
+    const last = wp[wp.length - 1];
     return { x: last.x, y: last.y };
   }
 
@@ -333,18 +356,26 @@ class GameScene extends Phaser.Scene {
 
   drawPath() {
     const g = this.add.graphics().setDepth(1);
-    const wp = this.waypoints;
-    const pcfg = this.levelCfg.path;
+    const pcfg = this.levelCfg.path || {};
     const w = TD_CONFIG.world.pathWidth;
-    // 深色描边 + 浅色路面
-    this.fatStroke(g, wp, w + 10, pcfg.borderColor);
-    this.fatStroke(g, wp, w, pcfg.fillColor);
-
-    // 起点（绿色传送门）/ 终点（红色洞穴）
-    const st = wp[0], ed = wp[wp.length - 1];
-    g.lineStyle(5, 0x3f9e34, 1); g.fillStyle(0x8be86b, 0.9);
-    g.fillCircle(st.x, st.y, 26); g.strokeCircle(st.x, st.y, 26);
-    g.fillStyle(0xffffff, 0.5); g.fillCircle(st.x - 4, st.y - 5, 7);
+    const borderColor = (pcfg.borderColor != null) ? pcfg.borderColor : 0xc99a54;
+    const fillColor = (pcfg.fillColor != null) ? pcfg.fillColor : 0xeac58f;
+    /* 逐条路线描边 + 路面（多路线共享段会重叠绘制，视觉无差异） */
+    for (const rg of this.routeGeoms) {
+      this.fatStroke(g, rg.waypoints, w + 10, borderColor);
+      this.fatStroke(g, rg.waypoints, w, fillColor);
+    }
+    /* 起点（绿色传送门）：每条路线各画一个（多出怪点） */
+    for (const rg of this.routeGeoms) {
+      const wp = rg.waypoints;
+      const st = wp[0];
+      g.lineStyle(5, 0x3f9e34, 1); g.fillStyle(0x8be86b, 0.9);
+      g.fillCircle(st.x, st.y, 26); g.strokeCircle(st.x, st.y, 26);
+      g.fillStyle(0xffffff, 0.5); g.fillCircle(st.x - 4, st.y - 5, 7);
+    }
+    /* 终点（红色洞穴）：所有路线共用同一终点，画一次即可 */
+    const lastWp = this.routeGeoms[this.routeGeoms.length - 1].waypoints;
+    const ed = lastWp[lastWp.length - 1];
     g.lineStyle(5, 0x7a2a2a, 1); g.fillStyle(0x5d3328, 1);
     g.fillCircle(ed.x, ed.y, 26); g.strokeCircle(ed.x, ed.y, 26);
     g.fillStyle(0x2e1812, 1); g.fillCircle(ed.x, ed.y, 16);
@@ -432,7 +463,7 @@ class GameScene extends Phaser.Scene {
     } else if (this.state === 'active') {
       this.spawnClock += dt;
       while (this.spawnIdx < this.spawnList.length && this.spawnList[this.spawnIdx].t <= this.spawnClock) {
-        this.spawnEnemy(this.spawnList[this.spawnIdx].type);
+        this.spawnEnemy(this.spawnList[this.spawnIdx]);
         this.spawnIdx++;
       }
     }
@@ -441,10 +472,20 @@ class GameScene extends Phaser.Scene {
   startWave() {
     if (this.state !== 'ready') return;
     const groups = this.levelCfg.waves.list[this.waveIndex];
+    const routeCount = this.routeGeoms.length;
     this.spawnList = [];
+    /* 多路线：每波 group 在【全部路线】同时复制一份出怪（数量/血量/间隔一致）。
+       单路线 routeCount=1，等价于原逻辑（route 字段缺省 0）。 */
     groups.forEach((grp) => {
-      for (let i = 0; i < grp.count; i++) {
-        this.spawnList.push({ t: grp.delay + i * grp.interval, type: grp.type });
+      for (let r = 0; r < routeCount; r++) {
+        for (let i = 0; i < grp.count; i++) {
+          this.spawnList.push({
+            t: grp.delay + i * grp.interval,
+            type: grp.type,
+            route: r,
+            bossHpFactor: grp.bossHpFactor
+          });
+        }
       }
     });
     this.spawnList.sort((a, b) => a.t - b.t);
@@ -470,14 +511,17 @@ class GameScene extends Phaser.Scene {
 
   /* 小怪当波血量（JSON 驱动，见 waves 配置）：
      - 常规波：round(baseHp × hpGrowth^waveIndex)（hpGrowth=1.5 即每波 +50%，复合）；
-     - 末波：先按公式取整得到第 N-1 波（第 4 波）血量，再 × finalWaveHpFactor(=2)
-       ——严格等于"第 4 波实际血量的两倍"，避免连乘带来的 1 点舍入偏差。 */
+     - 末波默认特例：先按公式取整得到第 N-1 波（第 4 波）血量，再 × finalWaveHpFactor(=2)
+       ——严格等于"第 4 波实际血量的两倍"，避免连乘带来的 1 点舍入偏差；
+     - 第 3 关设 finalWaveSpecial=false：不走末波翻倍，全程纯复合 +50%
+       （第 5 波 = base × 1.5^4，与"每波比前波 +50%"完全一致）。 */
   waveSmallHp(baseHp) {
     const wcfg = this.levelCfg.waves;
     const total = wcfg.list.length;
     const growth = (wcfg.hpGrowth != null ? wcfg.hpGrowth : 1.5);
     const wi = this.waveIndex;
-    if (total >= 2 && wi === total - 1) {
+    const special = (wcfg.finalWaveSpecial !== false); // 缺省 true：末波走特例翻倍
+    if (special && total >= 2 && wi === total - 1) {
       const prevHp = Math.round(baseHp * Math.pow(growth, wi - 1));
       return Math.round(prevHp * (wcfg.finalWaveHpFactor != null ? wcfg.finalWaveHpFactor : 2));
     }
@@ -485,15 +529,23 @@ class GameScene extends Phaser.Scene {
   }
 
   /* 敌人出生：按波数成长缩放血量（规则见 waveSmallHp）；
-     BOSS（末波）血量 = 同波小怪(enemyX)血量 × finalBossHpFactor(8)，
-     漏血 = enemyX.leakDamage × boss.leakMultiplier（普通怪的 3 倍）。 */
-  spawnEnemy(typeKey) {
-    const e = new Enemy(this, typeKey);
+     BOSS 血量 = 同波小怪(enemyX)血量 × bossFactor，bossFactor 优先级：
+     group.bossHpFactor（per-group，第 3 关第 3/4 波 16×、第 5 波 40×）
+     > wcfg.finalBossHpFactor（末波兜底） > boss.hpMultiplier（全局兜底）；
+     漏血 = enemyX.leakDamage × boss.leakMultiplier（普通怪的 3 倍）。
+     entry.route 指定敌人所属路线（多路线关卡），缺省 0。 */
+  spawnEnemy(entry) {
+    const typeKey = entry.type;
+    const routeId = entry.route || 0;
+    const e = new Enemy(this, typeKey, routeId);
     const isBoss = !!e.cfg.boss;
     if (isBoss) {
       const wcfg = this.levelCfg.waves;
       const bossCfg = TD_CONFIG.boss || { hpMultiplier: 8, leakMultiplier: 3 };
-      const bossFactor = (wcfg.finalBossHpFactor != null ? wcfg.finalBossHpFactor : bossCfg.hpMultiplier);
+      let bossFactor;
+      if (entry.bossHpFactor != null) bossFactor = entry.bossHpFactor;
+      else if (wcfg.finalBossHpFactor != null) bossFactor = wcfg.finalBossHpFactor;
+      else bossFactor = bossCfg.hpMultiplier;
       e.maxHp = this.waveSmallHp(TD_CONFIG.enemies.enemyX.hp) * bossFactor;
       e.hp = e.maxHp;
       e.leakDamage = TD_CONFIG.enemies.enemyX.leakDamage * bossCfg.leakMultiplier;

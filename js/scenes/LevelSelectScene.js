@@ -101,7 +101,7 @@ class LevelSelectScene extends Phaser.Scene {
     const levelInfo = [
       { name: '新手教程', desc: '学习基础操作', emoji: '🎓' },
       { name: '蜿蜒小径', desc: '多拐弯·BOSS', emoji: '🐉' },
-      { name: '未知之地', desc: '敬请期待', emoji: '🌲' },
+      { name: '双线汇流', desc: '双出怪·双BOSS', emoji: '🔀' },
       { name: '未知之地', desc: '敬请期待', emoji: '🏜' },
       { name: '未知之地', desc: '敬请期待', emoji: '🌋' }
     ];

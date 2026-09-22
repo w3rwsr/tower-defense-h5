@@ -99,7 +99,7 @@ window.TD_CONFIG = {
   "economy": {
     "startGold": 260,
     "startLives": 20,
-    "killRewardBonus": 15    // 每个【小怪】击杀金币在各自 reward 基础上统一增加的数量（BOSS 不享受）
+    "killRewardBonus": 20    // 每个【小怪】击杀金币在各自 reward 基础上统一增加的数量（BOSS 不享受）
   },
 
   /* ---------- 波次 ---------- */
@@ -349,7 +349,7 @@ window.TD_CONFIG = {
         "intermission": 15,
         "hpGrowth": 1.5,
         "finalWaveHpFactor": 2,
-        "finalBossHpFactor": 8,
+        "finalBossHpFactor": 32,
         "clearBonus": [50, 100, 150, 200, 250],
         "list": [
           [ { "type": "enemyX", "count": 8,  "interval": 0.80, "delay": 0 } ],
@@ -362,6 +362,72 @@ window.TD_CONFIG = {
           [ { "type": "enemyX", "count": 16, "interval": 0.40, "delay": 0 },
             { "type": "enemyY", "count": 3,  "interval": 1.50, "delay": 4 },
             { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 10 } ]
+        ]
+      }
+    },
+
+    /* ---------- 第 3 关：双出怪路线 ----------
+     * 两条独立路线（paths[0]=上路 / paths[1]=下路），各一个起点；
+     * 两路在两个汇合点合并后再分叉，最终在 finalMerge 汇合通向同一终点。
+     * 两路怪物配置完全相同，波次/数量/血量一致，两边同时出怪
+     * （GameScene.startWave 按 routeGeoms 数量复制每波 group 到全部路线）。
+     * 小怪血量每波复合 +50%（hpGrowth=1.5，finalWaveSpecial=false 不走末波翻倍）。
+     * BOSS：第 3、4 波 = 当波小怪(enemyX)血量 ×16，第 5 波 = ×40
+     * （per-group bossHpFactor 驱动，覆盖 finalBossHpFactor 兜底）。 */
+    "3": {
+      "economy": { "startGold": 320, "startLives": 25 },
+      "build": { "cell": 76 },
+      "path": {
+        "borderColor": 0xc99a54,
+        "fillColor": 0xeac58f
+      },
+      "paths": [
+        [
+          { "x": -40, "y": 80 },
+          { "x": 160, "y": 80 },
+          { "x": 160, "y": 175 },
+          { "x": 300, "y": 175 },
+          { "x": 420, "y": 270 },
+          { "x": 530, "y": 175 },
+          { "x": 650, "y": 175 },
+          { "x": 740, "y": 270 },
+          { "x": 810, "y": 210 },
+          { "x": 880, "y": 270 },
+          { "x": 880, "y": 580 }
+        ],
+        [
+          { "x": -40, "y": 460 },
+          { "x": 160, "y": 460 },
+          { "x": 160, "y": 365 },
+          { "x": 300, "y": 365 },
+          { "x": 420, "y": 270 },
+          { "x": 530, "y": 365 },
+          { "x": 650, "y": 365 },
+          { "x": 740, "y": 270 },
+          { "x": 810, "y": 330 },
+          { "x": 880, "y": 270 },
+          { "x": 880, "y": 580 }
+        ]
+      ],
+      "waves": {
+        "intermission": 15,
+        "hpGrowth": 1.5,
+        "finalWaveSpecial": false,
+        "finalBossHpFactor": 40,
+        "clearBonus": [50, 100, 150, 200, 250],
+        "list": [
+          [ { "type": "enemyX", "count": 8,  "interval": 0.80, "delay": 0 } ],
+          [ { "type": "enemyX", "count": 12, "interval": 0.60, "delay": 0 },
+            { "type": "enemyY", "count": 3,  "interval": 1.50, "delay": 4 } ],
+          [ { "type": "enemyX", "count": 14, "interval": 0.50, "delay": 0 },
+            { "type": "enemyY", "count": 4,  "interval": 1.30, "delay": 5 },
+            { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 12, "bossHpFactor": 16 } ],
+          [ { "type": "enemyX", "count": 16, "interval": 0.45, "delay": 0 },
+            { "type": "enemyY", "count": 5,  "interval": 1.20, "delay": 5 },
+            { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 12, "bossHpFactor": 16 } ],
+          [ { "type": "enemyY", "count": 6,  "interval": 1.20, "delay": 0 },
+            { "type": "enemyX", "count": 20, "interval": 0.40, "delay": 3 },
+            { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 14, "bossHpFactor": 40 } ]
         ]
       }
     }

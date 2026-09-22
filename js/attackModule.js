@@ -171,14 +171,15 @@
       this.smallOnly = this.eff.targetFilter === 'nonBoss';
     }
 
-    /** 按沿路里程找当前路径段（与 GameScene.buildPathGeometry 的 segments 同构） */
-    segmentAt(scene, dist) {
-      const segs = scene.segments;
-      for (let i = 0; i < segs.length; i++) {
-        if (dist <= segs[i].start + segs[i].len) return segs[i];
-      }
-      return segs[segs.length - 1];
+    /** 按沿路里程找当前路径段（取敌人所属路线的 segments，多路线关卡每敌独立） */
+  segmentAt(scene, dist, routeId) {
+    const rg = scene.routeGeoms[routeId || 0] || scene.routeGeoms[0];
+    const segs = rg.segments;
+    for (let i = 0; i < segs.length; i++) {
+      if (dist <= segs[i].start + segs[i].len) return segs[i];
     }
+    return segs[segs.length - 1];
+  }
 
     update(dt, ctx) {
       /* ---- 脉冲计时：每 interval 秒开窗一次，窗内持续 duration 秒 ---- */
@@ -228,7 +229,7 @@
         if (d2 > r2) continue; // 射程外：不标记，Enemy 首帧烘焙位移后继续前进
 
         /* 塔在敌人当前路段上的投影（钳在路段内），换算为沿路里程 */
-        const seg = this.segmentAt(scene, e.pathDist);
+        const seg = this.segmentAt(scene, e.pathDist, e.routeId);
         const inv = 1 / seg.len;
         let f = ((t.x - seg.x1) * (seg.x2 - seg.x1) + (t.y - seg.y1) * (seg.y2 - seg.y1)) * inv * inv;
         f = f < 0 ? 0 : (f > 1 ? 1 : f);

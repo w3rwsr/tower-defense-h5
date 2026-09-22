@@ -3,10 +3,12 @@
  * 沿 GameScene 预计算的路径移动，支持减速 debuff 与血条。
  * ============================================================ */
 class Enemy extends Phaser.GameObjects.Container {
-  constructor(scene, typeKey) {
+  constructor(scene, typeKey, routeId) {
     const cfg = TD_CONFIG.enemies[typeKey];
-    const p = scene.pathPointAt(0);
+    const rid = routeId || 0;   // 所属路线（多路线关卡：0=上路 / 1=下路），缺省 0
+    const p = scene.pathPointAt(0, rid);
     super(scene, p.x, p.y);
+    this.routeId = rid;
 
     this.typeKey = typeKey;
     this.cfg = cfg;
@@ -93,10 +95,11 @@ class Enemy extends Phaser.GameObjects.Container {
        ——小怪停在吸附结束的位置继续走，不弹回、不跳变；clamp 保证不越过
        起点/终点，新位置仍是路径上的点，绝不脱离道路。 */
     const wasPulled = this.pullFresh && Math.abs(this.pullBack) > 16;
+    const myLen = this.scene.routeLength(this.routeId);
     if (!this.pullFresh && this.pullBack !== 0) {
       let nd = this.pathDist - this.pullBack;
       if (nd < 0) nd = 0;
-      else if (nd > this.scene.pathLength) nd = this.scene.pathLength;
+      else if (nd > myLen) nd = myLen;
       this.pathDist = nd;
       this.pullBack = 0;
     }
@@ -108,7 +111,7 @@ class Enemy extends Phaser.GameObjects.Container {
     const ctrlSlow = wasPulled ? 0.5 : 1;
     this.pathDist += speedNow * dt * ctrlSlow;
 
-    if (this.pathDist >= this.scene.pathLength) {
+    if (this.pathDist >= myLen) {
       this.leaked = true;
       this.dead = true;
       this.scene.onEnemyLeak(this);
@@ -117,8 +120,8 @@ class Enemy extends Phaser.GameObjects.Container {
 
     /* 基点（真实进度）与渲染点（窗口内被吸引位移后的路径点）——两者都在
        路径上，从几何上保证敌人任何时刻都不会离开道路，拐弯同样成立。 */
-    const p = this.scene.pathPointAt(this.pathDist);
-    const vp = this.scene.pathPointAt(Math.max(0, this.pathDist - this.pullBack));
+    const p = this.scene.pathPointAt(this.pathDist, this.routeId);
+    const vp = this.scene.pathPointAt(Math.max(0, this.pathDist - this.pullBack), this.routeId);
     this.pullDX = vp.x - p.x;
     this.pullDY = vp.y - p.y;
     this.setPosition(vp.x, vp.y);
