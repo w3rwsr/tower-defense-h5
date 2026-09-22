@@ -72,6 +72,12 @@ class GameScene extends Phaser.Scene {
     this.spawnList = [];
     this.spawnIdx = 0;
     this.spawnClock = 0;
+    /* 支线波（第 4 关右侧岔路奇兵，JSON 驱动 waves.sideWaves）：
+       activeSideWave=当前进行中的支线波定义（主波之间插入，不计入 5 个主波编号）；
+       sideWavesDone=已播放支线波 id 集合（每局只播一次）。其他关卡无 sideWaves
+       配置时两者恒为 null/{}，状态机行为与旧版完全一致。 */
+    this.activeSideWave = null;
+    this.sideWavesDone = {};
 
     /* ---- 预览 / 选中 画面 ---- */
     this.ghost = this.add.graphics().setDepth(500);
@@ -698,9 +704,11 @@ class GameScene extends Phaser.Scene {
       for (const p of this.projectiles) p.update(dt);
       this.projectiles = this.projectiles.filter((p) => !p.done);
 
-      /* 一波结束判定：不再出怪且场上无敌人 */
+      /* 一波结束判定：不再出怪且场上无敌人。
+         支线波进行中（activeSideWave）走独立清场逻辑，主波编号不递增。 */
       if (this.state === 'active' && this.spawnIdx >= this.spawnList.length && this.enemies.length === 0) {
-        this.onWaveCleared();
+        if (this.activeSideWave) this.onSideWaveCleared();
+        else this.onWaveCleared();
       }
     }
 
@@ -738,25 +746,69 @@ class GameScene extends Phaser.Scene {
       for (let r = 0; r < routeCount; r++) routeIds.push(r);
     }
     if (this.waveIndex === 0 && wcfg.firstWaveRouteOnly) routeIds = routeIds.slice(0, 1);
-    this.spawnList = [];
-    groups.forEach((grp) => {
-      for (const r of routeIds) {
-        for (let i = 0; i < grp.count; i++) {
-          this.spawnList.push({
-            t: grp.delay + i * grp.interval,
-            type: grp.type,
-            route: r,
-            bossHpFactor: grp.bossHpFactor
-          });
-        }
-      }
-    });
-    this.spawnList.sort((a, b) => a.t - b.t);
+    this.spawnList = this.expandWaveSpawns(groups, routeIds, null);
     this.spawnIdx = 0;
     this.spawnClock = 0;
     this.countdown = null;
     this.state = 'active';
     this.banner('第 ' + (this.waveIndex + 1) + ' 波 开始！', 0xfff2a0);
+  }
+
+  /** 把波次 groups 按路线展开成定时出怪表并按时间排序（主波 / 支线波共用）。
+   *  sideDef 非空 = 支线波：entry.hpWaveIndex 覆盖当波血量索引（JSON 驱动，
+   *  如第 4 关岔路奇兵按第 3 波血量水平出怪），route 集取支线自己的 routes。 */
+  expandWaveSpawns(groups, routeIds, sideDef) {
+    const list = [];
+    groups.forEach((grp) => {
+      for (const r of routeIds) {
+        for (let i = 0; i < grp.count; i++) {
+          list.push({
+            t: grp.delay + i * grp.interval,
+            type: grp.type,
+            route: r,
+            bossHpFactor: grp.bossHpFactor,
+            hpWaveIndex: sideDef ? sideDef.hpWaveIndex : null
+          });
+        }
+      }
+    });
+    list.sort((a, b) => a.t - b.t);
+    return list;
+  }
+
+  /** 查找“刚清场的主波（1 基编号）”之后应播放的支线波（JSON 驱动，仅一次） */
+  findSideWaveAfter(clearedWave1Based) {
+    const defs = this.levelCfg.waves.sideWaves;
+    if (!defs || !defs.length) return null;
+    for (const def of defs) {
+      if (def.afterWave === clearedWave1Based && !this.sideWavesDone[def.id]) return def;
+    }
+    return null;
+  }
+
+  /** 开启支线波：仅在 def.routes（如第 4 关 [2]=右侧岔路）上出怪，
+   *  主波编号不递增，HUD 波次仍指向下一个主波；清场后回到下一波倒计时。 */
+  startSideWave(def) {
+    this.activeSideWave = def;
+    this.spawnList = this.expandWaveSpawns(def.groups, def.routes, def);
+    this.spawnIdx = 0;
+    this.spawnClock = 0;
+    this.countdown = null;
+    this.state = 'active';
+    this.banner(def.banner || '奇兵来袭！', 0xff9de0);
+  }
+
+  /** 支线波清场：独立金币奖励 → 进入下一个主波的常规倒计时 */
+  onSideWaveCleared() {
+    const def = this.activeSideWave;
+    this.sideWavesDone[def.id] = 1;
+    this.activeSideWave = null;
+    if (def.clearBonus) {
+      this.gold += def.clearBonus;
+      this.banner('岔路清场奖励 +' + def.clearBonus + ' 金币', 0xbef78a);
+    }
+    this.state = 'ready';
+    this.countdown = this.levelCfg.waves.intermission;
   }
 
   onWaveCleared() {
@@ -769,6 +821,13 @@ class GameScene extends Phaser.Scene {
     this.waveIndex++;
     if (this.waveIndex >= wcfg.list.length) {
       this.endGame(true);
+      return;
+    }
+    /* 支线波（第 4 关右侧岔路奇兵）：本主波清场后若配置了未播放的支线波，
+       先插入支线波（左路不出怪），清场后再进入下一波主波倒计时 */
+    const sideDef = this.findSideWaveAfter(this.waveIndex);
+    if (sideDef) {
+      this.startSideWave(sideDef);
       return;
     }
     this.state = 'ready';
@@ -785,12 +844,14 @@ class GameScene extends Phaser.Scene {
      - 末波默认特例：先按公式取整得到第 N-1 波（第 4 波）血量，再 × finalWaveHpFactor(=2)
        ——严格等于"第 4 波实际血量的两倍"，避免连乘带来的 1 点舍入偏差；
      - 第 3 关设 finalWaveSpecial=false：不走末波翻倍，全程纯复合 +50%
-       （第 5 波 = base × 1.5^4，与"每波比前波 +50%"完全一致）。 */
-  waveSmallHp(baseHp) {
+       （第 5 波 = base × 1.5^4，与"每波比前波 +50%"完全一致）；
+     - idxOverride：支线波（第 4 关右侧岔路奇兵）显式指定血量波次索引，
+       与主波编号解耦（hpWaveIndex=2 即按第 3 波水平，比第 2 波 +60%）。 */
+  waveSmallHp(baseHp, idxOverride) {
     const wcfg = this.levelCfg.waves;
     const total = wcfg.list.length;
     const growth = (wcfg.hpGrowth != null ? wcfg.hpGrowth : 1.5);
-    const wi = this.waveIndex;
+    const wi = (idxOverride != null) ? idxOverride : this.waveIndex;
     const special = (wcfg.finalWaveSpecial !== false); // 缺省 true：末波走特例翻倍
     if (special && total >= 2 && wi === total - 1) {
       const prevHp = Math.round(baseHp * Math.pow(growth, wi - 1));
@@ -833,7 +894,10 @@ class GameScene extends Phaser.Scene {
       /* 末波小怪额外血量倍率（如第 3 关 finalWaveHpMul=2：翻倍），
          仅末波非 BOSS 生效，不影响 BOSS/其他波次/其他关卡 */
       const fwHpMul = (this.waveIndex === fwcfg.list.length - 1 && fwcfg.finalWaveHpMul) ? fwcfg.finalWaveHpMul : 1;
-      e.maxHp = Math.round(this.waveSmallHp(e.cfg.hp) * hpMul * wHpMul * fwHpMul);
+      /* entry.hpWaveIndex 非空 = 支线波（第 4 关岔路奇兵）：血量按 JSON 指定
+         波次水平成长，不受主波 waveIndex/末波特例影响（wHpMul/fwHpMul 仅按
+         主波编号判定，支线波进行时均不触发）。 */
+      e.maxHp = Math.round(this.waveSmallHp(e.cfg.hp, entry.hpWaveIndex) * hpMul * wHpMul * fwHpMul);
       e.hp = e.maxHp;
       e.drawHpBar(1); // 血量上限变化后重绘满血条宽度
       /* 末波小怪伤害减免（如第 3 关 finalWaveDmgReduction=0.10：受击 ×90%），
@@ -2083,7 +2147,11 @@ class GameScene extends Phaser.Scene {
         waveBtn.textContent = '⏩ 提前开始';
       }
     } else if (this.state === 'active') {
-      info.textContent = '第 ' + (this.waveIndex + 1) + ' 波 进行中';
+      /* 支线波（第 4 关右侧岔路奇兵）进行中：波次编号仍指向下一个主波，
+         状态文字单独提示，避免与主波“第 N 波”混淆 */
+      info.textContent = this.activeSideWave
+        ? '右侧岔路奇兵 进行中'
+        : '第 ' + (this.waveIndex + 1) + ' 波 进行中';
       waveBtn.textContent = '战斗中…';
       waveBtn.disabled = true;
     } else {
