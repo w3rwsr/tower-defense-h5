@@ -756,7 +756,10 @@ class GameScene extends Phaser.Scene {
     if (bs && bs.list && this.waveIndex + 1 >= (bs.startWave || 2)) {
       const bGroups = bs.list[this.waveIndex];
       if (bGroups && bGroups.length) {
-        const bEntries = this.expandWaveSpawns(bGroups, bs.routes || [2], null);
+        /* JSON 驱动数量加成：branchSpawns.countBonus（如 3 = 每组 +3 只） */
+        const cb = bs.countBonus || 0;
+        const adjusted = cb ? bGroups.map(function(g) { return Object.assign({}, g, { count: g.count + cb }); }) : bGroups;
+        const bEntries = this.expandWaveSpawns(adjusted, bs.routes || [2], null);
         /* JSON 驱动加速：branchSpawns.speedBonus（如 0.10 = +10%）仅作用于
            这批右侧岔路追加怪，主波出怪不受影响（entry 无 speedBonus 字段） */
         const sb = bs.speedBonus || 0;
@@ -764,6 +767,13 @@ class GameScene extends Phaser.Scene {
         this.spawnList = this.spawnList.concat(bEntries);
         this.spawnList.sort((a, b) => a.t - b.t);
       }
+    }
+    /* 末波右侧额外追加一批（JSON 驱动 finalWaveExtraGroups，仅第 4 关第 5 波）：
+       仅 route 1 出怪，不替代 BOSS（BOSS 按 delay 排序仍在最后出现） */
+    if (this.waveIndex === wcfg.list.length - 1 && wcfg.finalWaveExtraGroups) {
+      const fwe = this.expandWaveSpawns(wcfg.finalWaveExtraGroups, [1], null);
+      this.spawnList = this.spawnList.concat(fwe);
+      this.spawnList.sort((a, b) => a.t - b.t);
     }
     this.spawnIdx = 0;
     this.spawnClock = 0;
@@ -922,6 +932,25 @@ class GameScene extends Phaser.Scene {
          仅末波非 BOSS 生效，不影响其他波次/其他关卡 */
       if (this.waveIndex === fwcfg.list.length - 1 && fwcfg.finalWaveDmgReduction) {
         e.dmgReduction = fwcfg.finalWaveDmgReduction;
+      }
+      /* JSON 驱动：按路线区分加成（第 4 关 routeBonus[1]：
+         goldBonus=5 → 击杀金币额外+5；hpMul=1.5 → 血量再×1.5），
+         仅非 BOSS 生效，BOSS 数值公式不受影响，左侧 route 0 无此字段不加速 */
+      const rb = fwcfg.routeBonus;
+      if (rb && rb[routeId]) {
+        const rbCfg = rb[routeId];
+        if (rbCfg.hpMul) {
+          e.maxHp = Math.round(e.maxHp * rbCfg.hpMul);
+          e.hp = e.maxHp;
+          e.drawHpBar(1);
+        }
+        if (rbCfg.goldBonus) e.reward += rbCfg.goldBonus;
+      }
+      /* JSON 驱动：末波按路线免伤（第 4 关 finalWaveRouteDmgReduction[1]=0.10：
+         第 5 波右侧小怪受击 ×90%），仅末波非 BOSS 生效，不影响左侧/其他波 */
+      if (this.waveIndex === fwcfg.list.length - 1 && fwcfg.finalWaveRouteDmgReduction) {
+        const rd = fwcfg.finalWaveRouteDmgReduction[routeId];
+        if (rd) e.dmgReduction = rd;
       }
     }
     /* JSON 驱动加速（第 4 关 branchSpawns.speedBonus=0.10）：

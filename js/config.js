@@ -607,6 +607,18 @@ window.TD_CONFIG = {
         "finalWaveSpecial": false,    // 不走末波特例翻倍，纯 1.6 复合成长
         "finalBossHpFactor": 50,      // 末波 BOSS 兜底 50 倍（per-group 同值显式驱动）
         "clearBonus": [50, 100, 150, 200, 250],
+        /* 右侧出怪（route 1）专属加成（JSON 驱动，仅第 4 关）：
+           goldBonus=5 → 击杀右侧小怪额外 +5 金币；
+           hpMul=1.5 → 右侧小怪血量在波次成长基础上再 ×1.5；
+           仅非 BOSS 生效，BOSS 数值公式不受影响。 */
+        "routeBonus": {
+          "1": { "goldBonus": 5, "hpMul": 1.5 }
+        },
+        /* 末波右侧小怪免伤（JSON 驱动，仅第 4 关第 5 波 route 1）：
+           0.10 = 受击伤害 ×90%（10% 减免），仅非 BOSS 生效 */
+        "finalWaveRouteDmgReduction": {
+          "1": 0.10
+        },
         /* 右侧岔路【每波追加批次】（JSON 驱动 branchSpawns，机制仅本关启用）：
            startWave=2 → 第 1 波不加，从第 2 波起每波都额外来一批；
            routes=[2] → 仅右侧岔路出怪，左路不额外加怪；
@@ -619,6 +631,7 @@ window.TD_CONFIG = {
           "startWave": 2,
           "routes": [2],
           "speedBonus": 0.10,
+          "countBonus": 3,
           "list": [
             null,                       // 第 1 波：不追加
             [ { "type": "enemyX", "count": 6, "interval": 0.70, "delay": 1 } ],
@@ -646,6 +659,12 @@ window.TD_CONFIG = {
             { "type": "enemyX", "count": 12, "interval": 0.40, "delay": 3 },
             { "type": "enemyX", "count": 7,  "interval": 0.45, "delay": 9 },
             { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 14, "bossHpFactor": 50 } ]
+        ],
+        /* 末波右侧额外追加一批（JSON 驱动 finalWaveExtraGroups，仅第 4 关第 5 波）：
+           仅 route 1（右侧）出怪，不替代/不影响 BOSS（BOSS 仍按 delay=14 最后出现）；
+           血量/数量按第 5 波规则计算（routeBonus 叠加生效）。 */
+        "finalWaveExtraGroups": [
+          { "type": "enemyX", "count": 8, "interval": 0.45, "delay": 6 }
         ]
       }
     },
