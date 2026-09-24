@@ -756,8 +756,12 @@ class GameScene extends Phaser.Scene {
     if (bs && bs.list && this.waveIndex + 1 >= (bs.startWave || 2)) {
       const bGroups = bs.list[this.waveIndex];
       if (bGroups && bGroups.length) {
-        this.spawnList = this.spawnList.concat(
-          this.expandWaveSpawns(bGroups, bs.routes || [2], null));
+        const bEntries = this.expandWaveSpawns(bGroups, bs.routes || [2], null);
+        /* JSON 驱动加速：branchSpawns.speedBonus（如 0.10 = +10%）仅作用于
+           这批右侧岔路追加怪，主波出怪不受影响（entry 无 speedBonus 字段） */
+        const sb = bs.speedBonus || 0;
+        if (sb) bEntries.forEach(function(e) { e.speedBonus = sb; });
+        this.spawnList = this.spawnList.concat(bEntries);
         this.spawnList.sort((a, b) => a.t - b.t);
       }
     }
@@ -920,6 +924,9 @@ class GameScene extends Phaser.Scene {
         e.dmgReduction = fwcfg.finalWaveDmgReduction;
       }
     }
+    /* JSON 驱动加速（第 4 关 branchSpawns.speedBonus=0.10）：
+       仅作用于右侧岔路追加怪（entry.speedBonus），主波出怪无此字段不加速 */
+    if (entry.speedBonus) e.baseSpeed *= (1 + entry.speedBonus);
     this.enemies.push(e);
   }
 
