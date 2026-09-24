@@ -491,6 +491,9 @@ class GameScene extends Phaser.Scene {
       return { route, waypoint: wi, dist, x: wp.x, y: wp.y };
     };
 
+    /* 同色配对调色板：一对传送门（入口+出口）用同一颜色，不同对用不同颜色，
+       方便玩家靠颜色分辨哪两个是一对，不再依赖 A/B/C/D 字母 */
+    const pairColors = [0xff5ad1, 0x4be0ff, 0xffd23b, 0x6fe05f, 0xb07bea];
     const drawn = {};
     pc.pairs.forEach((pair, pi) => {
       const a = resolve(pair.a);
@@ -498,33 +501,33 @@ class GameScene extends Phaser.Scene {
       if (!a || !b) return;
       const pid = pair.id || 'p';
       const affectBoss = pair.affectBoss !== false;
+      const color = pairColors[pi % pairColors.length];
       this.portals.push({
         key: pid + '>A',
         entryRoute: a.route, entryDist: a.dist, entryX: a.x, entryY: a.y,
-        exitRoute: b.route, exitDist: b.dist, affectBoss: affectBoss
+        exitRoute: b.route, exitDist: b.dist, affectBoss: affectBoss,
+        color: color
       });
       if (pair.direction === 'bidirectional') {
         this.portals.push({
           key: pid + '>B',
           entryRoute: b.route, entryDist: b.dist, entryX: b.x, entryY: b.y,
-          exitRoute: a.route, exitDist: a.dist, affectBoss: affectBoss
+          exitRoute: a.route, exitDist: a.dist, affectBoss: affectBoss,
+          color: color
         });
       }
-      /* 视觉端点去重（双向时 A/B 各只画一次）；
-         标签按对编号递增：第 1 对 A/B，第 2 对 C/D，第 3 对 E/F… */
-      const labelA = String.fromCharCode(65 + pi * 2);
-      const labelB = String.fromCharCode(66 + pi * 2);
+      /* 视觉端点去重（双向时 A/B 各只画一次）；同对入口/出口同色，不再带字母标签 */
       const ka = a.route + ':' + a.waypoint, kb = b.route + ':' + b.waypoint;
-      if (!drawn[ka]) { drawn[ka] = 1; this.portalEndpoints.push({ x: a.x, y: a.y, role: 'a', label: labelA }); }
-      if (!drawn[kb]) { drawn[kb] = 1; this.portalEndpoints.push({ x: b.x, y: b.y, role: 'b', label: labelB }); }
+      if (!drawn[ka]) { drawn[ka] = 1; this.portalEndpoints.push({ x: a.x, y: a.y, role: 'a', color: color }); }
+      if (!drawn[kb]) { drawn[kb] = 1; this.portalEndpoints.push({ x: b.x, y: b.y, role: 'b', color: color }); }
     });
   }
 
-  /** 传送门卡通外观：呼吸光晕 + 双环反向旋转 + 脉冲核心 + 环绕粒子 + A/B 标签 */
+  /** 传送门卡通外观：呼吸光晕 + 双环反向旋转 + 脉冲核心 + 环绕粒子（同对同色，无字母） */
   drawPortals() {
     if (!this.portalEndpoints || this.portalEndpoints.length === 0) return;
     for (const ep of this.portalEndpoints) {
-      const color = ep.role === 'a' ? 0xff5ad1 : 0x4be0ff; // A 入口品红 / B 出口青蓝
+      const color = ep.color || (ep.role === 'a' ? 0xff5ad1 : 0x4be0ff); // 同对同色
       const c = this.add.container(ep.x, ep.y).setDepth(6);
 
       /* 底盘光晕（呼吸） */
@@ -581,13 +584,7 @@ class GameScene extends Phaser.Scene {
       }
       this.tweens.add({ targets: spark2, angle: -360, duration: 1100, repeat: -1, ease: 'Linear' });
 
-      /* A/B 标签（轻微上下浮动） */
-      const label = this.add.text(0, -40, ep.label || (ep.role === 'a' ? 'A' : 'B'), {
-        fontFamily: TD_FONT_STACK, fontSize: '18px', fontStyle: 'bold', color: '#ffffff'
-      }).setOrigin(0.5).setStroke('#3a2350', 4);
-      this.tweens.add({ targets: label, y: -46, duration: 650, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
-
-      c.add([glow, ringA, ringB, core, spark, spark2, label]);
+      c.add([glow, ringA, ringB, core, spark, spark2]);
     }
   }
 
@@ -626,16 +623,17 @@ class GameScene extends Phaser.Scene {
         this.tweens.add({ targets: e, scaleX: 1, scaleY: 1, duration: 260, ease: 'Back.out' });
 
         const to = this.pathPointAt(e.pathDist, e.routeId);
-        this.playPortalTeleportFx(from, { x: to.x, y: to.y });
+        this.playPortalTeleportFx(from, { x: to.x, y: to.y }, p.color);
         return;
       }
     }
   }
 
-  /** 传送瞬间特效：入口/出口各一次扩散光环 + 放射星点 */
-  playPortalTeleportFx(from, to) {
-    this.makePortalBurst(from.x, from.y, 0xff5ad1);
-    this.makePortalBurst(to.x, to.y, 0x4be0ff);
+  /** 传送瞬间特效：入口/出口各一次扩散光环 + 放射星点（同对同色） */
+  playPortalTeleportFx(from, to, color) {
+    const c = color || 0xff5ad1;
+    this.makePortalBurst(from.x, from.y, c);
+    this.makePortalBurst(to.x, to.y, c);
   }
 
   makePortalBurst(x, y, color) {
