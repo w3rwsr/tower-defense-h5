@@ -15,9 +15,9 @@
 
   const KEY = 'td_levels_progress_v1';
   const TOTAL_LEVELS = 5;
-  /* 当前已设计完成的关卡数：第 1～4 关可游玩；第 5 关尚未设计，
-     不可进入（敬请期待）。选关界面保留按钮但灰显，点击只弹提示。 */
-  const TOTAL_DESIGNED = 4;
+  /* 当前已设计完成的关卡数：第 1～5 关可游玩（第 5 关=最终关）。
+     第 5 关解锁规则与其他关一致：通关第 4 关后解锁。 */
+  const TOTAL_DESIGNED = 5;
 
   const storage = {
     /**

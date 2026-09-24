@@ -46,6 +46,11 @@ class Enemy extends Phaser.GameObjects.Container {
     this.slowTimer = 0;
     this.slowFactor = 1;
 
+    /* ---- 三阶段 BOSS（第 5 关，JSON 驱动） ---- */
+    this.bossPhase = 0;       // 0=普通怪/无阶段；1=一阶段（阈值分裂）；2=分身；3=合体强化
+    this.bossPhaseLink = 0;   // 同一次分裂的分身共享的组号（合体时机按组判定）
+    this.bossPhasePool = 0;   // 本次分裂的分身总血量（合体回血基数）
+
     /* ---- 范围吸引（塔D）：pullBack = 沿路【带符号】的吸引位移（像素）
          正=已越过塔投影点被向回拉，负=还在塔之前被向前拉近。
          吸附【窗口内】渲染点 = pathPointAt(pathDist - pullBack)，数学上恒在
@@ -90,6 +95,10 @@ class Enemy extends Phaser.GameObjects.Container {
     const dmg = value * (1 - (this.dmgReduction || 0));
     this.hp -= dmg;
     this.drawHpBar(Math.max(0, this.hp / this.maxHp));
+    /* 三阶段 BOSS（第 5 关，JSON 驱动）：一阶段血量降到阈值即分裂成 3 分身；
+       分裂优先于死亡判定（一击打穿阈值也走分裂），无 bossPhases 配置的
+       关卡 bossPhase 恒为 0，此检查零影响 */
+    if (!this.dead && this.bossPhase === 1 && this.scene.checkBossSplit(this)) return;
     if (this.hp <= 0) this.scene.onEnemyKilled(this);
   }
 

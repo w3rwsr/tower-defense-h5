@@ -429,12 +429,34 @@ class GameScene extends Phaser.Scene {
       g.fillCircle(st.x, st.y, 26); g.strokeCircle(st.x, st.y, 26);
       g.fillStyle(0xffffff, 0.5); g.fillCircle(st.x - 4, st.y - 5, 7);
     }
-    /* 终点（红色洞穴）：所有路线共用同一终点，画一次即可 */
-    const lastWp = this.routeGeoms[this.routeGeoms.length - 1].waypoints;
-    const ed = lastWp[lastWp.length - 1];
+    /* 终点（红色洞穴）：第 5 关 goals JSON 配置多个终点（左右双洞穴，共享
+       生命值），按每条路线末端路径点绘制并显示标签；1~4 关无 goals 字段，
+       维持原行为——只在最后一条路线末端画一个洞穴 */
+    const goals = this.levelCfg.goals;
+    if (goals && goals.length) {
+      for (const gl of goals) {
+        const rg = this.routeGeoms[gl.route];
+        if (!rg) continue;
+        const wp = rg.waypoints[rg.waypoints.length - 1];
+        this.drawGoalCave(g, wp.x, wp.y);
+        if (gl.label) {
+          this.add.text(wp.x, wp.y - 44, gl.label, {
+            fontFamily: TD_FONT_STACK, fontSize: '15px', fontStyle: 'bold', color: '#ffffff'
+          }).setOrigin(0.5).setStroke('#3a1d1d', 4);
+        }
+      }
+    } else {
+      const lastWp = this.routeGeoms[this.routeGeoms.length - 1].waypoints;
+      const ed = lastWp[lastWp.length - 1];
+      this.drawGoalCave(g, ed.x, ed.y);
+    }
+  }
+
+  /** 终点洞穴视觉（红色洞穴圆标） */
+  drawGoalCave(g, x, y) {
     g.lineStyle(5, 0x7a2a2a, 1); g.fillStyle(0x5d3328, 1);
-    g.fillCircle(ed.x, ed.y, 26); g.strokeCircle(ed.x, ed.y, 26);
-    g.fillStyle(0x2e1812, 1); g.fillCircle(ed.x, ed.y, 16);
+    g.fillCircle(x, y, 26); g.strokeCircle(x, y, 26);
+    g.fillStyle(0x2e1812, 1); g.fillCircle(x, y, 16);
   }
 
   /* ============================================================
@@ -910,6 +932,11 @@ class GameScene extends Phaser.Scene {
       e.maxHp = this.waveSmallHp(TD_CONFIG.enemies.enemyX.hp) * bossFactor;
       e.hp = e.maxHp;
       e.leakDamage = TD_CONFIG.enemies.enemyX.leakDamage * bossCfg.leakMultiplier;
+      /* 三阶段 BOSS（第 5 关，JSON 驱动 waves.bossPhases）：仅末波 BOSS 标记
+         一阶段（血量阈值分裂），3/4 波 BOSS 与无配置关卡不参与、零影响 */
+      if (wcfg.bossPhases && this.waveIndex === wcfg.list.length - 1) {
+        e.bossPhase = 1;
+      }
     } else {
       /* 第 5 关等关卡可配 enemyHpMul：小怪（非 BOSS）血量在波次成长基础上再乘此系数 */
       const hpMul = this.levelCfg.enemyHpMul || 1;
@@ -961,10 +988,102 @@ class GameScene extends Phaser.Scene {
 
   onEnemyKilled(e) {
     if (e.dead) return;
+    /* 三阶段 BOSS（第 5 关）：分身死亡不入正常击杀流程（无金币、无爆尸动画），
+       按组统计；全部死亡后合体成强化 BOSS */
+    if (e.bossPhase === 2) { this.onMiniBossKilled(e); return; }
     e.dead = true;
     this.gold += e.reward;
     this.floatText(e.x, e.y - e.radius - 6, '+' + e.reward, 0xffe27a);
     e.playDeath();
+  }
+
+  /* ============================================================
+   * 三阶段 BOSS（第 5 关，全部 JSON 驱动：waves.bossPhases）
+   *  P1 血量降到阈值 → 分裂 3 分身（总量=剩余×splitHpMul）；
+   *  分身全灭 → 在最后一只位置合体成强化 BOSS（HP=总量×mergeHealRatio）；
+   *  每阶段都有 banner 提示与扩散特效。无配置关卡零影响。
+   * ============================================================ */
+
+  /** BOSS 一阶段血量阈值检查（Enemy.takeDamage 调用）；
+   *  低于阈值返回 true（已分裂，不再走死亡流程） */
+  checkBossSplit(e) {
+    const bp = this.levelCfg.waves && this.levelCfg.waves.bossPhases;
+    if (!bp) return false;
+    const thr = e.maxHp * ((bp.splitAtHpRatio != null) ? bp.splitAtHpRatio : 0.4);
+    if (e.hp > thr) return false;
+    this.splitBoss(e, bp);
+    return true;
+  }
+
+  /** 一阶段 BOSS 分裂成 N 个分身（血量均分，沿路前后错开，同组共享合体数据） */
+  splitBoss(e, bp) {
+    e.dead = true;
+    /* 剩余血量计总（被一击打穿阈值时按 1 保底），× splitHpMul 得分身总量 */
+    const rest = Math.max(e.hp, 1);
+    const total = Math.max(1, Math.round(rest * ((bp.splitHpMul != null) ? bp.splitHpMul : 1)));
+    const n = bp.splitCount || 3;
+    this.bossPhaseLinkSeq = (this.bossPhaseLinkSeq || 0) + 1;
+    this.bossPhaseLinks = this.bossPhaseLinks || {};
+    this.bossPhaseLinks[this.bossPhaseLinkSeq] = { total: total, killed: 0, lastRoute: e.routeId, lastDist: e.pathDist };
+    const base = Math.floor(total / n);
+    const len = this.routeLength(e.routeId);
+    for (let i = 0; i < n; i++) {
+      const mi = new Enemy(this, e.typeKey, e.routeId);
+      mi.maxHp = (i === n - 1) ? Math.max(1, total - base * (n - 1)) : base;
+      mi.hp = mi.maxHp;
+      mi.bossPhase = 2;
+      mi.bossPhaseLink = this.bossPhaseLinkSeq;
+      mi.bossPhasePool = total;
+      const off = (i - (n - 1) / 2) * 26;
+      mi.pathDist = Phaser.Math.Clamp(e.pathDist + off, 0, len);
+      const p = this.pathPointAt(mi.pathDist, e.routeId);
+      mi.setPosition(p.x, p.y);
+      mi.drawHpBar(1);
+      if (bp.miniScale) mi.setScale(bp.miniScale);
+      mi.body.setTint(0xff9a3c);
+      this.enemies.push(mi);
+    }
+    this.banner('BOSS 分裂成 ' + n + ' 个分身！', 0xff9a3c);
+    this.makePortalBurst(e.x, e.y, 0xff9a3c);
+    e.destroyImmediately();
+  }
+
+  /** 分身死亡：无金币/无死亡动画，按组计数；同组全部死亡后合体 */
+  onMiniBossKilled(e) {
+    e.dead = true;
+    const link = this.bossPhaseLinks && this.bossPhaseLinks[e.bossPhaseLink];
+    if (link) {
+      link.killed++;
+      link.lastRoute = e.routeId;
+      link.lastDist = e.pathDist;
+      this.makePortalBurst(e.x, e.y, 0xff9a3c);
+      e.destroyImmediately();
+      const bp = this.levelCfg.waves.bossPhases;
+      if (link.killed >= (bp.splitCount || 3) && !link.done) {
+        link.done = true;
+        this.spawnMergedBoss(link, bp);
+      }
+    } else {
+      e.destroyImmediately();
+    }
+  }
+
+  /** 合体：在最后一只分身位置生成强化 BOSS（回血比例 × 分身总量） */
+  spawnMergedBoss(link, bp) {
+    const hpv = Math.max(1, Math.round(link.total * ((bp.mergeHealRatio != null) ? bp.mergeHealRatio : 0.5)));
+    const mb = new Enemy(this, 'enemyBoss', link.lastRoute);
+    mb.maxHp = hpv;
+    mb.hp = hpv;
+    mb.bossPhase = 3;
+    mb.pathDist = Phaser.Math.Clamp(link.lastDist, 0, this.routeLength(link.lastRoute));
+    const p = this.pathPointAt(mb.pathDist, link.lastRoute);
+    mb.setPosition(p.x, p.y);
+    mb.drawHpBar(1);
+    if (bp.finalScale) mb.setScale(bp.finalScale);
+    mb.body.setTint(0xff6666);
+    this.enemies.push(mb);
+    this.banner('BOSS 合体归来！', 0xff6666);
+    this.makePortalBurst(p.x, p.y, 0xff6666);
   }
 
   onEnemyLeak(e) {

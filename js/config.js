@@ -669,13 +669,119 @@ window.TD_CONFIG = {
       }
     },
 
-    /* ---------- 第 5 关：小怪血量额外 +50%（JSON 驱动） ----------
-     * 第 5 关回退到顶层 path/waves/economy（GameScene 合并），仅叠加
-     * enemyHpMul=1.5：小怪（非 BOSS）血量在现有成长基础上再 ×1.5。
-     * BOSS 不受此影响（spawnEnemy 仅对非 BOSS 乘此系数）。 */
+    /* ---------- 第 5 关：迷域回廊（最终关：上下双路线 + 跨路线传送 + 三阶 BOSS） ----------
+     * 几何：route 0 上路 = 左上出怪 → (560,80) → (560,220) → (150,220) →
+     *                     左终点洞穴 (150,505)；
+     *       route 1 下路 = 右下出怪 → (620,470) → (620,340) → (390,340) →
+     *                     (390,470) → (820,470) → 右终点洞穴 (820,505)。
+     *       两路线互不交叉，双终点洞穴均完全在画面内（goals JSON 驱动）。
+     * 传送门（用户确认拓扑）：跨路线穿梭 2 对、单向——
+     *       A(上路 w1 560,80) → B(下路 w2 620,340)；
+     *       C(下路 w1 620,470) → D(上路 w3 150,220)。
+     *       上路小怪传去下路 → 右终点；下路小怪传去上路 → 左终点；
+     *       每怪每对一次（usedPortals），无死循环、绝不落到道路外；
+     *       affectBoss=false：BOSS 走完全程不传送（三阶段可控）。
+     * 双终点共享血量：两条路任一边漏怪都扣同一条命（HUD 单生命显示）。
+     * 波次：常规 5 波 spawnRoutes=[0,1] 左右同配置；hpGrowth=1.6
+     *       （每波小怪血量 +60%）；第 3/4 波 BOSS=当波小怪 ×16，
+     *       第 5 波 BOSS=×50 并启用三阶段（bossPhases JSON 驱动）：
+     *       P1 血量降到 splitAtHpRatio(0.4) → 分裂 3 分身（总量=
+     *       剩余血量 × splitHpMul(1.0)，一击打穿阈值也优先分裂）；
+     *       3 分身全灭 → 在最后一只位置合体成强化 BOSS，血量 = 分身
+     *       总量 × mergeHealRatio(0.5)，体型 finalScale(1.25) 继续走向终点。
+     * 火力点：自动双排 + extraSpots 补空白；障碍物/据点自动生成，
+     *       规则与 1~4 关一致（hp 1000 / reward 500）。 */
     "5": {
-      "enemyHpMul": 1.5
-    }
+      "economy": { "startGold": 320, "startLives": 20 },
+      "build": {
+        "cell": 76,
+        /* 第 5 关专属额外火力点（buildHotspots 统一做界内/避路/去重硬校验，
+           已几何验证全部距路 58~142 且互不重叠）：
+           补右侧上下两路之间的中带与右上边缘空白，两条路均全程有塔位覆盖 */
+        "extraSpots": [
+          { "x": 616, "y": 40 },  { "x": 688, "y": 40 },   // 顶部右侧一排
+          { "x": 688, "y": 112 }, { "x": 688, "y": 184 },  // 右竖排
+          { "x": 652, "y": 256 }, { "x": 724, "y": 256 },  // 两路中带一排
+          { "x": 688, "y": 328 }, { "x": 760, "y": 328 },
+          { "x": 832, "y": 328 }                            // 下路上方一排
+        ]
+      },
+      "path": { "borderColor": 0xc99a54, "fillColor": 0xeac58f },
+      "paths": [
+        /* route 0：上路（左上出怪 → 跨路传送 → 左终点洞穴） */
+        [
+          { "x": -40, "y": 80 },
+          { "x": 560, "y": 80 },    // w1 = 传送门 A（入口，恒在道路上）
+          { "x": 560, "y": 220 },
+          { "x": 150, "y": 220 },   // w3 = 传送门 D（出口）
+          { "x": 150, "y": 505 }    // w4 = 左终点洞穴
+        ],
+        /* route 1：下路（右下出怪 → 跨路传送 → 右终点洞穴） */
+        [
+          { "x": 1000, "y": 470 },
+          { "x": 620, "y": 470 },   // w1 = 传送门 C（入口）
+          { "x": 620, "y": 340 },   // w2 = 传送门 B（出口）
+          { "x": 390, "y": 340 },
+          { "x": 390, "y": 470 },
+          { "x": 820, "y": 470 },
+          { "x": 820, "y": 505 }    // w6 = 右终点洞穴
+        ]
+      ],
+      /* 双终点洞穴（JSON 驱动）：按路线末路径点绘制；缺省关卡（1~4）无此
+         字段时维持原有单终点行为，不受影响 */
+      "goals": [
+        { "route": 0, "label": "左终点" },
+        { "route": 1, "label": "右终点" }
+      ],
+      /* 传送门 2 对跨路线缠绕（A↛B 上路→下路、C→D 下路→上路，单向）；
+         BOSS 不传送（affectBoss:false），传送后 0.5s 无敌 */
+      "portals": {
+        "invulnTime": 0.5,
+        "pairs": [
+          { "id": "cross1",
+            "a": { "route": 0, "waypoint": 1 },
+            "b": { "route": 1, "waypoint": 2 },
+            "direction": "oneway", "affectBoss": false },
+          { "id": "cross2",
+            "a": { "route": 1, "waypoint": 1 },
+            "b": { "route": 0, "waypoint": 3 },
+            "direction": "oneway", "affectBoss": false }
+        ]
+      },
+      "waves": {
+        "intermission": 15,
+        "spawnRoutes": [0, 1],        // 上下两路同时出怪（双终点共享生命）
+        "hpGrowth": 1.6,              // 每波小怪血量 +60%（复合）
+        "finalWaveSpecial": false,
+        "finalBossHpFactor": 50,      // 末波 BOSS = 当波小怪 ×50
+        "clearBonus": [50, 100, 150, 200, 250],
+        /* 三阶段 BOSS（仅末波 BOSS 生效，第 3/4 波 BOSS 不参与）：
+           血量阈值分裂 → 3 分身（总量=剩余×splitHpMul）→ 全灭合体回血 */
+        "bossPhases": {
+          "splitAtHpRatio": 0.40,     // 降到最大血量 40% 时分裂
+          "splitHpMul": 1.0,          // 分身总血量 = 分裂时剩余血量 × 该系数
+          "splitCount": 3,            // 分身数量
+          "mergeHealRatio": 0.50,     // 合体血量 = 分身总血量 × 该回血比例
+          "finalScale": 1.25,         // 强化 BOSS 体型放大
+          "miniScale": 0.72           // 分身体型缩小
+        },
+        "list": [
+          [ { "type": "enemyX", "count": 5,  "interval": 0.80, "delay": 0 } ],
+          [ { "type": "enemyX", "count": 8,  "interval": 0.60, "delay": 0 },
+            { "type": "enemyY", "count": 2,  "interval": 1.50, "delay": 5 } ],
+          [ { "type": "enemyX", "count": 9,  "interval": 0.50, "delay": 0 },
+            { "type": "enemyY", "count": 3,  "interval": 1.30, "delay": 5 },
+            { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 12, "bossHpFactor": 16 } ],
+          [ { "type": "enemyX", "count": 10, "interval": 0.45, "delay": 0 },
+            { "type": "enemyY", "count": 3,  "interval": 1.20, "delay": 5 },
+            { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 12, "bossHpFactor": 16 } ],
+          [ { "type": "enemyY", "count": 4,  "interval": 1.20, "delay": 0 },
+            { "type": "enemyX", "count": 12, "interval": 0.40, "delay": 3 },
+            { "type": "enemyX", "count": 7,  "interval": 0.45, "delay": 9 },
+            { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 14, "bossHpFactor": 50 } ]
+        ]
+      }
+    },
   },
 
   "sellReturn": 0.60   // 出售返还总投入的 60%
