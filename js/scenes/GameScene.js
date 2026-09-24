@@ -1089,6 +1089,11 @@ class GameScene extends Phaser.Scene {
   onEnemyLeak(e) {
     this.lives = Math.max(0, this.lives - e.leakDamage);
     this.floatText(Math.max(40, e.x), Math.min(this.H - 60, e.y), '-' + e.leakDamage + ' ❤️', 0xff8a8a);
+    /* 三阶段 BOSS 分身漏到终点同样计入合体计数（第 5 关）：
+       分身先正常扣生命，再走分身消灭流程（含全灭合体判定）；
+       合体后若出生点已在终点（全灭发生在洞口），强化 BOSS 下一帧
+       自然漏掉，不再触发合体逻辑（bossPhase=3 无分支） */
+    if (e.bossPhase === 2) { this.onMiniBossKilled(e); return; }
     e.destroyImmediately();
     if (this.lives <= 0) this.endGame(false);
   }
