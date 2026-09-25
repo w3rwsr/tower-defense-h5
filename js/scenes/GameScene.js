@@ -430,26 +430,35 @@ class GameScene extends Phaser.Scene {
       g.fillStyle(0xffffff, 0.5); g.fillCircle(st.x - 4, st.y - 5, 7);
     }
     /* 终点（红色洞穴）：第 5 关 goals JSON 配置多个终点（左右双洞穴，共享
-       生命值），按每条路线末端路径点绘制并显示标签；1~4 关无 goals 字段，
-       维持原行为——只在最后一条路线末端画一个洞穴 */
+       生命值），按每条路线末端路径点绘制；1~4 关无 goals 字段，
+       维持原行为——只在最后一条路线末端画一个洞穴。
+       绘制位置经 goalDrawPos 钳入画面内（第 1~4 关逻辑终点在屏幕外
+       y=580，漏怪判定不变，仅视觉标记钳到路出屏边缘），保证所有关卡
+       终点样式统一可见（与第 5 关同一 drawGoalCave 样式） */
     const goals = this.levelCfg.goals;
     if (goals && goals.length) {
       for (const gl of goals) {
         const rg = this.routeGeoms[gl.route];
         if (!rg) continue;
         const wp = rg.waypoints[rg.waypoints.length - 1];
-        this.drawGoalCave(g, wp.x, wp.y);
-        if (gl.label) {
-          this.add.text(wp.x, wp.y - 44, gl.label, {
-            fontFamily: TD_FONT_STACK, fontSize: '15px', fontStyle: 'bold', color: '#ffffff'
-          }).setOrigin(0.5).setStroke('#3a1d1d', 4);
-        }
+        const dp = this.goalDrawPos(wp.x, wp.y);
+        this.drawGoalCave(g, dp.x, dp.y);
       }
     } else {
       const lastWp = this.routeGeoms[this.routeGeoms.length - 1].waypoints;
       const ed = lastWp[lastWp.length - 1];
-      this.drawGoalCave(g, ed.x, ed.y);
+      const dp = this.goalDrawPos(ed.x, ed.y);
+      this.drawGoalCave(g, dp.x, dp.y);
     }
+  }
+
+  /** 终点洞穴绘制位置：钳进画面内（留洞穴半径余量），逻辑终点坐标不变 */
+  goalDrawPos(x, y) {
+    const m = 34;
+    return {
+      x: Phaser.Math.Clamp(x, m, this.W - m),
+      y: Phaser.Math.Clamp(y, m, this.H - m)
+    };
   }
 
   /** 终点洞穴视觉（红色洞穴圆标） */
@@ -1277,6 +1286,25 @@ class GameScene extends Phaser.Scene {
       }
       if (dup) continue;
       this.obstacles.push(this.makeObstacle(c.x, c.y, kinds[Math.floor(rnd() * kinds.length)]));
+    }
+
+    /* 关卡专属额外障碍物（JSON 驱动 levelCfg.extraObstacles，仅部分关卡如第 5 关）：
+       由关卡设计者显式指定位置，绕过自动生成（不占 maxCount 名额）；
+       硬校验：界内 + 不压路（distToPath ≥ minPathDistance）+ 与已有障碍物
+       保持 spacing 欧氏间距，违规点跳过。血量/奖励沿用全局 obstacles 配置，
+       据点机制（buildObstacleSpots）对它们同样生效，保证可被塔攻击。 */
+    const extraObs = this.levelCfg.extraObstacles || [];
+    const bld = this.buildCfg || {};
+    const minPath = bld.minPathDistance || 56;
+    for (const p of extraObs) {
+      if (p.x < 24 || p.x > this.W - 24 || p.y < 24 || p.y > this.H - 24) continue;
+      if (this.distToPath(p.x, p.y) < minPath) continue;
+      let dup = false;
+      for (const o of this.obstacles) {
+        if (Math.hypot(o.x - p.x, o.y - p.y) < ocfg.spacing) { dup = true; break; }
+      }
+      if (dup) continue;
+      this.obstacles.push(this.makeObstacle(p.x, p.y, kinds[Math.floor(rnd() * kinds.length)]));
     }
   }
 
