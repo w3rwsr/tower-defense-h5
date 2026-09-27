@@ -1,13 +1,13 @@
 /* ============================================================
  * LevelSelectScene.js —— 关卡选择界面
- * 显示 5 个关卡卡片：
+ * 显示 6 个关卡卡片：
  *   - 第 1 关：新手教程，可进入
- *   - 第 2 ~ 5 关：锁定状态，点击弹出"此关卡暂未开放"
+ *   - 第 2 ~ 6 关：按通关进度逐关解锁
  * 已通关的关卡显示 ✓ 标记（进度来自 TDStorage）。
  *
  * 自适应：
- *   - 横屏：5 张卡片单行排列
- *   - 竖屏：5 张卡片分两行（3 + 2）居中
+ *   - 横屏：6 张卡片单行排列
+ *   - 竖屏：6 张卡片分两行（3 + 2）居中
  *   - 字号按画布实际缩放系数放大，保证小屏可读
  *   - 监听 resize / orientationchange，方向变化时重建布局
  * ============================================================ */
@@ -103,7 +103,8 @@ class LevelSelectScene extends Phaser.Scene {
       { name: '蜿蜒小径', desc: '多拐弯·BOSS', emoji: '🐉' },
       { name: '双线汇流', desc: '双出怪·双BOSS', emoji: '🔀' },
       { name: '交错迷域', desc: '交叉汇合·岔路奇兵', emoji: '🌀' },
-      { name: '迷域回廊', desc: '传送穿梭·三阶BOSS', emoji: '🔮' }
+      { name: '迷域回廊', desc: '传送穿梭·三阶BOSS', emoji: '🔮' },
+      { name: '三路会师', desc: '三线交叉·共享终点', emoji: '⚔️' }
     ];
 
     const positions = this.computeCardPositions(vl);
@@ -127,16 +128,17 @@ class LevelSelectScene extends Phaser.Scene {
 
   /**
    * 计算每张卡片的中心坐标与尺寸。
-   * 强制横屏：1 行 5 张，居中排列。
+   * 强制横屏：1 行 6 张，居中排列。
    */
   computeCardPositions(vl) {
     const W = this.W;
     const out = [];
     const cardH = vl.cardH;
-    const cardW = 140, gap = 18;
-    const totalW = 5 * cardW + 4 * gap;
+    const cardW = 132, gap = 16;
+    const count = TDStorage.total;          // 关卡总数（当前 6）
+    const totalW = count * cardW + (count - 1) * gap;
     const startX = (W - totalW) / 2 + cardW / 2;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < count; i++) {
       out.push({ x: startX + i * (cardW + gap), y: vl.row1Y, w: cardW, h: cardH });
     }
     return out;

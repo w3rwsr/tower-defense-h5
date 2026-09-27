@@ -14,10 +14,10 @@
   'use strict';
 
   const KEY = 'td_levels_progress_v1';
-  const TOTAL_LEVELS = 5;
-  /* 当前已设计完成的关卡数：第 1～5 关可游玩（第 5 关=最终关）。
-     第 5 关解锁规则与其他关一致：通关第 4 关后解锁。 */
-  const TOTAL_DESIGNED = 5;
+  const TOTAL_LEVELS = 6;
+  /* 当前已设计完成的关卡数：第 1～6 关可游玩（第 6 关=最终关）。
+     第 6 关解锁规则与其他关一致：通关第 5 关后解锁。 */
+  const TOTAL_DESIGNED = 6;
 
   const storage = {
     /**
@@ -38,7 +38,7 @@
 
     get total() { return TOTAL_LEVELS; },
 
-    /** 当前已设计完成并可游玩的最大关卡编号（第 5 关敬请期待） */
+    /** 当前已设计完成并可游玩的最大关卡编号（第 6 关为最终关） */
     get designed() { return TOTAL_DESIGNED; },
 
     /** 某关是否已设计完成（可游玩）；超出设计范围的关卡不可进入 */
@@ -85,7 +85,7 @@
     isUnlocked(level) {
       if (level < 1 || level > TOTAL_LEVELS) return false;
       if (this.__debugAllUnlocked) return true; // 调试态：全关卡放行（不落盘）
-      if (level > TOTAL_DESIGNED) return false; // 未设计关卡（第 5 关）：敬请期待，不可进入
+      if (level > TOTAL_DESIGNED) return false; // 未设计关卡：敬请期待，不可进入
       if (level === 1) return true;
       return this.isCompleted(level - 1);
     },
