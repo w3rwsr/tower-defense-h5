@@ -987,6 +987,14 @@ class GameScene extends Phaser.Scene {
         if (rd) e.dmgReduction = rd;
       }
     }
+    /* JSON 驱动：按路线速度补偿（第 6 关 routeBonus.speedMul）：
+       三路路径长度微调后仍有微小差异，按路线给 baseSpeed 乘系数，
+       使三路同时出怪时到达终点时间接近。作用于所有敌人（含 BOSS），
+       因为路径长度差异对所有敌人一视同仁。无配置关卡零影响。 */
+    const rbSpeed = this.levelCfg.waves && this.levelCfg.waves.routeBonus;
+    if (rbSpeed && rbSpeed[routeId] && rbSpeed[routeId].speedMul) {
+      e.baseSpeed *= rbSpeed[routeId].speedMul;
+    }
     /* JSON 驱动加速（第 4 关 branchSpawns.speedBonus=0.10）：
        仅作用于右侧岔路追加怪（entry.speedBonus），主波出怪无此字段不加速 */
     if (entry.speedBonus) e.baseSpeed *= (1 + entry.speedBonus);
