@@ -29,34 +29,11 @@
       </div>
     </div>
 
-    <!-- 底部 HUD：波次控制 + 塔商店 -->
+    <!-- 底部 HUD：波次控制（防御塔商店已改为点击地图火力点弹出选塔框） -->
     <div id="hud-bottom">
       <div id="wave-box">
         <span id="wave-info"></span>
         <button id="btn-wave" class="btn btn-wave" type="button"></button>
-      </div>
-      <div id="shop">
-        <button class="btn btn-tower towerA" data-type="towerA" type="button">
-          <span class="t-name">塔A</span><span class="t-desc">单体高伤</span><span class="t-cost">🪙100</span>
-        </button>
-        <button class="btn btn-tower towerB" data-type="towerB" type="button">
-          <span class="t-name">塔B</span><span class="t-desc">范围减速</span><span class="t-cost">🪙120</span>
-        </button>
-        <button class="btn btn-tower towerC" data-type="towerC" type="button">
-          <span class="t-name">塔C</span><span class="t-desc">攻速快</span><span class="t-cost">🪙80</span>
-        </button>
-        <button class="btn btn-tower towerD" data-type="towerD" type="button">
-          <span class="t-name">塔D</span><span class="t-desc">范围吸引</span><span class="t-cost">🪙110</span>
-          <span class="t-lock">🔒 通关第1关解锁</span>
-        </button>
-        <button class="btn btn-tower towerE" data-type="towerE" type="button">
-          <span class="t-name">塔E</span><span class="t-desc">电链弹跳</span><span class="t-cost">🪙200</span>
-          <span class="t-lock">🔒 通关第2关解锁</span>
-        </button>
-        <button class="btn btn-tower towerF" data-type="towerF" type="button">
-          <span class="t-name">风元素塔</span><span class="t-desc">元素扩散</span><span class="t-cost">🪙130</span>
-          <span class="t-lock">🔒 通关第3关解锁</span>
-        </button>
       </div>
     </div>
 
@@ -96,7 +73,7 @@
   <div id="dbg-panel" hidden>方向诊断：等待检测…</div>
 
   <!-- ===== 脚本按依赖顺序加载 ===== -->
-  <script src="js/config.js?v=20260929b"></script>
+  <script src="js/config.js?v=20260929d"></script>
   <script src="js/storage.js?v=20260927a"></script>
   <!-- 开发调试工具：仅 URL 带 #dbg 时激活（全内容解锁 + 应用内浏览器），无 #dbg 的正式环境脚本立即退出，不创建 DOM、不写任何存储 -->
   <script src="js/debugTools.js?v=20260921r"></script>
@@ -106,7 +83,7 @@
   <script src="js/objects/Tower.js?v=20260929a"></script>
   <script src="js/scenes/BootScene.js?v=20260929a"></script>
   <script src="js/scenes/LevelSelectScene.js?v=20260929a"></script>
-  <script src="js/scenes/GameScene.js?v=20260929c"></script>
+  <script src="js/scenes/GameScene.js?v=20260929d"></script>
   <script src="js/main.js?v=20260921n"></script>
 </body>
 </html>

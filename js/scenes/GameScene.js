@@ -82,6 +82,10 @@ class GameScene extends Phaser.Scene {
     /* ---- 预览 / 选中 画面 ---- */
     this.ghost = this.add.graphics().setDepth(500);
     this.rangeGfx = this.add.graphics().setDepth(499);
+    /* 点击火力点时的选塔浮框（每次打开动态构建）与火力点高亮层 */
+    this.picker = null;
+    this._pickSpot = null;
+    this.spotHlGfx = this.add.graphics().setDepth(590);
 
     /* ---- 塔操作面板（升级 / 出售） ---- */
     this.panel = this.buildTowerPanel();
@@ -1117,6 +1121,7 @@ class GameScene extends Phaser.Scene {
     this.state = win ? 'won' : 'lost';
     this.ghost.clear();
     this.hidePanel();
+    this.closeTowerPicker(true);
     if (this.tutorialOverlay) this.tutorialOverlay.setVisible(false);
 
     /* 胜利 → 保存关卡进度 */
@@ -1155,7 +1160,7 @@ class GameScene extends Phaser.Scene {
   onPointerDown(pointer) {
     const x = pointer.x, y = pointer.y;
 
-    /* 右键：仅用于取消放置模式。
+    /* 右键：仅用于取消放置模式 / 关闭选塔浮框。
        右键直接出售已放置塔的功能已移除——出售塔请使用左键点塔
        弹出升级/出售面板，再点面板中的"出售"按钮。 */
     if (pointer.rightButtonDown()) {
@@ -1163,7 +1168,14 @@ class GameScene extends Phaser.Scene {
         this.setPlacement(null);
         this.floatText(x, y, '已取消放置', 0xffe27a);
       }
+      this.closeTowerPicker();
       return;
+    }
+
+    // 点在选塔浮框上：交给框内塔槽按钮，地图不响应（淡入未完成时也算命中）
+    if (this.picker && this.picker.visible) {
+      const pickHits = this.input.manager.hitTest(pointer, this.picker.list, this.cameras.main);
+      if (pickHits.length > 0) return;
     }
 
     // 点在升级/出售面板上：交给面板按钮，不触发放塔/取消
@@ -1172,10 +1184,11 @@ class GameScene extends Phaser.Scene {
       if (panelHits.length > 0) return;
     }
 
-    // 1) 优先点选已有塔（放大触控热区）
+    // 1) 优先点选已有塔（放大触控热区）→ 升级/出售面板（不弹选塔框）
     const tower = this.getTowerAt(x, y);
     if (tower) {
       this.setPlacement(null);
+      this.closeTowerPicker(true);
       this.selectTower(tower);
       return;
     }
@@ -1183,6 +1196,7 @@ class GameScene extends Phaser.Scene {
     // 2) 障碍物：不可放塔；放置模式点击仅提示，普通模式点击=指派最近的塔攻击
     const ob = this.getObstacleAt(x, y);
     if (ob) {
+      this.closeTowerPicker(true);
       if (this.selectedType) {
         this.floatText(ob.x, ob.y - 30, '障碍物，不能放塔', 0xff9d9d);
         this.tweens.add({ targets: ob.img, scaleX: 1.12, scaleY: 0.9, duration: 90, yoyo: true });
@@ -1192,13 +1206,34 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
-    // 3) 放置模式：网格吸附 + 合法性校验
+    // 3) 放置模式（旧底部栏路径，已无 UI 入口，保留逻辑兜底）：吸附 + 校验
     if (this.selectedType) {
       this.tryPlaceAt(x, y);
       return;
     }
 
-    // 4) 点空地：取消选中
+    // 3.5) 点击空火力点 → 弹出/再次点击关闭选塔浮框；
+    //      道路、装饰物、画面边缘等 canBuildAt 不通过的位置不弹框
+    const h = this.snapHotspot(x, y);
+    const pr = (this.buildCfg.picker && this.buildCfg.picker.spotPickRadius != null)
+      ? this.buildCfg.picker.spotPickRadius : this.buildCfg.touchRadius;
+    if (h && this.canBuildAt(h.x, h.y, h.key)) {
+      const d2 = (h.x - x) * (h.x - x) + (h.y - y) * (h.y - y);
+      if (d2 <= pr * pr) {
+        if (this._pickSpot && this._pickSpot.key === h.key) {
+          this.closeTowerPicker();      // 再次点击同一火力点：关闭
+          return;
+        }
+        this.hidePanel();
+        this.selectedTower = null;
+        this.rangeGfx.clear();
+        this.openTowerPicker(h);
+        return;
+      }
+    }
+
+    // 4) 点空白区域：关闭选塔框与升级面板，取消选中
+    this.closeTowerPicker();
     this.hidePanel();
     this.selectedTower = null;
     this.rangeGfx.clear();
@@ -1461,20 +1496,28 @@ class GameScene extends Phaser.Scene {
     g.strokeCircle(cx, cy, 22);
   }
 
-  placeTower(x, y, key) {
-    const typeKey = this.selectedType;
-    const cfg = TD_CONFIG.towers[typeKey];
-    if (this.gold < cfg.cost) { this.setPlacement(null); return; }
+  /** 落子建塔。typeKey 显式传入时=选塔浮框直接放置（不进入/不依赖放置模式）；
+   *  缺省时沿用旧放置模式（this.selectedType，底部栏移除后已无 UI 入口，保留兜底）。
+   *  返回是否放置成功。 */
+  placeTower(x, y, key, typeKey) {
+    const tk = typeKey || this.selectedType;
+    if (!tk) return false;
+    const cfg = TD_CONFIG.towers[tk];
+    if (this.gold < cfg.cost) {
+      if (!typeKey) this.setPlacement(null);   // 放置模式兜底：金币不足退出模式
+      return false;
+    }
     this.gold -= cfg.cost;
-    const tower = new Tower(this, x, y, typeKey);
+    const tower = new Tower(this, x, y, tk);
     tower.hotspotKey = key;            // 记录所占热区（出售时精确释放，主/交错晶格通用）
     this.towers.push(tower);
     this.occupied.set(key, tower);
     this.tweens.add({ targets: tower, scale: { from: 0.4, to: 1 }, duration: 160, ease: 'Back.out' });
     /* 放置后刷新可放置区域：被占的格子从图层中消失，无需手动清空 */
     if (this.selectedType) this.drawPlacementGrid();
-    // 金币不够再放一座时自动退出放置模式
-    if (this.gold < cfg.cost) this.setPlacement(null);
+    // 放置模式下金币不够再放一座时自动退出；选塔浮框每次点击只放一座
+    if (this.selectedType && !typeKey && this.gold < cfg.cost) this.setPlacement(null);
+    return true;
   }
 
   /* ============================================================
@@ -1616,6 +1659,183 @@ class GameScene extends Phaser.Scene {
   }
 
   hidePanel() { this.panel.setVisible(false); this._panelAction = null; }
+
+  /* ============================================================
+   * 选塔浮框（点击空火力点弹出；替代旧底部塔栏）
+   * ------------------------------------------------------------
+   * - 半透明深色圆角框 + 白边 + 外发光；列出本关已解锁塔，元素色
+   *   圆图标（火红/冰蓝/水青/牵引灰/雷紫/风绿）+ 名称 + 价格；
+   * - 金币不足：图标与文字置灰，点击给「金币不足」提示、不落塔；
+   * - 默认在火力点上方（避开手指遮挡），上方空间不够翻到下方，
+   *   横向钳制不超出屏幕；整体按画布 FIT 缩放自适应手机/电脑；
+   * - 淡入/淡出 140ms；打开期间被点火力点金色脉冲高亮。
+   * ============================================================ */
+
+  /** 浮框整体缩放：画布被 FIT 缩小时同步放大，保证屏上可读可点；
+   *  同时受画面宽高上限钳制，避免在小屏上过大 */
+  pickerScale(w, h) {
+    const k = Math.min(this.scale.displayScale.x, this.scale.displayScale.y) || 1;
+    const readScale = 1 / Math.min(k, 1);
+    const fitW = (this.W * 0.92) / w;
+    const fitH = (this.H * 0.55) / h;
+    return Math.max(1, Math.min(readScale, fitW, fitH));
+  }
+
+  /** 在指定火力点打开选塔浮框（每次打开重建，价格/解锁状态恒为最新） */
+  openTowerPicker(spot) {
+    this.closeTowerPicker(true);
+
+    const cfg = (this.buildCfg.picker) || {};
+    const itemW = cfg.itemW || 64;
+    const gap = cfg.gap != null ? cfg.gap : 6;
+    const padX = cfg.padX != null ? cfg.padX : 12;
+    const padY = cfg.padY != null ? cfg.padY : 10;
+    const iconR = cfg.iconR || 19;
+    const offY = cfg.offsetY != null ? cfg.offsetY : 30;
+    const edge = cfg.edgeMargin != null ? cfg.edgeMargin : 8;
+    const colors = cfg.iconColors || {};
+    const glyphs = cfg.iconGlyph || {};
+
+    /* 只列本关已解锁的塔（塔D/E/F 按通关进度），固定 A→F 顺序 */
+    const types = ['towerA', 'towerB', 'towerC', 'towerD', 'towerE', 'towerF']
+      .filter((k) => TD_CONFIG.towers[k] && TDStorage.isTowerUnlocked(k, this.levelId));
+    if (!types.length) return;
+
+    const innerW = types.length * itemW + (types.length - 1) * gap;
+    const W = innerW + padX * 2;
+    /* 图标 38 + 间距 + 名称行 16 + 价格行 15 + 上下内边距 */
+    const H = padY * 2 + iconR * 2 + 5 + 16 + 2 + 15;
+
+    const box = this.add.container(0, 0).setDepth(700).setVisible(false);
+
+    /* 外发光（白边外圈）+ 半透明深色框体 + 白色描边，Canvas/WebGL 通用 */
+    const bg = this.add.graphics();
+    bg.fillStyle(0xffffff, 0.14);
+    bg.fillRoundedRect(-W / 2 - 4, -H / 2 - 4, W + 8, H + 8, 18);
+    bg.fillStyle(0x101828, 0.86);
+    bg.fillRoundedRect(-W / 2, -H / 2, W, H, 14);
+    bg.lineStyle(2, 0xffffff, 0.72);
+    bg.strokeRoundedRect(-W / 2, -H / 2, W, H, 14);
+    box.add(bg);
+
+    const iconCy = -H / 2 + padY + iconR;
+    const nameCy = iconCy + iconR + 4 + 8;
+    const costCy = nameCy + 16;
+    const left = -innerW / 2 + itemW / 2;
+
+    types.forEach((tk, i) => {
+      const tc = TD_CONFIG.towers[tk];
+      const afford = this.gold >= tc.cost;
+      const col = colors[tk] != null ? colors[tk] : (tc.color != null ? tc.color : 0xffffff);
+      const cx = left + i * (itemW + gap);
+
+      const ig = this.add.graphics();
+      ig.fillStyle(col, afford ? 0.95 : 0.22);
+      ig.fillCircle(cx, iconCy, iconR);
+      ig.lineStyle(2, 0xffffff, afford ? 0.9 : 0.28);
+      ig.strokeCircle(cx, iconCy, iconR);
+      box.add(ig);
+
+      const glyph = this.add.text(cx, iconCy + 1, glyphs[tk] || '', {
+        fontFamily: TD_FONT_STACK, fontSize: '17px', fontStyle: 'bold',
+        color: afford ? '#ffffff' : '#cfd4da'
+      }).setOrigin(0.5);
+      glyph.setAlpha(afford ? 1 : 0.4);
+      box.add(glyph);
+
+      const name = this.add.text(cx, nameCy, tc.name, {
+        fontFamily: TD_FONT_STACK, fontSize: '12.5px', fontStyle: 'bold',
+        color: afford ? '#ffffff' : '#aab0b8'
+      }).setOrigin(0.5);
+      box.add(name);
+
+      const cost = this.add.text(cx, costCy, '🪙' + tc.cost, {
+        fontFamily: TD_FONT_STACK, fontSize: '12px', fontStyle: 'bold',
+        color: afford ? '#ffd66b' : '#9aa0a8'
+      }).setOrigin(0.5);
+      box.add(cost);
+
+      /* 整条塔槽为热区（放大触控）；置灰槽仍可点击，点击给金币不足提示 */
+      const zone = this.add.zone(cx, 0, itemW, H).setInteractive({ useHandCursor: afford });
+      zone.setData('ui', true);
+      zone.on('pointerdown', () => this.pickTowerFromBox(tk));
+      box.add(zone);
+    });
+
+    /* 定位：优先上方（手指在火力点处，不遮挡内容）；顶不下则翻下方；
+       横向钳制在画面内 */
+    const s = this.pickerScale(W, H);
+    box.setScale(s);
+    let py = spot.y - offY - H / 2;
+    if (py - H / 2 < edge) py = spot.y + offY + H / 2;
+    py = Phaser.Math.Clamp(py, H / 2 + edge, this.H - H / 2 - edge);
+    const px = Phaser.Math.Clamp(spot.x, W / 2 + edge, this.W - W / 2 - edge);
+    box.setPosition(px, py);
+
+    box.setAlpha(0).setVisible(true);
+    this.tweens.add({ targets: box, alpha: 1, duration: 140, ease: 'Cubic.out' });
+
+    this.picker = box;
+    this._pickSpot = spot;
+    this.drawSpotHighlight(spot);
+  }
+
+  /** 点击浮框中的某个塔：校验金币与火力点合法性后立即落塔关闭浮框 */
+  pickTowerFromBox(typeKey) {
+    const spot = this._pickSpot;
+    if (!spot) return;
+    if (!TDStorage.isTowerUnlocked(typeKey, this.levelId)) return;
+    const cfg = TD_CONFIG.towers[typeKey];
+    if (this.gold < cfg.cost) {
+      this.floatText(spot.x, spot.y - 32, '🪙 金币不足', 0xffd66b);
+      return;
+    }
+    if (!this.canBuildAt(spot.x, spot.y, spot.key)) {
+      this.floatText(spot.x, spot.y - 32, '✕ 不能放这里', 0xff9d9d);
+      this.closeTowerPicker();
+      return;
+    }
+    if (this.placeTower(spot.x, spot.y, spot.key, typeKey)) {
+      this.closeTowerPicker();
+    }
+  }
+
+  /** 关闭选塔浮框；immediate=true 时不播淡出（切换/落子/场景清理用） */
+  closeTowerPicker(immediate) {
+    const box = this.picker;
+    this.picker = null;
+    this._pickSpot = null;
+    this.clearSpotHighlight();
+    if (!box) return;
+    this.tweens.killTweensOf(box);
+    if (immediate) { box.destroy(true); return; }
+    this.tweens.add({
+      targets: box, alpha: 0, duration: 140, ease: 'Cubic.in',
+      onComplete: () => { if (box && box.scene) box.destroy(true); }
+    });
+  }
+
+  /** 被点击火力点的金色脉冲高亮（比常驻方格大一圈） */
+  drawSpotHighlight(h) {
+    const g = this.spotHlGfx;
+    g.clear();
+    g.setAlpha(1);
+    const b = this.buildCfg;
+    const size = (b.spotSize || 36) + 10;
+    const r = (b.spotRadius || 10) + 3;
+    g.fillStyle(0xffe27a, 0.16);
+    g.fillRoundedRect(h.x - size / 2, h.y - size / 2, size, size, r);
+    g.lineStyle(3.5, 0xffe27a, 0.95);
+    g.strokeRoundedRect(h.x - size / 2, h.y - size / 2, size, size, r);
+    this.tweens.killTweensOf(g);
+    this.tweens.add({ targets: g, alpha: 0.4, duration: 420, yoyo: true, repeat: -1 });
+  }
+
+  clearSpotHighlight() {
+    const g = this.spotHlGfx;
+    this.tweens.killTweensOf(g);
+    g.setAlpha(1).clear();
+  }
 
   drawRange(x, y, range, color) {
     const g = this.rangeGfx;
@@ -2759,6 +2979,7 @@ class GameScene extends Phaser.Scene {
     document.getElementById('overlay-end').classList.add('hidden');
     document.getElementById('overlay-pause').classList.add('hidden');
     if (this.tutorialOverlay) this.tutorialOverlay.setVisible(false);
+    this.closeTowerPicker(true);
     this.setPaused(false);
     this.scene.start('LevelSelectScene');
   }
@@ -2769,8 +2990,8 @@ class GameScene extends Phaser.Scene {
    * ============================================================ */
   startTutorial() {
     this.tutorialSteps = [
-      { title: '👋 欢迎，指挥官！', text: '点击下方的「塔A」按钮，选择你要建造的防御塔。' },
-      { title: '🏗 建造防御塔', text: '在绿色空地上点击，就可以把塔放在那里了。\n（不能放在路径或其他塔上哦）' },
+      { title: '👋 欢迎，指挥官！', text: '点击地图上的绿色火力点，会在旁边弹出选塔框。' },
+      { title: '🏗 建造防御塔', text: '在弹出的选塔框里点「塔A」，就能立刻把塔建在该火力点上。\n（道路、障碍物上不能放塔；再点一次火力点可关闭选塔框）' },
       { title: '⬆ 升级 / 出售', text: '点击已经放好的塔，可以升级它的攻击力，或者出售换金币。' },
       { title: '⚔ 开始战斗', text: '准备好后，点击「开始第 1 波」，抵御入侵的敌人吧！' }
     ];

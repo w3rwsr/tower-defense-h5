@@ -63,6 +63,31 @@ window.TD_CONFIG = {
     "campSpot": {            // 障碍物据点：琥珀色（视觉区别于道路点）
       "fill": 0xffc24b, "fillAlpha": 0.52,
       "border": 0xa8680c, "borderAlpha": 0.95
+    },
+    /* 点击火力点弹出的选塔浮框（替代底部塔栏；全部 JSON 可调）：
+       半透明深色圆角框，元素色圆图标，金币不足置灰；靠近屏幕边缘自动
+       上下翻转/横向钳制；容器整体按画布缩放自适应（GameScene 内实现） */
+    "picker": {
+      "spotPickRadius": 30,   // 点击距火力点中心多远算命中（与触控热区一致）
+      "itemW": 68,            // 单个塔槽宽（世界像素，容得下「风元素塔」四字）
+      "gap": 6,               // 塔槽间距
+      "padX": 12,             // 框左右内边距
+      "padY": 10,             // 框上下内边距
+      "iconR": 19,            // 元素色圆图标半径
+      "offsetY": 30,          // 浮框距火力点的间隔
+      "edgeMargin": 8,        // 浮框距画面边缘最小距离
+      "iconColors": {         // 图标元素色：火红 / 冰蓝 / 水青 / 牵引灰 / 雷紫 / 风绿
+        "towerA": 0xff5d4d,
+        "towerB": 0x4aa8ff,
+        "towerC": 0x2fd6c4,
+        "towerD": 0x9aa4ad,
+        "towerE": 0x9b6bff,
+        "towerF": 0x4ccf7e
+      },
+      "iconGlyph": {          // 圆图标中央的单字标识
+        "towerA": "火", "towerB": "冰", "towerC": "水",
+        "towerD": "引", "towerE": "雷", "towerF": "风"
+      }
     }
   },
 
