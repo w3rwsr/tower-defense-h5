@@ -46,6 +46,15 @@ class Enemy extends Phaser.GameObjects.Container {
     this.slowTimer = 0;
     this.slowFactor = 1;
 
+    /* ---- 元素印记（火/冰/雷/水，供风元素塔扩散） ----
+       纯视觉标记：头顶小光点（elementMark），颜色取 TD_CONFIG.elements。
+       规则：已有印记时新印记不覆盖（保留原有）；冰印记与减速同生同灭
+       （applySlow 内同步）；到期自动消散。 */
+    this.element = null;        // 'fire' | 'ice' | 'thunder' | 'water' | null
+    this.elementTimer = 0;      // 印记剩余秒数
+    this.elementMark = null;    // 印记光点 Graphics
+    this.elementMarkTween = null;
+
     /* ---- 三阶段 BOSS（第 5 关，JSON 驱动） ---- */
     this.bossPhase = 0;       // 0=普通怪/无阶段；1=一阶段（阈值分裂）；2=分身；3=合体强化
     this.bossPhaseLink = 0;   // 同一次分裂的分身共享的组号（合体时机按组判定）
@@ -86,6 +95,50 @@ class Enemy extends Phaser.GameObjects.Container {
     this.slowFactor = this.slowTimer > 0 ? Math.min(this.slowFactor, factor) : factor;
     this.slowTimer = Math.max(this.slowTimer, duration);
     this.body.setTint(0xbbeeff);
+    /* 冰元素印记：塔B 减速即冰（风塔冰扩散共用本方法），印记与减速同生同灭；
+       已有其他元素印记时不覆盖（update 中其他元素消散后若仍减速会回落为冰） */
+    if (!this.element || this.elementTimer <= 0) {
+      this.element = 'ice';
+      this.elementTimer = duration;
+      this.showElementMark('ice');
+    }
+  }
+
+  /* 附加元素印记（火/冰/雷/水）：已有印记不覆盖，只保留原有元素 */
+  applyElement(el, duration) {
+    if (this.dead || !el) return;
+    if (this.element && this.elementTimer > 0) return; // 已有元素：不覆盖
+    this.element = el;
+    this.elementTimer = duration;
+    this.showElementMark(el);
+  }
+
+  /* 元素印记光点：头顶右上的小圆点（独立于 body tint，不与减速/吸引闪光冲突） */
+  showElementMark(el) {
+    this.clearElementMark();
+    const conf = (TD_CONFIG.elements || {})[el];
+    if (!conf || !this.scene) return;
+    const g = this.scene.add.graphics();
+    g.fillStyle(conf.color, 0.95).fillCircle(0, 0, 5.5);
+    g.lineStyle(1.5, 0xffffff, 0.9).strokeCircle(0, 0, 5.5);
+    g.setPosition(this.radius * 0.85, -this.radius - 6);
+    this.add(g);
+    this.elementMark = g;
+    /* 轻微脉动，提示“身上有元素” */
+    this.elementMarkTween = this.scene.tweens.add({
+      targets: g, scale: 1.3, duration: 350, yoyo: true, repeat: -1
+    });
+  }
+
+  clearElementMark() {
+    if (this.elementMarkTween) {
+      try { this.elementMarkTween.stop(); } catch (_) {}
+      this.elementMarkTween = null;
+    }
+    if (this.elementMark) {
+      try { this.elementMark.destroy(); } catch (_) {}
+      this.elementMark = null;
+    }
   }
 
   takeDamage(value) {
@@ -121,6 +174,30 @@ class Enemy extends Phaser.GameObjects.Container {
         this.slowTimer = 0;
         this.slowFactor = 1;
         this.body.clearTint();
+      }
+    }
+
+    /* 元素印记计时：冰印记与减速同生同灭（跟随 slowTimer）；
+       其他元素到期消散，消散后若仍在减速则回落为冰印记 */
+    if (this.element === 'ice') {
+      if (this.slowTimer > 0) {
+        this.elementTimer = this.slowTimer;
+      } else {
+        this.element = null;
+        this.elementTimer = 0;
+        this.clearElementMark();
+      }
+    } else if (this.element && this.elementTimer > 0) {
+      this.elementTimer -= dt;
+      if (this.elementTimer <= 0) {
+        this.elementTimer = 0;
+        this.element = null;
+        this.clearElementMark();
+        if (this.slowTimer > 0) { // 回落为冰（减速的视觉同步）
+          this.element = 'ice';
+          this.elementTimer = this.slowTimer;
+          this.showElementMark('ice');
+        }
       }
     }
 
@@ -188,6 +265,7 @@ class Enemy extends Phaser.GameObjects.Container {
 
   /* 击杀后的弹跳消失动画，结束后由场景统一销毁 */
   playDeath() {
+    this.clearElementMark();  // 印记光点随死亡清除（tween 不残留）
     this.body.setTint(0xffffff);
     this.scene.tweens.add({
       targets: this,
@@ -202,6 +280,7 @@ class Enemy extends Phaser.GameObjects.Container {
   }
 
   destroyImmediately() {
+    this.clearElementMark();
     this.removed = true;
     this.destroy();
   }

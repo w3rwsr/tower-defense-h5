@@ -1559,6 +1559,13 @@ class GameScene extends Phaser.Scene {
         '   射程 ' + tower.stats.range +
         '\n电链弹跳 ' + tower.stats.jumps + ' 次'
       );
+    } else if (effType === 'windSpread') {
+      const weff = tower.cfg.effect || {};
+      p._stats.setText(
+        '伤害 ' + tower.stats.damage + '   射程 ' + tower.stats.range +
+        '\n元素扩散 半径 ' + (weff.spreadRadius != null ? weff.spreadRadius : 0) +
+        ' · 冷却 ' + (weff.spreadCooldown != null ? weff.spreadCooldown : 0) + 's'
+      );
     } else {
       p._stats.setText(
         '伤害 ' + tower.stats.damage +
@@ -1624,7 +1631,7 @@ class GameScene extends Phaser.Scene {
    * ============================================================ */
   fireProjectile(tower, target) {
     this.projectiles.push(
-      new Projectile(this, tower.x, tower.y - 4, target, tower.cfg.projectile, tower.stats.damage)
+      new Projectile(this, tower.x, tower.y - 4, target, tower.cfg.projectile, tower.stats.damage, tower)
     );
   }
 
@@ -1777,6 +1784,83 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  /* ============================================================
+   * 风元素塔：元素扩散
+   * 以 center 为中心，把 center 身上的元素印记扩散给 spreadRadius 内
+   * 【所有无元素】的小怪（已有元素者不覆盖，保留原有元素）；
+   * 扩散印记持续 spreadDuration 秒（固定值，JSON 驱动）；
+   * 冰元素扩散附带真实减速（iceSlowFactor/iceSlowDuration），
+   * 其余元素为视觉标记传播；targetFilter=nonBoss 时 BOSS 不被扩散。
+   * ============================================================ */
+  spreadElement(center, eff) {
+    const el = center.element;
+    if (!el || center.elementTimer <= 0) return;
+    const r = (eff && eff.spreadRadius != null) ? eff.spreadRadius : 90;
+    const dur = (eff && eff.spreadDuration != null) ? eff.spreadDuration : 3;
+    const nonBossOnly = !eff || eff.targetFilter === 'nonBoss';
+    const conf = (TD_CONFIG.elements || {})[el] || {};
+    const color = conf.color != null ? conf.color : 0xbfffd9;
+
+    /* 扩散光环：以目标为中心的元素色圆环，半径扩到扩散范围 */
+    this.spawnSpreadFx(center.x, center.y, r, color);
+
+    for (const e of this.enemies) {
+      if (e.dead || e.invulnTimer > 0 || e === center) continue;
+      if (nonBossOnly && e.cfg && e.cfg.boss) continue;   // BOSS 不被扩散
+      if (e.element && e.elementTimer > 0) continue;      // 已有元素：不覆盖
+      if (Phaser.Math.Distance.Between(center.x, center.y, e.x, e.y) > r + e.radius) continue;
+
+      if (el === 'ice') {
+        /* 冰元素扩散 = 真实减速（applySlow 内自动挂上冰印记） */
+        e.applySlow(
+          eff.iceSlowFactor != null ? eff.iceSlowFactor : 0.5,
+          Math.min(dur, eff.iceSlowDuration != null ? eff.iceSlowDuration : dur)
+        );
+      } else {
+        /* 火/雷/水：视觉印记传播（不改变任何数值） */
+        e.applyElement(el, dur);
+      }
+      /* 被扩散的小怪身上播放短暂元素光效，明确提示“元素被传播了” */
+      this.spawnSpreadHitFx(e.x, e.y, color);
+    }
+  }
+
+  /* 扩散光环：从命中点扩散到 spreadRadius 的元素色圆环（纯视觉） */
+  spawnSpreadFx(x, y, radius, color) {
+    const ring = this.add.graphics().setDepth(45);
+    const st = { r: 14, a: 0.85 };
+    this.tweens.add({
+      targets: st, r: radius, a: 0,
+      duration: 380, ease: 'Quad.out',
+      onUpdate: () => {
+        ring.clear();
+        ring.fillStyle(color, st.a * 0.10);
+        ring.fillCircle(x, y, st.r);
+        ring.lineStyle(3, color, st.a);
+        ring.strokeCircle(x, y, st.r);
+      },
+      onComplete: () => ring.destroy()
+    });
+  }
+
+  /* 被扩散小怪的短暂元素光效：小圆环炸开 + 白芯一闪（纯视觉） */
+  spawnSpreadHitFx(x, y, color) {
+    const g = this.add.graphics().setDepth(46);
+    const st = { r: 4, a: 0.9 };
+    this.tweens.add({
+      targets: st, r: 16, a: 0,
+      duration: 260, ease: 'Quad.out',
+      onUpdate: () => {
+        g.clear();
+        g.lineStyle(2.5, color, st.a);
+        g.strokeCircle(x, y, st.r);
+        g.fillStyle(0xffffff, st.a * 0.5);
+        g.fillCircle(x, y, st.r * 0.4);
+      },
+      onComplete: () => g.destroy()
+    });
+  }
+
   floatText(x, y, text, color) {
     const t = this.add.text(x, y, text, {
       fontFamily: TD_FONT_STACK,
@@ -1859,6 +1943,8 @@ class GameScene extends Phaser.Scene {
        由真实 update 循环驱动，验证：沿路回拉生效、不出道路、
        脉冲每 2s 一次、间隙回弹归位、ctrlSlow 期间仍继续前进。 */
     window.__tdPullTest = () => this.runPullTest();
+    /* 风元素塔「风刃 + 元素扩散」真实运行时自查：控制台 window.__tdWindTest() */
+    window.__tdWindTest = () => this.runWindTest();
   }
 
   /**
@@ -2161,6 +2247,102 @@ class GameScene extends Phaser.Scene {
         this._pullTestObjs.enemies.forEach(e => { try { this.enemies = this.enemies.filter(v => v !== e); e.destroyImmediately && e.destroyImmediately(); } catch(_){} });
         this._pullTestObjs = null;
       }
+    }
+    return report;
+  }
+
+  /**
+   * 风元素塔真实运行时自查（控制台 window.__tdWindTest()）。
+   * 在当前 GameScene 内构造真实 Tower(towerF) + 真实 Enemy，手动触发
+   * Projectile.impact（同步结算），逐项验证：
+   *   behaviorClass      行为类为 WindSpreadBehavior；
+   *   noOverwrite        已有火印记的怪 applyElement('water') 不被覆盖；
+   *   noElementNoSpread  目标无元素 → 不扩散（仅风刃伤害）；
+   *   spreadToNearest    目标有火印记 → 半径内无元素小怪获得火印记；
+   *   keepExisting       半径内已有水印记的小怪保留水（不覆盖）；
+   *   farUntouched       扩散半径外的小怪不受影响；
+   *   bossUntouched      BOSS 不被附加扩散印记（targetFilter=nonBoss）；
+   *   cooldownBlocks     扩散冷却中再次命中 → 不扩散；
+   *   cooldownReady      冷却就绪后命中 → 恢复扩散；
+   *   slowMarksIce       applySlow 自动挂冰印记（塔B 减速即冰）；
+   *   iceSpreadSlows     冰元素扩散附带真实减速（slowTimer>0 且挂冰印记）。
+   * 测试对象结束全部清理，不影响正常游戏。
+   */
+  runWindTest() {
+    const report = { step: 'init', checks: {}, conclusion: null, error: null };
+    const testTowers = [], testEnemies = [];
+    try {
+      const mkEnemy = (dist, typeKey) => {
+        const e = new Enemy(this, typeKey || 'enemyX', 0);
+        e.pathDist = dist;
+        e.baseSpeed = 0; // 静止夹具：只测元素/扩散，不测移动
+        e.update(0);
+        this.enemies.push(e); testEnemies.push(e);
+        return e;
+      };
+      const clearMark = (e) => { e.element = null; e.elementTimer = 0; e.clearElementMark(); };
+      /* 真实风刃：构造 Projectile 并同步触发 impact（伤害 + 扩散判定） */
+      const fireBlade = (tower, target) => {
+        const p = new Projectile(this, tower.x, tower.y, target, tower.cfg.projectile, tower.stats.damage, tower);
+        p.impact();
+      };
+
+      /* 路径直线段上的夹具：pathDist 差即世界距离（路线0首段均为水平直线） */
+      const center = mkEnemy(300);   // 扩散中心（距塔 100px，射程 150 内）
+      const wind = new Tower(this, center.x, center.y + 100, 'towerF');
+      this.towers.push(wind); testTowers.push(wind);
+      report.checks.behaviorClass = wind.behavior.constructor.name;
+
+      /* 不覆盖：火印记的怪再挂水，仍保留火 */
+      center.applyElement('fire', 4);
+      center.applyElement('water', 4);
+      report.checks.noOverwrite = center.element === 'fire';
+
+      /* 目标无元素 → 不扩散（见证怪不得获得任何印记） */
+      const plain = mkEnemy(350);
+      const witness = mkEnemy(320);
+      fireBlade(wind, plain);
+      report.checks.noElementNoSpread = !witness.element && !plain.element;
+
+      /* 目标有火印记 → 半径 90 内无元素小怪获得火；已有水者保留；
+         半径外（260px）不受影响；BOSS 不被扩散 */
+      const tagged = mkEnemy(330); tagged.applyElement('water', 4);
+      const far = mkEnemy(560);
+      const boss = mkEnemy(320, 'enemyBoss');
+      fireBlade(wind, center);
+      report.checks.spreadToNearest = witness.element === 'fire';
+      report.checks.keepExisting = tagged.element === 'water';
+      report.checks.farUntouched = !far.element;
+      report.checks.bossUntouched = !boss.element;
+
+      /* 扩散冷却：冷却中命中不扩散；手动就绪后恢复扩散 */
+      clearMark(witness);
+      fireBlade(wind, center);
+      report.checks.cooldownBlocks = !witness.element;
+      wind.behavior.spreadTimer = 0; // 手动清零扩散冷却
+      fireBlade(wind, center);
+      report.checks.cooldownReady = witness.element === 'fire';
+
+      /* 冰：塔B 减速自动挂冰印记；冰扩散附带真实减速 */
+      clearMark(center); clearMark(witness);
+      center.applySlow(0.5, 1.6);
+      report.checks.slowMarksIce = center.element === 'ice';
+      wind.behavior.spreadTimer = 0;
+      fireBlade(wind, center);
+      report.checks.iceSpreadSlows = witness.element === 'ice' && witness.slowTimer > 0;
+
+      const c = report.checks;
+      report.conclusion = (c.behaviorClass === 'WindSpreadBehavior' && c.noOverwrite &&
+        c.noElementNoSpread && c.spreadToNearest && c.keepExisting && c.farUntouched &&
+        c.bossUntouched && c.cooldownBlocks && c.cooldownReady && c.slowMarksIce &&
+        c.iceSpreadSlows) ? 'PASS' : 'FAIL';
+      report.step = 'done';
+    } catch (err) {
+      report.error = String(err && err.stack || err);
+      report.step = 'error';
+    } finally {
+      testTowers.forEach((t) => { try { this.towers = this.towers.filter((v) => v !== t); t.destroy(); } catch (_) {} });
+      testEnemies.forEach((e) => { try { this.enemies = this.enemies.filter((v) => v !== e); e.destroyImmediately(); } catch (_) {} });
     }
     return report;
   }

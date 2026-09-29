@@ -96,6 +96,29 @@ class BootScene extends Phaser.Scene {
       });
     });
 
+    /* ---------- 风元素塔风刃（旋风贴图，仅当配置引用 proj_wind 时生成） ----------
+       三条旋臂 + 白芯，运行时由 Projectile 持续旋转形成旋风效果 */
+    const needWind = Object.values(C.towers).some((t) => t.projectile && t.projectile.texture === 'proj_wind');
+    if (needWind) {
+      this.makeTexture('proj_wind', 24, 24, (g) => {
+        for (let i = 0; i < 3; i++) {
+          const a0 = (i / 3) * Math.PI * 2;
+          /* 内层旋臂（风绿） */
+          g.lineStyle(3.2, 0x7fe3a8, 1);
+          g.beginPath();
+          g.arc(12, 12, 5.5, a0, a0 + Math.PI * 0.75);
+          g.strokePath();
+          /* 外层旋臂（近白） */
+          g.lineStyle(2.4, 0xeafff3, 0.95);
+          g.beginPath();
+          g.arc(12, 12, 8.5, a0 + 0.5, a0 + Math.PI * 0.6 + 0.5);
+          g.strokePath();
+        }
+        g.fillStyle(0xffffff, 0.95);
+        g.fillCircle(12, 12, 2.6);
+      });
+    }
+
     /* ---------- 地面装饰（灌木 / 小花 / 石头） ---------- */
     this.makeTexture('decor_bush', 36, 30, (g) => {
       g.fillStyle(0x4f9e38, 1);

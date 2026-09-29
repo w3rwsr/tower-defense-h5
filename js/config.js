@@ -146,6 +146,20 @@ window.TD_CONFIG = {
    *   { "unlockLevel": N } —— 通关第 N-1 关后永久解锁，
    *     仅在第 N 关及之后关卡的商店中可选用（TDStorage 统一判定 + 持久化）
    * upgrade: 每级相对上一级的成长系数                            */
+  /* ---------- 元素印记（火/冰/雷/水） ----------
+   * 现有塔命中小怪时附加的【视觉标记】（不改变任何塔的伤害/攻速/射程），
+   * 供风元素塔检测与扩散。color 用于印记光点、扩散光环与命中光效。
+   *   火 fire —— 塔A 单体弹命中附加（projectile.element）
+   *   冰 ice  —— 塔B 减速即冰，印记与减速同生同灭（Enemy.applySlow 内同步）
+   *   水 water—— 塔C 速射弹命中附加（projectile.element）
+   *   雷 thunder—— 塔E 电链命中附加（effect.element） */
+  "elements": {
+    "fire":    { "name": "火", "color": 0xff7a45 },
+    "ice":     { "name": "冰", "color": 0x7fdcff },
+    "thunder": { "name": "雷", "color": 0xffe23b },
+    "water":   { "name": "水", "color": 0x4a90e2 }
+  },
+
   "towers": {
     "towerA": {
       "name": "塔A",
@@ -163,6 +177,8 @@ window.TD_CONFIG = {
         "speed": 460,         // 弹道速度 px/s
         "radius": 8,
         "color": 0x9fd0ff,
+        "element": "fire",        // 火元素印记（纯视觉标记，伤害不变；供风元素塔扩散）
+        "elementDuration": 4,     // 印记持续秒数
         "effect": { "type": "damage", "value": 42 }
       },
       "upgrade": {
@@ -223,6 +239,8 @@ window.TD_CONFIG = {
         "speed": 560,
         "radius": 6,
         "color": 0xffe2a3,
+        "element": "water",       // 水元素印记（纯视觉标记，伤害不变；供风元素塔扩散）
+        "elementDuration": 4,
         "effect": { "type": "damage", "value": 7 }
       },
       "upgrade": {
@@ -296,10 +314,12 @@ window.TD_CONFIG = {
       },
       "effect": {
         "type": "chain",
-        "jumps": 3,            // 基础弹跳次数（1 级时 3 跳）
-        "jumpDecay": 0.90,     // 每跳伤害衰减 10%（伤害 = 上一跳 × 0.90）
-        "chainRange": 130,     // 弹跳搜索范围：上一目标到此范围内的最近未被击中怪
-        "visualDuration": 0.25 // 闪电视觉持续秒数（0.2~0.3，避免画面杂乱）
+        "element": "thunder",    // 雷元素印记（纯视觉标记，伤害不变；供风元素塔扩散）
+        "elementDuration": 4,    // 印记持续秒数
+        "jumps": 3,              // 基础弹跳次数（1 级时 3 跳）
+        "jumpDecay": 0.90,       // 每跳伤害衰减 10%（伤害 = 上一跳 × 0.90）
+        "chainRange": 130,       // 弹跳搜索范围：上一目标到此范围内的最近未被击中怪
+        "visualDuration": 0.25   // 闪电视觉持续秒数（0.2~0.3，避免画面杂乱）
       },
       "upgrade": {
         "maxLevel": 3,
@@ -308,6 +328,57 @@ window.TD_CONFIG = {
         "range": 1.10,
         "cooldown": 0.88,
         "jumps": 1             // 每升 1 级弹跳次数 +1（1级3跳/2级4跳/3级5跳）
+      }
+    },
+
+    /* 风元素塔（towerF）—— 元素扩散·辅助：
+       发射风刃命中单只小怪，自身伤害极低（stats.damage=4）；
+       命中后检查目标元素印记（火/冰/雷/水，见 TD_CONFIG.elements）：
+       - 目标有元素 → 以目标为中心，把该元素扩散给 spreadRadius 内
+         【所有无元素】的小怪（已有元素者不覆盖；冰扩散附带真实减速，
+         其余元素为视觉标记传播），扩散印记持续 spreadDuration 秒；
+       - 目标无元素 → 不扩散，只造成少量伤害。
+       扩散冷却 spreadCooldown 秒一次（独立于风刃攻击间隔 stats.cooldown，
+       由 WindSpreadBehavior.tryConsumeSpread 判定），避免无限连锁扩散；
+       扩散目标 targetFilter=nonBoss：BOSS 不被附加扩散印记（中心目标不限）。
+       风刃贴图 proj_wind（旋风）+ spin 旋转，由 BootScene/Projectile 处理。
+       解锁：通关第 3 关后永久解锁，第 4 关及之后关卡可用。 */
+    "towerF": {
+      "name": "风元素塔",
+      "desc": "元素扩散·辅助",
+      "cost": 130,
+      "color": 0x7fe3a8,
+      "darkColor": 0x3fae72,
+      "unlock": { "unlockLevel": 4 },
+      "targeting": "furthest",
+      "stats": {
+        "damage": 4,
+        "range": 150,
+        "cooldown": 1.20       // 风刃攻击间隔（秒）
+      },
+      "projectile": {
+        "speed": 520,
+        "radius": 9,
+        "color": 0xbfffd9,
+        "texture": "proj_wind",  // 旋风专用贴图（BootScene 按需生成）
+        "spin": 12,              // 风刃旋转速度（弧度/秒）
+        "effect": { "type": "windSpread", "value": 4 }
+      },
+      "effect": {
+        "type": "windSpread",
+        "spreadRadius": 90,        // 扩散半径（像素）
+        "spreadDuration": 3.0,     // 扩散出去的印记持续秒数（固定值）
+        "spreadCooldown": 2.5,     // 扩散冷却（秒）：每 2.5s 最多扩散一次
+        "targetFilter": "nonBoss", // 扩散目标仅小怪（中心目标不限）
+        "iceSlowFactor": 0.50,     // 冰元素扩散附带的真实减速系数
+        "iceSlowDuration": 1.6     // 冰扩散减速持续秒数
+      },
+      "upgrade": {
+        "maxLevel": 3,
+        "costFactor": 0.80,
+        "damage": 1.50,
+        "range": 1.10,
+        "cooldown": 0.90
       }
     }
   },

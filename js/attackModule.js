@@ -334,6 +334,11 @@
         hit.add(current);
         /* 造成伤害（鸭子类型：小怪 / 障碍物通用 takeDamage） */
         if (!current.dead) current.takeDamage(Math.round(dmg));
+        /* 雷元素印记（JSON effect.element 驱动）：纯视觉标记，不改变电链伤害；
+           鸭子类型守卫——障碍物无 applyElement，自动跳过 */
+        if (this.eff.element && !current.dead && typeof current.applyElement === 'function') {
+          current.applyElement(this.eff.element, this.eff.elementDuration || 4);
+        }
         chainPoints.push({ x: current.x, y: current.y });
 
         /* 最后一次后不再搜索下一目标 */
@@ -362,6 +367,36 @@
     }
   }
 
+  /* ============================================================
+   * 风元素塔行为（towerF）：风刃攻击与 AttackBehavior 完全相同
+   * （索敌→发射风刃→攻击冷却），额外维护【扩散冷却】：
+   *   风刃命中带元素印记的小怪时，由 Projectile 回调 tryConsumeSpread()；
+   *   冷却就绪才允许本次扩散并重置冷却（spreadCooldown 秒，JSON 驱动），
+   *   冷却中命中不扩散（只造成风刃伤害）——避免无限连锁扩散。
+   * 扩散计时用 dt（含暂停/倍速换算），与攻击冷却同一时钟。
+   * ============================================================ */
+  class WindSpreadBehavior extends AttackBehavior {
+    constructor(tower, cfg) {
+      super(tower, cfg);
+      const eff = cfg.effect || {};
+      this.spreadCooldown = eff.spreadCooldown != null ? eff.spreadCooldown : 2.5;
+      this.spreadTimer = 0; // 出生即可扩散
+    }
+
+    update(dt, ctx) {
+      if (this.spreadTimer > 0) this.spreadTimer -= dt;
+      super.update(dt, ctx); // 索敌 + 风刃发射 + 攻击冷却（复用普通攻击）
+    }
+
+    /* 扩散冷却判定：就绪 → 消耗本次扩散机会并开始计时（返回 true）；
+       冷却中 → 返回 false，本次命中不扩散 */
+    tryConsumeSpread() {
+      if (this.spreadTimer > 0) return false;
+      this.spreadTimer = this.spreadCooldown;
+      return true;
+    }
+  }
+
   /* 对外接口 */
-  window.TDAttack = { AttackBehavior, PullBehavior, ChainBehavior, Targeting };
+  window.TDAttack = { AttackBehavior, PullBehavior, ChainBehavior, WindSpreadBehavior, Targeting };
 })();

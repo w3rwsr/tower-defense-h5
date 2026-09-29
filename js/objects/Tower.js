@@ -32,13 +32,15 @@ class Tower extends Phaser.GameObjects.Container {
 
     this.recalcStats();
     // 攻击逻辑：按 effect.type 选择行为
-    //   pull  → 范围吸引（塔D）
-    //   chain → 电链弹跳（塔E）
-    //   其他  → 普通弹道攻击（塔A/B/C）
+    //   pull       → 范围吸引（塔D）
+    //   chain      → 电链弹跳（塔E）
+    //   windSpread → 风刃 + 元素扩散冷却（风元素塔）
+    //   其他       → 普通弹道攻击（塔A/B/C）
     const eff = this.cfg.effect;
     let BehaviorClass = TDAttack.AttackBehavior;
     if (eff && eff.type === 'pull') BehaviorClass = TDAttack.PullBehavior;
     else if (eff && eff.type === 'chain') BehaviorClass = TDAttack.ChainBehavior;
+    else if (eff && eff.type === 'windSpread') BehaviorClass = TDAttack.WindSpreadBehavior;
     this.behavior = new BehaviorClass(this, this.cfg);
     this.aimAngle = -Math.PI / 2;
     this.turret.rotation = this.aimAngle;

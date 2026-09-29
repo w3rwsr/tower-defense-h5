@@ -120,7 +120,7 @@ class LevelSelectScene extends Phaser.Scene {
     }
 
     /* ---- 底部提示 ---- */
-    this.add.text(W / 2, vl.hintY, '通关第 1 关解锁塔D，通关第 2 关解锁塔E·电链弹跳', {
+    this.add.text(W / 2, vl.hintY, '通关第 1 关解锁塔D，通关第 2 关解锁塔E·电链弹跳，通关第 3 关解锁风元素塔', {
       fontFamily: TD_FONT_STACK,
       fontSize: this.ls(13) + 'px', color: '#1e4620'
     }).setOrigin(0.5).setStroke('#e6f7d8', 3);
