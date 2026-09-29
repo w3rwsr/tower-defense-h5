@@ -1786,18 +1786,63 @@ class GameScene extends Phaser.Scene {
 
   /* ============================================================
    * 风元素塔：元素扩散
-   * 以 center 为中心，把 center 身上的元素印记扩散给 spreadRadius 内
-   * 【所有无元素】的小怪（已有元素者不覆盖，保留原有元素）；
-   * 扩散印记持续 spreadDuration 秒（固定值，JSON 驱动）；
-   * 冰元素扩散附带真实减速（iceSlowFactor/iceSlowDuration），
-   * 其余元素为视觉标记传播；targetFilter=nonBoss 时 BOSS 不被扩散。
+   * 新反应模式（第 6 关起，规则见 elementSystem）：
+   *   - 扩散目标元素 = center 身上【最早附着】的元素（火/冰/水/雷均可，含水）；
+   *   - 每个目标附着 spreadAmount(1) 单位，center 元素量【不减少】（额外附加）；
+   *   - 最多 spreadMaxTargets(5) 个：半径内【身上没有该元素】的小怪，
+   *     按距离从近到远选取（可带着其他元素，被扩散元素照常与其反应）；
+   *   - sourceEl=null：扩散可触发反应特效/冰冻，但不享受任何伤害倍率；
+   *   - targetFilter=nonBoss：BOSS 不被扩散（center 不限）。
+   * 旧印记模式（1~5 关）：保持原逻辑——扩散给半径内所有【完全无元素】的
+   *   小怪，冰扩散附带真实减速，其余为视觉印记传播。
    * ============================================================ */
   spreadElement(center, eff) {
+    const r = (eff && eff.spreadRadius != null) ? eff.spreadRadius : 90;
+    const nonBossOnly = !eff || eff.targetFilter === 'nonBoss';
+
+    /* ---- 新反应模式 ---- */
+    if (center.reactionsEnabled) {
+      const el = (typeof center.primaryElement === 'function') ? center.primaryElement() : null;
+      if (!el) return;
+      const sys = TD_CONFIG.elementSystem || {};
+      const amount = (eff && eff.spreadAmount != null)
+        ? eff.spreadAmount
+        : (sys.spreadAmount != null ? sys.spreadAmount : 1);
+      const maxTargets = (eff && eff.spreadMaxTargets != null)
+        ? eff.spreadMaxTargets : 5;
+      const conf = (TD_CONFIG.elements || {})[el] || {};
+      const color = conf.color != null ? conf.color : 0xbfffd9;
+
+      /* 候选：半径内、非 center、非 BOSS（按配置）、身上【没有该元素】的小怪 */
+      const cands = [];
+      for (const e of this.enemies) {
+        if (e.dead || e.invulnTimer > 0 || e === center) continue;
+        if (nonBossOnly && e.cfg && e.cfg.boss) continue;
+        if (typeof e.hasElement === 'function' && e.hasElement(el)) continue;
+        const d = Phaser.Math.Distance.Between(center.x, center.y, e.x, e.y);
+        if (d > r + e.radius) continue;
+        cands.push({ e, d });
+      }
+      cands.sort((a, b) => a.d - b.d); // 最近优先
+
+      /* 扩散光环：以目标为中心的元素色圆环，半径扩到扩散范围 */
+      this.spawnSpreadFx(center.x, center.y, r, color);
+
+      const n = Math.min(maxTargets, cands.length);
+      for (let i = 0; i < n; i++) {
+        const target = cands[i].e;
+        /* 额外附着 1 单位：center 不扣量；sourceEl=null 不享受倍率；
+           目标身上的其他元素照常与扩散元素反应（含水元素） */
+        target.attachElement(el, amount, null);
+        this.spawnSpreadHitFx(target.x, target.y, color);
+      }
+      return;
+    }
+
+    /* ---- 旧印记模式（1~5 关原样） ---- */
     const el = center.element;
     if (!el || center.elementTimer <= 0) return;
-    const r = (eff && eff.spreadRadius != null) ? eff.spreadRadius : 90;
     const dur = (eff && eff.spreadDuration != null) ? eff.spreadDuration : 3;
-    const nonBossOnly = !eff || eff.targetFilter === 'nonBoss';
     const conf = (TD_CONFIG.elements || {})[el] || {};
     const color = conf.color != null ? conf.color : 0xbfffd9;
 
@@ -1859,6 +1904,103 @@ class GameScene extends Phaser.Scene {
       },
       onComplete: () => g.destroy()
     });
+  }
+
+  /* ============================================================
+   * 元素反应特效（rule.fx 驱动）：怪身位置一圈元素色光环 + 数颗向外迸射
+   * 的火花/冰晶/电弧，上方飘反应名（有伤害倍率时附带 ×N）。
+   *   melt 融化（火+冰，暖橙火光）/ vaporize 蒸发（火+水，青白蒸汽）/
+   *   freeze 冰冻（水+冰，冰蓝，无倍率）/ charged 感电（水+雷，明黄电弧）/
+   *   overload 超载（火+雷，橙黄爆炸，光环更大）/
+   *   superconductor 超导（冰+雷，淡蓝碎冰）。
+   * ============================================================ */
+  spawnReactionFx(enemy, rule, mult) {
+    if (!enemy || !rule) return;
+    const x = enemy.x, y = enemy.y;
+    const presets = {
+      melt:           { color: 0xff8a3d, ring: 26, sparks: 8 },
+      vaporize:       { color: 0xcfeeff, ring: 24, sparks: 6 },
+      freeze:         { color: 0x8fd8ff, ring: 22, sparks: 6 },
+      charged:        { color: 0xffe23b, ring: 24, sparks: 7 },
+      overload:       { color: 0xffb02e, ring: 34, sparks: 10 },
+      superconductor: { color: 0xa9e6ff, ring: 26, sparks: 8 }
+    };
+    const p = presets[rule.fx] || presets.melt;
+
+    /* 光环爆散 */
+    const ring = this.add.graphics().setDepth(47);
+    const rs = { r: 8, a: 0.95 };
+    this.tweens.add({
+      targets: rs, r: p.ring, a: 0,
+      duration: 300, ease: 'Quad.out',
+      onUpdate: () => {
+        ring.clear();
+        ring.fillStyle(p.color, rs.a * 0.12).fillCircle(x, y, rs.r);
+        ring.lineStyle(3, p.color, rs.a).strokeCircle(x, y, rs.r);
+      },
+      onComplete: () => ring.destroy()
+    });
+
+    /* 火花/冰晶/电弧迸射（10 个小亮点各带随机方向，随机绘制在同一 graphics） */
+    const parts = [];
+    for (let i = 0; i < p.sparks; i++) {
+      const ang = (Math.PI * 2 * i) / p.sparks + Math.random() * 0.5;
+      const dist = 14 + Math.random() * 12;
+      parts.push({ x: x, y: y, dx: Math.cos(ang) * dist, dy: Math.sin(ang) * dist, r: 2 + Math.random() * 1.6 });
+    }
+    const spark = this.add.graphics().setDepth(47);
+    const ss = { t: 0 };
+    this.tweens.add({
+      targets: ss, t: 1,
+      duration: 320, ease: 'Cubic.out',
+      onUpdate: () => {
+        spark.clear();
+        for (const pt of parts) {
+          spark.fillStyle(p.color, 0.9 * (1 - ss.t));
+          spark.fillCircle(pt.x + pt.dx * ss.t, pt.y + pt.dy * ss.t, pt.r * (1 - ss.t * 0.5));
+        }
+      },
+      onComplete: () => spark.destroy()
+    });
+
+    /* 反应名 + 倍率（冰冻无倍率；风塔扩散触发的反应 mult=0 也不显示倍率） */
+    const label = rule.label + (mult && mult > 1 ? ' ×' + mult : '');
+    this.floatText(x, y - enemy.radius - 14, label, p.color);
+  }
+
+  /* 提前破冰特效：冰蓝碎块四溅 + 白色冰环 */
+  spawnShatterFx(x, y) {
+    const ring = this.add.graphics().setDepth(47);
+    const rs = { r: 10, a: 0.9 };
+    this.tweens.add({
+      targets: rs, r: 26, a: 0,
+      duration: 260, ease: 'Quad.out',
+      onUpdate: () => {
+        ring.clear();
+        ring.lineStyle(2.5, 0xbfe8ff, rs.a).strokeCircle(x, y, rs.r);
+      },
+      onComplete: () => ring.destroy()
+    });
+    const shards = [];
+    for (let i = 0; i < 8; i++) {
+      const ang = (Math.PI * 2 * i) / 8 + Math.random() * 0.4;
+      shards.push({ x, y, dx: Math.cos(ang) * (14 + Math.random() * 10), dy: Math.sin(ang) * (14 + Math.random() * 10) });
+    }
+    const g = this.add.graphics().setDepth(47);
+    const st = { t: 0 };
+    this.tweens.add({
+      targets: st, t: 1,
+      duration: 300, ease: 'Cubic.out',
+      onUpdate: () => {
+        g.clear();
+        g.fillStyle(0xdff3ff, 1 - st.t);
+        for (const s of shards) {
+          g.fillRect(s.x + s.dx * st.t - 1.5, s.y + s.dy * st.t - 1.5, 3, 3);
+        }
+      },
+      onComplete: () => g.destroy()
+    });
+    this.floatText(x, y - 24, '裂甲 +1', 0xff7a7a);
   }
 
   floatText(x, y, text, color) {
@@ -1945,6 +2087,9 @@ class GameScene extends Phaser.Scene {
     window.__tdPullTest = () => this.runPullTest();
     /* 风元素塔「风刃 + 元素扩散」真实运行时自查：控制台 window.__tdWindTest() */
     window.__tdWindTest = () => this.runWindTest();
+    /* 元素反应系统真实运行时自查（附着量/系数/倍率归属/冰冻易伤/BOSS减速）：
+       控制台 window.__tdReactionTest()，任何关卡内均可运行 */
+    window.__tdReactionTest = () => this.runElementTest();
   }
 
   /**
@@ -2253,23 +2398,19 @@ class GameScene extends Phaser.Scene {
 
   /**
    * 风元素塔真实运行时自查（控制台 window.__tdWindTest()）。
-   * 在当前 GameScene 内构造真实 Tower(towerF) + 真实 Enemy，手动触发
-   * Projectile.impact（同步结算），逐项验证：
-   *   behaviorClass      行为类为 WindSpreadBehavior；
-   *   noOverwrite        已有火印记的怪 applyElement('water') 不被覆盖；
-   *   noElementNoSpread  目标无元素 → 不扩散（仅风刃伤害）；
-   *   spreadToNearest    目标有火印记 → 半径内无元素小怪获得火印记；
-   *   keepExisting       半径内已有水印记的小怪保留水（不覆盖）；
-   *   farUntouched       扩散半径外的小怪不受影响；
-   *   bossUntouched      BOSS 不被附加扩散印记（targetFilter=nonBoss）；
-   *   cooldownBlocks     扩散冷却中再次命中 → 不扩散；
-   *   cooldownReady      冷却就绪后命中 → 恢复扩散；
-   *   slowMarksIce       applySlow 自动挂冰印记（塔B 减速即冰）；
-   *   iceSpreadSlows     冰元素扩散附带真实减速（slowTimer>0 且挂冰印记）。
+   * 自动按当前关卡模式分支：
+   * 旧印记模式（1~5关）：noOverwrite / noElementNoSpread / spreadToNearest /
+   *   keepExisting / farUntouched / bossUntouched / cooldown / slowMarksIce /
+   *   iceSpreadSlows；
+   * 新反应模式（第6关起）：amountOne（扩散 1 单位）/ centerKept（中心不扣量）/
+   *   maxFive（最多 5 个、最近优先）/ waterSpread（可扩散水）/
+   *   sameElementSkipped（已有该元素者跳过，名额让给远处无素怪）/
+   *   farUntouched / bossUntouched / cooldown / iceWaterFreezes
+   *   （扩散冰到带水怪 → 触发冰冻）。
    * 测试对象结束全部清理，不影响正常游戏。
    */
   runWindTest() {
-    const report = { step: 'init', checks: {}, conclusion: null, error: null };
+    const report = { step: 'init', mode: null, checks: {}, conclusion: null, error: null };
     const testTowers = [], testEnemies = [];
     try {
       const mkEnemy = (dist, typeKey) => {
@@ -2280,7 +2421,6 @@ class GameScene extends Phaser.Scene {
         this.enemies.push(e); testEnemies.push(e);
         return e;
       };
-      const clearMark = (e) => { e.element = null; e.elementTimer = 0; e.clearElementMark(); };
       /* 真实风刃：构造 Projectile 并同步触发 impact（伤害 + 扩散判定） */
       const fireBlade = (tower, target) => {
         const p = new Projectile(this, tower.x, tower.y, target, tower.cfg.projectile, tower.stats.damage, tower);
@@ -2292,50 +2432,288 @@ class GameScene extends Phaser.Scene {
       const wind = new Tower(this, center.x, center.y + 100, 'towerF');
       this.towers.push(wind); testTowers.push(wind);
       report.checks.behaviorClass = wind.behavior.constructor.name;
+      report.mode = center.reactionsEnabled ? 'reaction' : 'legacy';
 
-      /* 不覆盖：火印记的怪再挂水，仍保留火 */
-      center.applyElement('fire', 4);
-      center.applyElement('water', 4);
-      report.checks.noOverwrite = center.element === 'fire';
+      if (!center.reactionsEnabled) {
+        /* ---------- 旧印记模式（1~5 关） ---------- */
+        const clearMark = (e) => { e.element = null; e.elementTimer = 0; e.clearElementMark(); };
+        center.applyElement('fire', 4);
+        center.applyElement('water', 4);
+        report.checks.noOverwrite = center.element === 'fire';
 
-      /* 目标无元素 → 不扩散（见证怪不得获得任何印记） */
-      const plain = mkEnemy(350);
-      const witness = mkEnemy(320);
-      fireBlade(wind, plain);
-      report.checks.noElementNoSpread = !witness.element && !plain.element;
+        const plain = mkEnemy(350);
+        const witness = mkEnemy(320);
+        fireBlade(wind, plain);
+        report.checks.noElementNoSpread = !witness.element && !plain.element;
 
-      /* 目标有火印记 → 半径 90 内无元素小怪获得火；已有水者保留；
-         半径外（260px）不受影响；BOSS 不被扩散 */
-      const tagged = mkEnemy(330); tagged.applyElement('water', 4);
-      const far = mkEnemy(560);
-      const boss = mkEnemy(320, 'enemyBoss');
-      fireBlade(wind, center);
-      report.checks.spreadToNearest = witness.element === 'fire';
-      report.checks.keepExisting = tagged.element === 'water';
-      report.checks.farUntouched = !far.element;
-      report.checks.bossUntouched = !boss.element;
+        const tagged = mkEnemy(330); tagged.applyElement('water', 4);
+        const far = mkEnemy(560);
+        const boss = mkEnemy(320, 'enemyBoss');
+        fireBlade(wind, center);
+        report.checks.spreadToNearest = witness.element === 'fire';
+        report.checks.keepExisting = tagged.element === 'water';
+        report.checks.farUntouched = !far.element;
+        report.checks.bossUntouched = !boss.element;
 
-      /* 扩散冷却：冷却中命中不扩散；手动就绪后恢复扩散 */
-      clearMark(witness);
-      fireBlade(wind, center);
-      report.checks.cooldownBlocks = !witness.element;
-      wind.behavior.spreadTimer = 0; // 手动清零扩散冷却
-      fireBlade(wind, center);
-      report.checks.cooldownReady = witness.element === 'fire';
+        clearMark(witness);
+        fireBlade(wind, center);
+        report.checks.cooldownBlocks = !witness.element;
+        wind.behavior.spreadTimer = 0;
+        fireBlade(wind, center);
+        report.checks.cooldownReady = witness.element === 'fire';
 
-      /* 冰：塔B 减速自动挂冰印记；冰扩散附带真实减速 */
-      clearMark(center); clearMark(witness);
-      center.applySlow(0.5, 1.6);
-      report.checks.slowMarksIce = center.element === 'ice';
-      wind.behavior.spreadTimer = 0;
-      fireBlade(wind, center);
-      report.checks.iceSpreadSlows = witness.element === 'ice' && witness.slowTimer > 0;
+        clearMark(center); clearMark(witness);
+        center.applySlow(0.5, 1.6);
+        report.checks.slowMarksIce = center.element === 'ice';
+        wind.behavior.spreadTimer = 0;
+        fireBlade(wind, center);
+        report.checks.iceSpreadSlows = witness.element === 'ice' && witness.slowTimer > 0;
 
+        const c = report.checks;
+        report.conclusion = (c.behaviorClass === 'WindSpreadBehavior' && c.noOverwrite &&
+          c.noElementNoSpread && c.spreadToNearest && c.keepExisting && c.farUntouched &&
+          c.bossUntouched && c.cooldownBlocks && c.cooldownReady && c.slowMarksIce &&
+          c.iceSpreadSlows) ? 'PASS' : 'FAIL';
+      } else {
+        /* ---------- 新反应模式（第 6 关起） ---------- */
+        const amt = (e, type) => {
+          const s = e.elements.find((v) => v.type === type);
+          return s ? s.amount : 0;
+        };
+        const clearEls = (e) => { e.elements = []; e.freezeTimer = 0; e.showFreezeGfx(false); e.refreshElementMarks(); };
+        /* 夹具移走：把无关小怪挪到扩散半径外，避免占用最多 5 个扩散名额 */
+        let banishSeq = 900;
+        const banish = (e) => { e.pathDist = banishSeq++; e.update(0); };
+
+        /* 无元素目标 → 不扩散 */
+        const plain = mkEnemy(350);
+        const w0 = mkEnemy(260);
+        fireBlade(wind, plain);
+        report.checks.noElementNoSpread = w0.elements.length === 0 && plain.elements.length === 0;
+        banish(plain); banish(w0);
+
+        /* 中心挂水 2 单位；半径内放 6 个无素小怪 + 1 个已带水怪（距20）：
+           预期最近的 5 个无素怪各得水 1 单位（已带水者跳过），第 6 个不得；
+           中心仍为 2 单位（不扣量）；可扩散水元素 */
+        clearEls(center);
+        center.attachElement('water', 2, null);
+        const holders = [];
+        for (const d of [20, 32, 44, 56, 68, 80]) holders.push(mkEnemy(300 + d));
+        const alreadyWater = mkEnemy(315);
+        alreadyWater.attachElement('water', 2, null);
+        const far = mkEnemy(470);
+        const boss = mkEnemy(318, 'enemyBoss');
+        wind.behavior.spreadTimer = 0;
+        fireBlade(wind, center);
+        const gotWater = holders.filter((e) => Math.abs(amt(e, 'water') - 1) < 1e-6);
+        report.checks.amountOne = gotWater.length === 5;
+        report.checks.maxFive = gotWater.length === 5 && Math.abs(amt(holders[5], 'water')) < 1e-6;
+        report.checks.sameElementSkipped = Math.abs(amt(alreadyWater, 'water') - 2) < 1e-6;
+        report.checks.centerKept = Math.abs(amt(center, 'water') - 2) < 1e-6;
+        report.checks.waterSpread = gotWater.length === 5;
+        report.checks.farUntouched = far.elements.length === 0;
+        report.checks.bossUntouched = boss.elements.length === 0;
+
+        /* 冷却中不扩散；就绪后恢复 */
+        const probe = holders[5]; // 上一轮没拿到水的第 6 只
+        fireBlade(wind, center);
+        report.checks.cooldownBlocks = probe.elements.length === 0;
+        wind.behavior.spreadTimer = 0;
+        fireBlade(wind, center);
+        report.checks.cooldownReady = Math.abs(amt(probe, 'water') - 1) < 1e-6;
+
+        /* 扩散冰（1单位）到带水（2单位）小怪 → 水+冰冰冻（冰耗尽，水剩1）。
+           先把上一轮残留的带水小怪全部移走，只留 center/probe 在半径内 */
+        holders.forEach((h) => { if (h !== probe) banish(h); });
+        banish(alreadyWater);
+        clearEls(center); clearEls(probe);
+        center.attachElement('ice', 2, null);
+        probe.attachElement('water', 2, null);
+        wind.behavior.spreadTimer = 0;
+        fireBlade(wind, center);
+        report.checks.iceWaterFreezes = probe.freezeTimer > 0 &&
+          Math.abs(amt(probe, 'water') - 1) < 1e-6 && amt(probe, 'ice') === 0;
+
+        const c = report.checks;
+        const keys = ['behaviorClass', 'noElementNoSpread', 'amountOne', 'maxFive',
+          'sameElementSkipped', 'centerKept', 'waterSpread', 'farUntouched',
+          'bossUntouched', 'cooldownBlocks', 'cooldownReady', 'iceWaterFreezes'];
+        report.conclusion = keys.every((k) => c[k] === true || (k === 'behaviorClass' && c[k] === 'WindSpreadBehavior'))
+          ? 'PASS' : 'FAIL';
+      }
+      report.step = 'done';
+    } catch (err) {
+      report.error = String(err && err.stack || err);
+      report.step = 'error';
+    } finally {
+      testTowers.forEach((t) => { try { this.towers = this.towers.filter((v) => v !== t); t.destroy(); } catch (_) {} });
+      testEnemies.forEach((e) => { try { this.enemies = this.enemies.filter((v) => v !== e); e.destroyImmediately(); } catch (_) {} });
+    }
+    return report;
+  }
+
+  /**
+   * 元素反应系统真实运行时自查（控制台 window.__tdReactionTest()）。
+   * 构造强制开启反应模式的真实 Enemy（不依赖当前关卡编号），逐项验证：
+   *   meltByFire/ByIce   火+冰：火触发 ×2、冰触发 ×1.5；
+   *   vaporByFire/ByWater 火+水：火触发 ×2、水触发 ×1.5；
+   *   chargedRatio       水+雷 1:0.5（水2+雷2 → 雷剩1），双方触发 ×1.75；
+   *   superRatio         冰+雷 0.5:1（冰2+雷2 → 冰剩1），×1.5；
+   *   orderFirstAttached 按附着先后反应（先雷残留1，再上冰 → 先触发超导）；
+   *   rateLimit          同种元素 0.5s 内限附着一次，超时补量但不触发新反应；
+   *   freeze             水+冰 → 冰冻 2 秒（定身、不被牵引）；
+   *   shatterVuln        塔D脉冲扫到冰冻怪：提前破冰 + 易伤 10%/层，最多3层，
+   *                      满层+30%，每层独立5秒倒计时；
+   *   vulnTimers         先层到时独立消失，不刷新其他层；
+   *   bossSlowNotVuln    BOSS 水+冰 → 减速、不冰冻、不挂易伤，伤害不放大；
+   *   projMelt           真实塔A风... 弹道命中带冰怪伤害 ×2（端到端）；
+   *   pullBlocksFreeze   牵引脉冲不位移冰冻怪，破冰当窗不拉人。
+   */
+  runElementTest() {
+    const report = { step: 'init', checks: {}, conclusion: null, error: null };
+    const testTowers = [], testEnemies = [];
+    try {
+      const mk = (dist, typeKey) => {
+        const e = new Enemy(this, typeKey || 'enemyY', 0); // 默认高血胖子，避免测试击杀
+        e.reactionsEnabled = true;   // 强制新反应模式（任何关卡内都可测）
+        e.pathDist = dist;
+        e.baseSpeed = 0;
+        e.update(0);
+        this.enemies.push(e); testEnemies.push(e);
+        return e;
+      };
+      const amt = (e, type) => {
+        const s = e.elements.find((v) => v.type === type);
+        return s ? s.amount : 0;
+      };
+      const near = (a, b) => Math.abs(a - b) < 1e-6;
       const c = report.checks;
-      report.conclusion = (c.behaviorClass === 'WindSpreadBehavior' && c.noOverwrite &&
-        c.noElementNoSpread && c.spreadToNearest && c.keepExisting && c.farUntouched &&
-        c.bossUntouched && c.cooldownBlocks && c.cooldownReady && c.slowMarksIce &&
-        c.iceSpreadSlows) ? 'PASS' : 'FAIL';
+
+      /* 火+冰：火先附着冰后触发 ×1.5；冰先附着火后触发 ×2 */
+      let e1 = mk(300);
+      let r1 = e1.attachElement('fire', 2, 'fire');
+      let r2 = e1.attachElement('ice', 2, 'ice');
+      c.meltByIce = r2.reactionMul === 1.5 && e1.elements.length === 0;
+      let e2 = mk(300);
+      e2.attachElement('ice', 2, 'ice');
+      let r3 = e2.attachElement('fire', 2, 'fire');
+      c.meltByFire = r3.reactionMul === 2 && e2.elements.length === 0;
+
+      /* 火+水：水先火后 ×2；火先水后 ×1.5 */
+      let e3 = mk(300);
+      e3.attachElement('water', 2, 'water');
+      c.vaporByFire = e3.attachElement('fire', 2, 'fire').reactionMul === 2;
+      let e4 = mk(300);
+      e4.attachElement('fire', 2, 'fire');
+      c.vaporByWater = e4.attachElement('water', 2, 'water').reactionMul === 1.5;
+
+      /* 水+雷 1:0.5：水2+雷2 → 水耗尽、雷剩1；双方触发都 ×1.75 */
+      let e5 = mk(300);
+      e5.attachElement('water', 2, 'water');
+      let rr = e5.attachElement('thunder', 2, 'thunder');
+      c.chargedRatio = rr.reactionMul === 1.75 && near(amt(e5, 'thunder'), 1) && amt(e5, 'water') === 0;
+      let e6 = mk(300);
+      e6.attachElement('thunder', 2, 'thunder');
+      c.chargedByWater = e6.attachElement('water', 2, 'water').reactionMul === 1.75;
+
+      /* 冰+雷 0.5:1：冰2+雷2 → 雷耗尽、冰剩1，×1.5 */
+      let e7 = mk(300);
+      e7.attachElement('ice', 2, 'ice');
+      let rs = e7.attachElement('thunder', 2, 'thunder');
+      c.superRatio = rs.reactionMul === 1.5 && near(amt(e7, 'ice'), 1) && amt(e7, 'thunder') === 0;
+
+      /* 反应顺序按附着先后：雷2+水2 反应后雷剩1；再上冰2：
+         冰应先与【更早附着的雷】超导（雷1耗尽、冰耗0.5剩1.5），
+         而不是别的顺序 → reactions[0]==='superconductor' */
+      let e8 = mk(300);
+      e8.attachElement('thunder', 2, 'thunder');
+      e8.attachElement('water', 2, 'water');          // 感电后雷剩1，水0
+      const orderRes = e8.attachElement('ice', 2, 'ice');
+      c.orderFirstAttached = orderRes.reactions[0] === 'superconductor' &&
+        near(amt(e8, 'ice'), 1.5) && amt(e8, 'thunder') === 0;
+
+      /* 0.5s 同元素限频：立即再去火被挡（量仍2）；0.6s 后补量到4但不触发反应；
+         随后水2只与火按1:1反应掉2，火剩2 */
+      let e9 = mk(300);
+      e9.attachElement('fire', 2, 'fire');
+      const blocked = e9.attachElement('fire', 2, 'fire');
+      c.rateLimit = blocked.reactionMul === 1 && near(amt(e9, 'fire'), 2);
+      e9.age = 0.6;
+      e9.attachElement('fire', 2, 'fire');
+      const fireStacked = near(amt(e9, 'fire'), 4); // 限频超时补量：水反应前火应为4
+      const reV = e9.attachElement('water', 2, 'water');
+      c.rateLimitStack = fireStacked &&
+        reV.reactionMul === 1.5 && near(amt(e9, 'fire'), 2) && amt(e9, 'water') === 0;
+
+      /* 水+冰 → 冰冻2秒（非BOSS、非易伤） */
+      let e10 = mk(300);
+      e10.attachElement('water', 2, 'water');
+      e10.attachElement('ice', 2, 'ice');
+      c.freeze = e10.freezeTimer > 1.9 && e10.vulnStacks.length === 0;
+
+      /* 提前破冰 + 易伤叠层：1/2/3 层受伤 ×1.1/1.2/1.3，第4层忽略；
+         每层独立5秒：先层过3秒再叠两层，2.1秒后最早层独立消失 */
+      let e11 = mk(300);
+      e11.applyFreeze(2);
+      e11.shatterFreeze();
+      c.shatterClearsFreeze = e11.freezeTimer === 0 && e11.vulnStacks.length === 1;
+      const hp0 = e11.hp;
+      e11.takeDamage(20);
+      const dmg1 = hp0 - e11.hp;
+      e11.shatterFreeze();                 // 未冰冻：无效
+      c.shatterOnlyWhenFrozen = e11.vulnStacks.length === 1;
+      e11.applyFreeze(2); e11.shatterFreeze();  // 第2层
+      const hp1 = e11.hp; e11.takeDamage(20); const dmg2 = hp1 - e11.hp;
+      e11.applyFreeze(2); e11.shatterFreeze();  // 第3层
+      const hp2 = e11.hp; e11.takeDamage(20); const dmg3 = hp2 - e11.hp;
+      e11.addVuln();                       // 满层忽略
+      c.vulnDamage = near(dmg1, 22) && near(dmg2, 24) && near(dmg3, 26) && e11.vulnStacks.length === 3;
+      /* 独立计时：第1层已过~0秒；先 update(3)（第1层剩2s），再补两层，
+         update(2.1) → 第1层消失，新两层仍在（剩约2.9/2.9） */
+      e11.vulnStacks.length = 0; e11.refreshVulnView(false);
+      e11.addVuln();
+      e11.update(3);
+      e11.addVuln(); e11.addVuln();
+      c.vulnStacksBefore = e11.vulnStacks.length === 3;
+      e11.update(2.1);
+      c.vulnTimers = e11.vulnStacks.length === 2;
+
+      /* BOSS：水+冰 → 减速（不冰冻/不挂易伤），伤害不吃易伤 */
+      let boss = mk(300, 'enemyBoss');
+      boss.attachElement('water', 2, 'water');
+      boss.attachElement('ice', 2, 'ice');
+      c.bossSlowNotVuln = boss.freezeTimer === 0 && boss.slowTimer > 0 && boss.vulnStacks.length === 0;
+      boss.applyFreeze(2);
+      boss.shatterFreeze();               // BOSS 理论上不会被牵引；即便误调也不挂易伤
+      c.bossNoVulnShatter = boss.vulnStacks.length === 0;
+      const bh0 = boss.hp; boss.takeDamage(100);
+      c.bossDamageClean = near(bh0 - boss.hp, 100);
+
+      /* 端到端：真实塔A弹道命中带冰怪（enemyY 175血），伤害42应×2=84 */
+      const tgt = mk(300);
+      tgt.attachElement('ice', 2, 'ice');
+      const towerA = new Tower(this, tgt.x, tgt.y + 100, 'towerA');
+      this.towers.push(towerA); testTowers.push(towerA);
+      const hpA = tgt.hp;
+      const proj = new Projectile(this, towerA.x, towerA.y, tgt, towerA.cfg.projectile, towerA.stats.damage, towerA);
+      proj.impact();
+      c.projMelt = near(hpA - tgt.hp, 84);
+
+      /* 塔D 牵引：冰冻怪不被位移且破冰；同窗口普通怪正常标记 */
+      const frozen = mk(340); frozen.applyFreeze(2);
+      const movable = mk(380);
+      const towerD = new Tower(this, frozen.x, frozen.y + 100, 'towerD');
+      this.towers.push(towerD); testTowers.push(towerD);
+      towerD.behavior.update(0.016, { enemies: this.enemies });
+      c.pullBlocksFreeze = frozen.freezeTimer === 0 && frozen.vulnStacks.length === 1 &&
+        (frozen.pullBack || 0) === 0;
+      c.pullStillWorks = movable.pullFresh === true;
+
+      /* 塔D 不附元素：场上被牵引怪身上无元素槽 */
+      c.towerDNoElement = movable.elements.length === 0;
+
+      const keys = Object.keys(c);
+      report.conclusion = keys.every((k) => c[k] === true) ? 'PASS' : 'FAIL';
       report.step = 'done';
     } catch (err) {
       report.error = String(err && err.stack || err);

@@ -156,8 +156,69 @@ window.TD_CONFIG = {
   "elements": {
     "fire":    { "name": "火", "color": 0xff7a45 },
     "ice":     { "name": "冰", "color": 0x7fdcff },
-    "thunder": { "name": "雷", "color": 0xffe23b },
-    "water":   { "name": "水", "color": 0x4a90e2 }
+    "water":   { "name": "水", "color": 0x4a90e2 },
+    "thunder": { "name": "雷", "color": 0xffe23b }
+  },
+
+  /* ============================================================
+   * 元素反应系统（第 6 关起启用；第 1~5 关仍走旧的纯视觉印记逻辑）
+   * ------------------------------------------------------------
+   * 附着：元素塔命中附着 attachAmount(=2) 单位，同种元素 attachInterval(0.5s)
+   *       内只能附着一次；不同元素可共存，按【附着先后】保序；
+   *       每个元素槽独立持续 duration(5s)，到期整槽消散（量不随时间衰减，
+   *       只被反应消耗）。
+   * 反应：新元素附着时，按附着先后与身上已有的元素依次结算（先附着先反应），
+   *       按 cost 系数消耗双方元素量：反应量 u=min(存量A/costA, 存量B/costB)，
+   *       消耗 u*costA / u*costB，未消耗完的一方继续保留并继续与后续元素
+   *       结算下一轮；倍率【谁先触发谁享受】——只加倍本次攻击伤害，不叠加
+   *       给其他塔。风塔扩散的附着 sourceEl=null，只出特效/冰冻，不加倍率。
+   * pairs 六种反应（无向配对，cost 按元素名给出，天然支持正反两种附着顺序）：
+   *   火+冰 1:1 融化；火+水 1:1 蒸发；水+冰 1:1 冰冻；
+   *   水+雷 1:0.5 感电；雷+火 1:1 超载；冰+雷 0.5:1 超导。
+   * ============================================================ */
+  "elementSystem": {
+    "enableFromLevel": 6,       // 元素反应从第 6 关起启用（1~5 关保持原样）
+    "attachAmount": 2,          // 每次攻击附着的元素单位
+    "spreadAmount": 1,          // 风塔扩散附着的元素单位
+    "attachInterval": 0.5,      // 同种元素附着限频（秒）
+    "duration": 5,              // 元素附着持续时间（秒）
+    "pairs": {
+      "fire+ice": {
+        "cost": { "fire": 1, "ice": 1 }, "fx": "melt", "label": "融化",
+        "multiplier": { "fire": 2, "ice": 1.5 }
+      },
+      "fire+water": {
+        "cost": { "fire": 1, "water": 1 }, "fx": "vaporize", "label": "蒸发",
+        "multiplier": { "fire": 2, "water": 1.5 }
+      },
+      "water+ice": {
+        "cost": { "water": 1, "ice": 1 }, "fx": "freeze", "label": "冰冻",
+        "freeze": true          // 水+冰：冰冻（无伤害倍率）
+      },
+      "water+thunder": {
+        "cost": { "water": 1, "thunder": 0.5 }, "fx": "charged", "label": "感电",
+        "multiplier": { "water": 1.75, "thunder": 1.75 }
+      },
+      "fire+thunder": {
+        "cost": { "fire": 1, "thunder": 1 }, "fx": "overload", "label": "超载",
+        "multiplier": { "fire": 1.5, "thunder": 1.5 }
+      },
+      "ice+thunder": {
+        "cost": { "ice": 0.5, "thunder": 1 }, "fx": "superconductor", "label": "超导",
+        "multiplier": { "ice": 1.5, "thunder": 1.5 }
+      }
+    },
+    /* 水+冰冰冻；冰冻期间免疫塔D牵引，被牵引脉冲扫到则提前破冰 */
+    "freeze": {
+      "duration": 2             // 冰冻秒数
+    },
+    /* 提前破冰 → 易伤（仅小怪；BOSS 改为减速，不吃易伤） */
+    "vuln": {
+      "perStack": 0.10,         // 每层受伤 +10%
+      "maxStacks": 3,           // 最多 3 层（满层 +30%）
+      "duration": 5,            // 每层独立持续 5 秒，各自到时消失
+      "bossSlowRatio": 0.30     // BOSS 不吃易伤：水+冰反应改为移速降低 30%（系数 0.70）
+    }
   },
 
   "towers": {
@@ -206,6 +267,7 @@ window.TD_CONFIG = {
         "speed": 330,
         "radius": 9,
         "color": 0xc8f6ff,
+        "element": "ice",             // 冰元素（第6关起参与元素反应；1~5关仍为纯视觉印记）
         "effect": {
           "type": "splashSlow",
           "value": 9,
@@ -367,11 +429,13 @@ window.TD_CONFIG = {
       "effect": {
         "type": "windSpread",
         "spreadRadius": 90,        // 扩散半径（像素）
-        "spreadDuration": 3.0,     // 扩散出去的印记持续秒数（固定值）
+        "spreadDuration": 3.0,     // 扩散出去的印记持续秒数（仅 1~5 关旧印记模式使用）
         "spreadCooldown": 2.5,     // 扩散冷却（秒）：每 2.5s 最多扩散一次
+        "spreadMaxTargets": 5,     // 单次最多扩散 5 个小怪（最近且无该元素者优先）
+        "spreadAmount": 1,         // 扩散附着 1 单位元素（中心目标元素量不减少）
         "targetFilter": "nonBoss", // 扩散目标仅小怪（中心目标不限）
-        "iceSlowFactor": 0.50,     // 冰元素扩散附带的真实减速系数
-        "iceSlowDuration": 1.6     // 冰扩散减速持续秒数
+        "iceSlowFactor": 0.50,     // 冰元素扩散附带的真实减速系数（仅旧印记模式）
+        "iceSlowDuration": 1.6     // 冰扩散减速持续秒数（仅旧印记模式）
       },
       "upgrade": {
         "maxLevel": 3,

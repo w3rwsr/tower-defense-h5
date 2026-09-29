@@ -59,7 +59,7 @@ class Projectile extends Phaser.GameObjects.Image {
     const vsObstacle = this.target && this.target.isObstacle;
 
     if (this.effect.type === 'splashSlow') {
-      // 范围伤害 + 减速
+      // 范围伤害 + 减速（塔B=冰元素：先附着冰元素并按反应倍率结算本次伤害）
       const r = this.effect.splashRadius;
       scene.spawnSplashFx(this.tx, this.ty, r, this.pCfg.color);
       if (vsObstacle) {
@@ -69,14 +69,20 @@ class Projectile extends Phaser.GameObjects.Image {
         scene.enemies.forEach((e) => {
           if (e.dead || e.invulnTimer > 0) return; // 传送无敌中：不受伤也不吃减速
           if (Phaser.Math.Distance.Between(this.tx, this.ty, e.x, e.y) <= r + e.radius) {
-            e.takeDamage(this.damage);
+            let mul = 1;
+            /* 冰元素附着（第6关起参与反应，倍率“谁先触发谁享受”归塔B本次溅射） */
+            if (this.pCfg.element && typeof e.attachElement === 'function') {
+              mul = e.attachElement(this.pCfg.element, null, this.pCfg.element).reactionMul || 1;
+            }
+            e.takeDamage(this.damage * mul);
             if (!e.dead) e.applySlow(this.effect.slowFactor, this.effect.slowDuration);
           }
         });
       }
     } else if (this.effect.type === 'windSpread') {
-      /* 风元素塔风刃：少量伤害；目标带元素印记且本塔扩散冷却就绪 → 以目标
-         为中心扩散元素（GameScene.spreadElement）；目标无元素则不扩散 */
+      /* 风元素塔风刃：少量伤害；目标带元素且本塔扩散冷却就绪 → 以目标
+         为中心扩散元素（GameScene.spreadElement）；目标无元素则不扩散。
+         风塔自身不附着风元素，扩散附着 sourceEl=null（不享受反应倍率） */
       if (this.target && !this.target.dead) {
         this.target.takeDamage(this.damage);
         scene.spawnHitFx(this.tx, this.ty, this.pCfg.color);
@@ -84,9 +90,11 @@ class Projectile extends Phaser.GameObjects.Image {
           const tower = this.sourceTower;
           const behavior = tower && tower.behavior;
           const spreadEff = (tower && tower.cfg.effect) || {};
+          const hasEl = this.target.reactionsEnabled
+            ? this.target.hasElement()                                  // 新反应模式：多元素槽
+            : (this.target.element && this.target.elementTimer > 0);    // 旧印记模式（1~5关）
           if (behavior && typeof behavior.tryConsumeSpread === 'function' &&
-              this.target.element && this.target.elementTimer > 0 &&
-              behavior.tryConsumeSpread()) {
+              hasEl && behavior.tryConsumeSpread()) {
             scene.spreadElement(this.target, spreadEff);
           }
         }
@@ -94,13 +102,15 @@ class Projectile extends Phaser.GameObjects.Image {
     } else {
       // 单体伤害：目标仍存活才结算（小怪 / 障碍物通用 takeDamage 鸭子类型）
       if (this.target && !this.target.dead) {
-        this.target.takeDamage(this.damage);
-        scene.spawnHitFx(this.tx, this.ty, this.pCfg.color);
-        /* 元素印记（塔A=火 / 塔C=水，JSON projectile.element 驱动）：
-           纯视觉标记，不改变伤害；已有元素的小怪不覆盖（applyElement 内判定） */
-        if (!vsObstacle && this.pCfg.element && typeof this.target.applyElement === 'function') {
-          this.target.applyElement(this.pCfg.element, this.pCfg.elementDuration || 4);
+        /* 先附着元素并结算反应：倍率“谁先触发谁享受”，只加倍塔A(火)/塔C(水)
+           本次命中的伤害；第1~5关 attachElement 退化为旧视觉印记，倍率恒1 */
+        let mul = 1;
+        if (!vsObstacle && this.pCfg.element &&
+            typeof this.target.attachElement === 'function') {
+          mul = this.target.attachElement(this.pCfg.element, null, this.pCfg.element).reactionMul || 1;
         }
+        this.target.takeDamage(this.damage * mul);
+        scene.spawnHitFx(this.tx, this.ty, this.pCfg.color);
       }
     }
     this.destroy();

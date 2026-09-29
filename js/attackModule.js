@@ -168,6 +168,7 @@
       this.primed = false;         // 首帧把开窗状态补记为一次脉冲（首窗也有动画）
       this.targets = [];           // 本帧实际被吸的小怪集合（范围目标，供动画/自查）
       this.pulseCount = 0;         // 已触发的攻击脉冲数（有目标才计数，供自查）
+      this.windowId = 0;           // 牵引窗口序号（破冰去重用，每开一次窗 +1）
       this.smallOnly = this.eff.targetFilter === 'nonBoss';
     }
 
@@ -202,11 +203,13 @@
         /* 构造时已开首个窗口（建塔即生效），首帧补记一次开窗事件 */
         this.primed = true;
         windowJustOpened = true;
+        this.windowId++;
       }
       if (this.timer <= 0) {
         this.timer += this.interval;
         this.active = this.duration;
         windowJustOpened = true;
+        this.windowId++;
       }
 
       this.targets = [];
@@ -239,6 +242,19 @@
         const dy = e.y - t.y;
         const d2 = dx * dx + dy * dy;
         if (d2 > r2) continue; // 射程外：不标记，Enemy 首帧烘焙位移后继续前进
+
+        /* 水+冰冰冻期间免疫牵引：本脉冲不产生任何位移；脉冲首次扫到冰冻
+           小怪时提前破冰 → 挂一层易伤（Enemy.shatterFreeze，BOSS 不吃），
+           破冰的这个窗口剩余帧继续跳过（牵引被用来碎冰，不当场拉人；
+           下一个 2 秒窗口起正常牵引）。塔D 不附着/不消耗任何元素。 */
+        if (e.freezeTimer > 0) {
+          if (e._shatterWindow !== this.windowId) {
+            e._shatterWindow = this.windowId;
+            if (typeof e.shatterFreeze === 'function') e.shatterFreeze();
+          }
+          continue;
+        }
+        if (e._shatterWindow === this.windowId) continue;
 
         /* 塔在敌人所属路线整条路径上的投影（全段扫描取最近点里程），
            拐角处也不钳到段端：小怪能被拉过拐角到塔附近 */
@@ -332,13 +348,16 @@
       /* 循环 jumps 次（弹跳次数）：i=0 为初始击中，i=jumps 为最后一跳 */
       for (let i = 0; i <= jumps; i++) {
         hit.add(current);
-        /* 造成伤害（鸭子类型：小怪 / 障碍物通用 takeDamage） */
-        if (!current.dead) current.takeDamage(Math.round(dmg));
-        /* 雷元素印记（JSON effect.element 驱动）：纯视觉标记，不改变电链伤害；
-           鸭子类型守卫——障碍物无 applyElement，自动跳过 */
-        if (this.eff.element && !current.dead && typeof current.applyElement === 'function') {
-          current.applyElement(this.eff.element, this.eff.elementDuration || 4);
+        /* 雷元素附着（JSON effect.element 驱动）：第6关起先附着雷元素并结算
+           反应，倍率“谁先触发谁享受”归塔E 本跳伤害（火+雷×1.5 / 水+雷×1.75 /
+           冰+雷×1.5）；第1~5关退化为旧视觉印记，倍率恒 1。
+           鸭子类型守卫——障碍物无 attachElement，自动跳过 */
+        let mul = 1;
+        if (this.eff.element && !current.dead && typeof current.attachElement === 'function') {
+          mul = current.attachElement(this.eff.element, null, this.eff.element).reactionMul || 1;
         }
+        /* 造成伤害（鸭子类型：小怪 / 障碍物通用 takeDamage） */
+        if (!current.dead) current.takeDamage(Math.round(dmg * mul));
         chainPoints.push({ x: current.x, y: current.y });
 
         /* 最后一次后不再搜索下一目标 */
