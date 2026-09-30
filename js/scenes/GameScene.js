@@ -1689,15 +1689,15 @@ class GameScene extends Phaser.Scene {
     this.closeTowerPicker(true);
 
     const cfg = (this.buildCfg.picker) || {};
-    const itemW = cfg.itemW || 50;
+    const itemW = cfg.itemW || 56;
     const gap = cfg.gap != null ? cfg.gap : 4;
-    const padX = cfg.padX != null ? cfg.padX : 6;
+    const padX = cfg.padX != null ? cfg.padX : 8;
     const padY = cfg.padY != null ? cfg.padY : 5;
-    const iconR = cfg.iconR || 11;
+    const iconR = cfg.iconR || 13;
     const offY = cfg.offsetY != null ? cfg.offsetY : 22;
     const edge = cfg.edgeMargin != null ? cfg.edgeMargin : 8;
-    const nameFS = cfg.nameFS || 10;
-    const costFS = cfg.costFS || 9;
+    const nameFS = cfg.nameFS || 12;
+    const costFS = cfg.costFS || 11;
     const colors = cfg.iconColors || {};
     const glyphs = cfg.iconGlyph || {};
 
@@ -1724,40 +1724,55 @@ class GameScene extends Phaser.Scene {
     bg.strokeRoundedRect(-W / 2, -H / 2, W, H, 10);
     box.add(bg);
 
-    const iconCy = -H / 2 + padY + iconR;
-    const nameCy = iconCy + iconR + gapN + nameFS / 2;
-    const costCy = nameCy + nameFS / 2 + gapC + costFS / 2;
+    const iconCy = -Math.round(H / 2 - padY - iconR);
+    const nameCy = Math.round(iconCy + iconR + gapN + nameFS / 2);
+    const costCy = Math.round(nameCy + nameFS / 2 + gapC + costFS / 2);
     const left = -innerW / 2 + itemW / 2;
+
+    /* 文字统一高分辨率：分辨率 = clamp(devicePixelRatio, 2, 3)，避免小字号半像素模糊 */
+    const textRes = Math.round(Math.min(Math.max(window.devicePixelRatio || 1, 2), 3));
+
+    /* 4x 超采样烘焙塔图标纹理：在世界坐标画 52px 圆 → 缓存为 208px 纹理，
+       缩小显示时边缘清晰（等效 128-256px PNG 方案，无外部资源依赖）。
+       第一次打开时创建，后续复用缓存（per-key，含可用/置灰双色）。 */
+    for (const tk of types) {
+      const col = colors[tk] != null ? colors[tk] : (TD_CONFIG.towers[tk].color || 0xffffff);
+      const gkey = '_pickerIcon_' + tk;
+      const gkeyGray = gkey + '_g';
+      if (!this.textures.exists(gkey)) {
+        this._bakePickerIcon(gkey, col, 1.0, 0.9);       // 可用态：完全不透明
+        this._bakePickerIcon(gkeyGray, col, 0.22, 0.28); // 置灰态
+      }
+    }
 
     types.forEach((tk, i) => {
       const tc = TD_CONFIG.towers[tk];
       const afford = this.gold >= tc.cost;
-      const col = colors[tk] != null ? colors[tk] : (tc.color != null ? tc.color : 0xffffff);
-      const cx = left + i * (itemW + gap);
+      const cx = Math.round(left + i * (itemW + gap));
+      const texKey = afford ? '_pickerIcon_' + tk : '_pickerIcon_' + tk + '_g';
 
-      const ig = this.add.graphics();
-      ig.fillStyle(col, afford ? 0.95 : 0.22);
-      ig.fillCircle(cx, iconCy, iconR);
-      ig.lineStyle(1.5, 0xffffff, afford ? 0.9 : 0.28);
-      ig.strokeCircle(cx, iconCy, iconR);
-      box.add(ig);
+      /* 图标：Image 显示 52px，内部纹理为 208px，缩小后边缘抗锯齿 */
+      const iconImg = this.add.image(cx, iconCy, texKey).setOrigin(0.5);
+      iconImg.setDisplaySize(iconR * 2, iconR * 2);
+      box.add(iconImg);
 
+      /* 中心单字标识（在图标上层，直接文字清晰） */
       const glyph = this.add.text(cx, iconCy + 1, glyphs[tk] || '', {
         fontFamily: TD_FONT_STACK, fontSize: (iconR - 1) + 'px', fontStyle: 'bold',
-        color: afford ? '#ffffff' : '#cfd4da'
+        color: afford ? '#ffffff' : '#cfd4da', resolution: textRes
       }).setOrigin(0.5);
       glyph.setAlpha(afford ? 1 : 0.4);
       box.add(glyph);
 
       const name = this.add.text(cx, nameCy, tc.name, {
         fontFamily: TD_FONT_STACK, fontSize: nameFS + 'px', fontStyle: 'bold',
-        color: afford ? '#ffffff' : '#aab0b8'
+        color: afford ? '#ffffff' : '#aab0b8', resolution: textRes
       }).setOrigin(0.5);
       box.add(name);
 
       const cost = this.add.text(cx, costCy, '🪙' + tc.cost, {
         fontFamily: TD_FONT_STACK, fontSize: costFS + 'px', fontStyle: 'bold',
-        color: afford ? '#ffd66b' : '#9aa0a8'
+        color: afford ? '#ffd66b' : '#9aa0a8', resolution: textRes
       }).setOrigin(0.5);
       box.add(cost);
 
@@ -1785,6 +1800,34 @@ class GameScene extends Phaser.Scene {
     this._pickSpot = spot;
     this.drawOtherSpotsHighlight(spot);   // 同步高亮所有其他可放置区域
     this.drawSpotHighlight(spot);
+  }
+
+  /** 4x 超采样烘焙塔图标纹理：生成高分辨率圆图标缓存，供 Image 缩小显示。
+   *  worldR：世界坐标显示半径（如 13）
+   *  fillAlpha / strokeAlpha：填充与描边不透明度（可用态 1.0/0.9，置灰态 0.22/0.28）
+   *  纹理尺寸 = worldR×2×4，等效 128-256px PNG 清晰度 */
+  _bakePickerIcon(key, color, fillAlpha, strokeAlpha) {
+    const worldR = (this.buildCfg.picker && this.buildCfg.picker.iconR) || 13;
+    const scale = 4;          // 4x 超采样
+    const texSize = Math.ceil(worldR * 2 * scale);
+    const tex = this.textures.createCanvas(key, texSize, texSize);
+    const ctx = tex.getContext();
+    const c = texSize / 2;
+    const r = (texSize / 2) - 2;   // 留 2px 边距防止抗锯齿裁切
+
+    ctx.clearRect(0, 0, texSize, texSize);
+    ctx.fillStyle = 'rgba(' + ((color >> 16) & 0xff) + ',' + ((color >> 8) & 0xff) + ',' + (color & 0xff) + ',' + fillAlpha + ')';
+    ctx.beginPath();
+    ctx.arc(c, c, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.lineWidth = scale * 1.5;   // 等效 1.5px 世界描边
+    ctx.strokeStyle = 'rgba(255,255,255,' + strokeAlpha + ')';
+    ctx.beginPath();
+    ctx.arc(c, c, r - ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.stroke();
+
+    tex.refresh();
   }
 
   /** 点击浮框中的某个塔：校验金币与火力点合法性后立即落塔关闭浮框 */
