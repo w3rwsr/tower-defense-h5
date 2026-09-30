@@ -85,6 +85,8 @@ class GameScene extends Phaser.Scene {
     /* 点击火力点时的选塔浮框（每次打开动态构建）与火力点高亮层 */
     this.picker = null;
     this._pickSpot = null;
+    /* 第 6 关：点空白草地时的"仅高亮提示"模式（无浮框），再点空白关闭 */
+    this._spotHint = false;
     this.spotHlGfx = this.add.graphics().setDepth(590);
     /* 浮框弹出期间，所有其他可放置区域的半透明绿色描边方框层（在塔/障碍物
        之上、面板之下；脉冲由 drawOtherSpotsHighlight 驱动，关闭浮框即清除） */
@@ -1235,7 +1237,36 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    // 4) 点空白区域：关闭选塔框与升级面板，取消选中
+    // 4) 第 6 关：点不可放置的【空白草地/装饰物旁】不弹框，仅高亮全部
+    //    可放置区域作提示；再次点击空白 → 关闭高亮。点道路/传送门/终点
+    //    不做任何建造相关反应（浮框若开着则关闭，也不显示提示高亮）。
+    //    第 1~5 关保持原行为：点空白直接关闭浮框与面板。
+    if (this.levelId === 6) {
+      const roadHalf = (TD_CONFIG.world.pathWidth || 50) / 2 + 6;  // 路面半宽+触控容差
+      const onRoad = this.distToPath(x, y) < roadHalf;
+      if (onRoad) {
+        this.closeTowerPicker(true);
+        this.hidePanel();
+        this.selectedTower = null;
+        this.rangeGfx.clear();
+        return;
+      }
+      if (this._spotHint) {
+        /* 纯提示高亮已显示：再点空白 → 全部关闭 */
+        this.closeTowerPicker(true);
+        return;
+      }
+      /* 关浮框但保留高亮层，随后重绘为覆盖全部火力点的纯提示高亮 */
+      this.closeTowerPicker(true, true);
+      this.hidePanel();
+      this.selectedTower = null;
+      this.rangeGfx.clear();
+      this._spotHint = true;
+      this.drawOtherSpotsHighlight(null);
+      return;
+    }
+
+    // 5) 第 1~5 关原行为：点空白区域，关闭选塔框与升级面板，取消选中
     this.closeTowerPicker();
     this.hidePanel();
     this.selectedTower = null;
@@ -1850,12 +1881,15 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  /** 关闭选塔浮框；immediate=true 时不播淡出（切换/落子/场景清理用） */
-  closeTowerPicker(immediate) {
+  /** 关闭选塔浮框；immediate=true 时不播淡出（切换/落子/场景清理用）；
+   *  keepHighlight=true 时保留其他火力点高亮层（第 6 关：浮框关闭后
+   *  转为"纯提示高亮"模式，由调用方随后重绘）。 */
+  closeTowerPicker(immediate, keepHighlight) {
     const box = this.picker;
     this.picker = null;
     this._pickSpot = null;
-    this.clearOtherSpotsHighlight();
+    this._spotHint = false;
+    if (!keepHighlight) this.clearOtherSpotsHighlight();
     this.clearSpotHighlight();
     if (!box) return;
     this.tweens.killTweensOf(box);
