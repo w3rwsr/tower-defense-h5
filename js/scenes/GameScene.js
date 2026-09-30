@@ -86,6 +86,9 @@ class GameScene extends Phaser.Scene {
     this.picker = null;
     this._pickSpot = null;
     this.spotHlGfx = this.add.graphics().setDepth(590);
+    /* 浮框弹出期间，所有其他可放置区域的半透明绿色描边方框层（在塔/障碍物
+       之上、面板之下；脉冲由 drawOtherSpotsHighlight 驱动，关闭浮框即清除） */
+    this.spotOtherHlGfx = this.add.graphics().setDepth(15);
 
     /* ---- 塔操作面板（升级 / 出售） ---- */
     this.panel = this.buildTowerPanel();
@@ -1672,12 +1675,12 @@ class GameScene extends Phaser.Scene {
    * ============================================================ */
 
   /** 浮框整体缩放：画布被 FIT 缩小时同步放大，保证屏上可读可点；
-   *  同时受画面宽高上限钳制，避免在小屏上过大 */
+   *  同时受画面宽高上限钳制（宽≤屏宽60%、高≤屏高15%），避免遮大半屏幕 */
   pickerScale(w, h) {
     const k = Math.min(this.scale.displayScale.x, this.scale.displayScale.y) || 1;
     const readScale = 1 / Math.min(k, 1);
-    const fitW = (this.W * 0.92) / w;
-    const fitH = (this.H * 0.55) / h;
+    const fitW = (this.W * 0.60) / w;
+    const fitH = (this.H * 0.15) / h;
     return Math.max(1, Math.min(readScale, fitW, fitH));
   }
 
@@ -1686,13 +1689,15 @@ class GameScene extends Phaser.Scene {
     this.closeTowerPicker(true);
 
     const cfg = (this.buildCfg.picker) || {};
-    const itemW = cfg.itemW || 64;
-    const gap = cfg.gap != null ? cfg.gap : 6;
-    const padX = cfg.padX != null ? cfg.padX : 12;
-    const padY = cfg.padY != null ? cfg.padY : 10;
-    const iconR = cfg.iconR || 19;
-    const offY = cfg.offsetY != null ? cfg.offsetY : 30;
+    const itemW = cfg.itemW || 50;
+    const gap = cfg.gap != null ? cfg.gap : 4;
+    const padX = cfg.padX != null ? cfg.padX : 6;
+    const padY = cfg.padY != null ? cfg.padY : 5;
+    const iconR = cfg.iconR || 11;
+    const offY = cfg.offsetY != null ? cfg.offsetY : 22;
     const edge = cfg.edgeMargin != null ? cfg.edgeMargin : 8;
+    const nameFS = cfg.nameFS || 10;
+    const costFS = cfg.costFS || 9;
     const colors = cfg.iconColors || {};
     const glyphs = cfg.iconGlyph || {};
 
@@ -1703,24 +1708,25 @@ class GameScene extends Phaser.Scene {
 
     const innerW = types.length * itemW + (types.length - 1) * gap;
     const W = innerW + padX * 2;
-    /* 图标 38 + 间距 + 名称行 16 + 价格行 15 + 上下内边距 */
-    const H = padY * 2 + iconR * 2 + 5 + 16 + 2 + 15;
+    /* 紧凑垂直布局：图标(直径=2r) + gap(3) + 名称行(nameFS) + gap(2) + 价格行(costFS) */
+    const gapN = 3, gapC = 2;
+    const H = padY * 2 + iconR * 2 + gapN + nameFS + gapC + costFS;
 
     const box = this.add.container(0, 0).setDepth(700).setVisible(false);
 
     /* 外发光（白边外圈）+ 半透明深色框体 + 白色描边，Canvas/WebGL 通用 */
     const bg = this.add.graphics();
     bg.fillStyle(0xffffff, 0.14);
-    bg.fillRoundedRect(-W / 2 - 4, -H / 2 - 4, W + 8, H + 8, 18);
+    bg.fillRoundedRect(-W / 2 - 3, -H / 2 - 3, W + 6, H + 6, 12);
     bg.fillStyle(0x101828, 0.86);
-    bg.fillRoundedRect(-W / 2, -H / 2, W, H, 14);
+    bg.fillRoundedRect(-W / 2, -H / 2, W, H, 10);
     bg.lineStyle(2, 0xffffff, 0.72);
-    bg.strokeRoundedRect(-W / 2, -H / 2, W, H, 14);
+    bg.strokeRoundedRect(-W / 2, -H / 2, W, H, 10);
     box.add(bg);
 
     const iconCy = -H / 2 + padY + iconR;
-    const nameCy = iconCy + iconR + 4 + 8;
-    const costCy = nameCy + 16;
+    const nameCy = iconCy + iconR + gapN + nameFS / 2;
+    const costCy = nameCy + nameFS / 2 + gapC + costFS / 2;
     const left = -innerW / 2 + itemW / 2;
 
     types.forEach((tk, i) => {
@@ -1732,25 +1738,25 @@ class GameScene extends Phaser.Scene {
       const ig = this.add.graphics();
       ig.fillStyle(col, afford ? 0.95 : 0.22);
       ig.fillCircle(cx, iconCy, iconR);
-      ig.lineStyle(2, 0xffffff, afford ? 0.9 : 0.28);
+      ig.lineStyle(1.5, 0xffffff, afford ? 0.9 : 0.28);
       ig.strokeCircle(cx, iconCy, iconR);
       box.add(ig);
 
       const glyph = this.add.text(cx, iconCy + 1, glyphs[tk] || '', {
-        fontFamily: TD_FONT_STACK, fontSize: '17px', fontStyle: 'bold',
+        fontFamily: TD_FONT_STACK, fontSize: (iconR - 1) + 'px', fontStyle: 'bold',
         color: afford ? '#ffffff' : '#cfd4da'
       }).setOrigin(0.5);
       glyph.setAlpha(afford ? 1 : 0.4);
       box.add(glyph);
 
       const name = this.add.text(cx, nameCy, tc.name, {
-        fontFamily: TD_FONT_STACK, fontSize: '12.5px', fontStyle: 'bold',
+        fontFamily: TD_FONT_STACK, fontSize: nameFS + 'px', fontStyle: 'bold',
         color: afford ? '#ffffff' : '#aab0b8'
       }).setOrigin(0.5);
       box.add(name);
 
       const cost = this.add.text(cx, costCy, '🪙' + tc.cost, {
-        fontFamily: TD_FONT_STACK, fontSize: '12px', fontStyle: 'bold',
+        fontFamily: TD_FONT_STACK, fontSize: costFS + 'px', fontStyle: 'bold',
         color: afford ? '#ffd66b' : '#9aa0a8'
       }).setOrigin(0.5);
       box.add(cost);
@@ -1777,6 +1783,7 @@ class GameScene extends Phaser.Scene {
 
     this.picker = box;
     this._pickSpot = spot;
+    this.drawOtherSpotsHighlight(spot);   // 同步高亮所有其他可放置区域
     this.drawSpotHighlight(spot);
   }
 
@@ -1805,6 +1812,7 @@ class GameScene extends Phaser.Scene {
     const box = this.picker;
     this.picker = null;
     this._pickSpot = null;
+    this.clearOtherSpotsHighlight();
     this.clearSpotHighlight();
     if (!box) return;
     this.tweens.killTweensOf(box);
@@ -1833,6 +1841,61 @@ class GameScene extends Phaser.Scene {
 
   clearSpotHighlight() {
     const g = this.spotHlGfx;
+    this.tweens.killTweensOf(g);
+    g.setAlpha(1).clear();
+  }
+
+  /* ============================================================
+   * 其他可放置区域高亮（选塔浮框弹出期间显示）
+   * 作用：玩家点击一个火力点放塔时，屏幕上其余所有可放置区域同步
+   *       亮起半透明绿色描边方框 + 轻脉冲，让玩家一眼看清哪里还能
+   *       放塔；关闭浮框即清除。
+   * 范围：仅 hotspots 中可放塔且未被占用的点；跳过当前点击点（已由
+   *       金色脉冲高亮单独标记）。装饰物、道路、已被占用点不高亮。
+   * ============================================================ */
+
+  /** 绘制其他可放置区域高亮（半透明绿框 + 轻脉冲），activeSpot 为当前被点击点 */
+  drawOtherSpotsHighlight(activeSpot) {
+    const g = this.spotOtherHlGfx;
+    this.tweens.killTweensOf(g);
+    g.clear();
+    g.setAlpha(1);
+    const b = this.buildCfg;
+    const pk = (b.picker && b.picker.otherSpots) || {};
+    const sizeBonus = pk.sizeBonus != null ? pk.sizeBonus : 6;
+    const radiusBonus = pk.radiusBonus != null ? pk.radiusBonus : 2;
+    const size = (b.spotSize || 36) + sizeBonus;
+    const r = (b.spotRadius || 10) + radiusBonus;
+    const fill = pk.fill != null ? pk.fill : 0x7CFC00;
+    const fillA = pk.fillAlpha != null ? pk.fillAlpha : 0.16;
+    const border = pk.border != null ? pk.border : 0x2e7d1c;
+    const borderA = pk.borderAlpha != null ? pk.borderAlpha : 0.85;
+    let drew = 0;
+    const activeKey = activeSpot && activeSpot.key;
+    for (const h of this.hotspots) {
+      if (activeKey && h.key === activeKey) continue;        // 跳过当前点击点
+      if (!this.canBuildAt(h.x, h.y, h.key)) continue;        // 仅可放且未占用
+      const x0 = h.x - size / 2, y0 = h.y - size / 2;
+      g.fillStyle(fill, fillA);
+      g.fillRoundedRect(x0, y0, size, size, r);
+      g.lineStyle(2.5, border, borderA);
+      g.strokeRoundedRect(x0, y0, size, size, r);
+      drew++;
+    }
+    if (drew > 0) {
+      const lo = pk.pulseMin != null ? pk.pulseMin : 0.35;
+      const hi = pk.pulseMax != null ? pk.pulseMax : 0.75;
+      const dur = pk.duration != null ? pk.duration : 600;
+      this.tweens.add({
+        targets: g, alpha: { from: hi, to: lo },
+        duration: dur, yoyo: true, repeat: -1, ease: 'Sine.inOut'
+      });
+    }
+  }
+
+  /** 清除其他可放置区域高亮（关闭选塔浮框时调用） */
+  clearOtherSpotsHighlight() {
+    const g = this.spotOtherHlGfx;
     this.tweens.killTweensOf(g);
     g.setAlpha(1).clear();
   }
