@@ -207,12 +207,13 @@ class GameScene extends Phaser.Scene {
         raw.push({ x: px - nx * gap, y: py - ny * gap });
       }
     }
-    /* 全局筛选：画面边界内 + 避路硬校验 + 最小间距去重 */
+    /* 全局筛选：画面边界内 + 避路硬校验 + HUD 安全禁区 + 最小间距去重 */
     this.hotspots = [];
     for (const p of raw) {
       if (p.x < b.edgeMargin || p.x > this.W - b.edgeMargin ||
           p.y < b.edgeMargin || p.y > this.H - b.edgeMargin) continue;
       if (this.distToPath(p.x, p.y) < b.minPathDistance) continue;
+      if (this.inUiSafeZone(p.x, p.y)) continue;   // 避开顶部HUD/左下波次按钮（两端统一）
       let dup = false;
       for (const h of this.hotspots) {
         if (Math.abs(h.x - p.x) < minSpacing && Math.abs(h.y - p.y) < minSpacing) { dup = true; break; }
@@ -223,12 +224,14 @@ class GameScene extends Phaser.Scene {
     }
 
     /* 关卡专属额外火力点（JSON 驱动 build.extraSpots，仅部分关卡如第 3 关）：
-       覆盖道路、不压路、与已有热区去重，保证布局整齐不杂乱 */
+       覆盖道路、不压路、避开 HUD 安全禁区、与已有热区去重，保证布局整齐不杂乱。
+       新增塔位若落在 HUD 按钮区同样在此被拒绝（电脑/手机规则一致）。 */
     const extra = b.extraSpots || [];
     for (const p of extra) {
       if (p.x < b.edgeMargin || p.x > this.W - b.edgeMargin ||
           p.y < b.edgeMargin || p.y > this.H - b.edgeMargin) continue;
       if (this.distToPath(p.x, p.y) < b.minPathDistance) continue;
+      if (this.inUiSafeZone(p.x, p.y)) continue;
       let dup = false;
       for (const h of this.hotspots) {
         if (Math.abs(h.x - p.x) < minSpacing && Math.abs(h.y - p.y) < minSpacing) { dup = true; break; }
@@ -274,12 +277,14 @@ class GameScene extends Phaser.Scene {
     const share = oc.spotShare || 112;
     const spacing = oc.spotSpacing || 50;
 
-    /* 候选点合法性：界内 + 不压路 + 与全部已有热区保持间距 + 不贴其他障碍物。
-       minSpace 可放宽（首选失败时兜底），但避路/界内/覆盖距离永不放宽。 */
+    /* 候选点合法性：界内 + 不压路 + 不落 HUD 安全禁区 + 与全部已有热区保持
+       间距 + 不贴其他障碍物。
+       minSpace 可放宽（首选失败时兜底），但避路/界内/禁区/覆盖距离永不放宽。 */
     const validSpot = (p, self, minSpace) => {
       if (p.x < b.edgeMargin || p.x > this.W - b.edgeMargin ||
           p.y < b.edgeMargin || p.y > this.H - b.edgeMargin) return false;
       if (this.distToPath(p.x, p.y) < b.minPathDistance) return false;
+      if (this.inUiSafeZone(p.x, p.y)) return false;
       if (Math.hypot(p.x - self.x, p.y - self.y) > coverRange) return false;
       for (const h of this.hotspots) {
         if (Math.hypot(h.x - p.x, h.y - p.y) < minSpace) return false;
@@ -1306,12 +1311,26 @@ class GameScene extends Phaser.Scene {
     return best;
   }
 
-  /** 热区是否可放：画面边界 + 热区未占用 + 塔心离路径中心线足够远（避路） */
+  /** 点是否落在 HUD 安全禁区（顶部金币/生命/波次/控制按钮、左下波次按钮）。
+      电脑端与移动端共用同一份世界坐标矩形（TD_CONFIG.build.uiSafeZones），
+      保证两端塔位布局一致；任何火力点/据点/障碍物都不得生成在区内。 */
+  inUiSafeZone(x, y) {
+    const zones = (this.buildCfg && this.buildCfg.uiSafeZones) || TD_CONFIG.build.uiSafeZones;
+    if (!zones) return false;
+    for (const z of zones) {
+      if (x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h) return true;
+    }
+    return false;
+  }
+
+  /** 热区是否可放：画面边界 + 热区未占用 + 塔心离路径中心线足够远（避路）
+      + 不落入 HUD 安全禁区 */
   canBuildAt(x, y, key) {
     const b = TD_CONFIG.build;
     if (x < b.edgeMargin || x > this.W - b.edgeMargin || y < b.edgeMargin || y > this.H - b.edgeMargin) return false;
     if (this.occupied.has(key)) return false;
     if (this.distToPath(x, y) < b.minPathDistance) return false;
+    if (this.inUiSafeZone(x, y)) return false;
     return true;
   }
 
@@ -1348,6 +1367,9 @@ class GameScene extends Phaser.Scene {
     const kinds = ocfg.kinds || ['rock'];
     for (const c of cand) {
       if (this.obstacles.length >= ocfg.maxCount) break;
+      /* HUD 安全禁区（顶部信息栏/控制按钮、左下波次按钮）不放障碍物：
+         否则被按钮遮挡无法点选/转火攻击（血量/奖励规则不变，只是换位置） */
+      if (this.inUiSafeZone(c.x, c.y)) continue;
       let dup = false;
       for (const o of this.obstacles) {
         if (Math.abs(o.x - c.x) < ocfg.spacing && Math.abs(o.y - c.y) < ocfg.spacing) { dup = true; break; }
@@ -1367,6 +1389,7 @@ class GameScene extends Phaser.Scene {
     for (const p of extraObs) {
       if (p.x < 24 || p.x > this.W - 24 || p.y < 24 || p.y > this.H - 24) continue;
       if (this.distToPath(p.x, p.y) < minPath) continue;
+      if (this.inUiSafeZone(p.x, p.y)) continue;   // 固定障碍物同样避开 HUD 区
       let dup = false;
       for (const o of this.obstacles) {
         if (Math.hypot(o.x - p.x, o.y - p.y) < ocfg.spacing) { dup = true; break; }
