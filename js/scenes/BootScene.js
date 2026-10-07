@@ -5,6 +5,15 @@
 class BootScene extends Phaser.Scene {
   constructor() { super('BootScene'); }
 
+  /* 加载火元素塔（towerA）1/2/3 级美术图；加载失败不影响游戏，create 中做回退 */
+  preload() {
+    try {
+      this.load.image('fire_tower_lv1_raw', 'assets/fire_tower_lv1.png');
+      this.load.image('fire_tower_lv2_raw', 'assets/fire_tower_lv2.png');
+      this.load.image('fire_tower_lv3_raw', 'assets/fire_tower_lv3.png');
+    } catch (e) { /* 兜底：create 中会检测缺失并回退程序化炮头 */ }
+  }
+
   create() {
     const C = TD_CONFIG;
 
@@ -183,7 +192,109 @@ class BootScene extends Phaser.Scene {
       g.fillEllipse(21, 8, 24, 7);
     });
 
+    /* ---------- 火元素塔（towerA）1/2/3 级美术贴图：色度键抠图转透明 ----------
+       lv1/lv3 绿幕（纯绿 #00ff00），lv2 白幕（纯白 #ffffff），纯色且与火焰
+       颜色无重叠，用 canvas 像素级抠图 + 边缘去晕，结果存为 fire_tower_lvN。
+       任何一步失败都会保留对应等级的程序化炮头回退，绝不影响游戏启动。 */
+    try {
+      const bgKeys = ['fire_tower_lv1_raw', 'fire_tower_lv2_raw', 'fire_tower_lv3_raw'];
+      const bgs = ['green', 'white', 'green'];
+      bgKeys.forEach((rawKey, i) => {
+        const lv = i + 1;
+        const outKey = 'fire_tower_lv' + lv;
+        if (this.textures.exists(rawKey)) {
+          this.chromaKeyTexture(rawKey, outKey, bgs[i]);
+        }
+      });
+    } catch (e) { /* 抠图异常：忽略，Tower 端会回退到 turret_towerA 炮头 */ }
+
+    /* ---------- 火元素弹幕贴图（3 级风格：小火苗 / 中火球 / 大火球） ----------
+       外焰橙红 0xff5d1a、中焰橙黄 0xffa93b、内焰亮黄 0xffe76b，统一生成。 */
+    this.makeTexture('proj_fire_lv1', 18, 18, (g) => {
+      g.fillStyle(0xff5d1a, 1); g.fillCircle(9, 10, 7);
+      g.fillStyle(0xffa93b, 1); g.fillCircle(9, 9.5, 5);
+      g.fillStyle(0xffe76b, 1); g.fillCircle(9, 9, 2.6);
+    });
+    this.makeTexture('proj_fire_lv2', 24, 24, (g) => {
+      g.fillStyle(0xff5d1a, 1); g.fillCircle(12, 13, 10);
+      g.fillStyle(0xffa93b, 1); g.fillCircle(12, 12.5, 7);
+      g.fillStyle(0xffe76b, 1); g.fillCircle(12, 12, 3.6);
+    });
+    this.makeTexture('proj_fire_lv3', 30, 30, (g) => {
+      g.fillStyle(0xff5d1a, 1); g.fillCircle(15, 16, 13);
+      g.fillStyle(0xffa93b, 1); g.fillCircle(15, 15.5, 9.5);
+      g.fillStyle(0xffe76b, 1); g.fillCircle(15, 15, 5);
+    });
+
     this.scene.start('LevelSelectScene');
+  }
+
+  /* 色度键抠图：把纯色背景（green/white）转透明，并做边缘去晕防白边/绿边；
+     随后按 alpha 裁剪到内容包围盒（四周留 12% 边距，供缩放动效余量），
+     输出正方形纹理——原图火焰占比小，不裁剪直接显示会缩成一团。
+     全程离线 canvas 处理，不改任何 canvas/相机/缩放。 */
+  chromaKeyTexture(rawKey, outKey, bg) {
+    if (this.textures.exists(outKey)) this.textures.remove(outKey);
+    const src = this.textures.get(rawKey).getSourceImage();
+    const w = src.width, h = src.height;
+    const off = document.createElement('canvas');
+    off.width = w; off.height = h;
+    const ctx = off.getContext('2d');
+    ctx.drawImage(src, 0, 0);
+    let img;
+    try { img = ctx.getImageData(0, 0, w, h); } catch (e) { return; } // 跨域等异常：放弃抠图
+    const d = img.data;
+    const isGreen = bg === 'green';
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      let key; // 0=主体, 1=背景, 0~1=边缘混合度
+      if (isGreen) {
+        // 纯绿幕：绿分量远高于红蓝则视为背景；用"超出红蓝的量"做线性键控去绿晕
+        const excess = g - Math.max(r, b);
+        key = Phaser.Math.Clamp(excess / 90, 0, 1);
+      } else {
+        /* 纯白幕：RGB 最小分量足够接近 255 才算背景（m≥235 全透明，m≤165 全保留）。
+           亮黄内焰 m≈107、橙红外焰 m≈20 均远低于 165，不会被误抠出洞；
+           白边/白晕处于 165~235 之间，按键控值半透明 + 去白晕。 */
+        const m = Math.min(r, g, b);
+        key = Phaser.Math.Clamp((m - 165) / 70, 0, 1);
+      }
+      if (key >= 1) { d[i + 3] = 0; continue; }          // 纯背景 → 全透明
+      if (key <= 0) { continue; }                        // 纯主体 → 保持
+      // 边缘：反算去除背景色溢出（un-premultiply），再按键控值设 alpha
+      const inv = 1 / (1 - key);
+      if (isGreen) {
+        d[i + 1] = Phaser.Math.Clamp((g - 255 * key) * inv, 0, 255);
+      } else {
+        d[i]     = Phaser.Math.Clamp((r - 255 * key) * inv, 0, 255);
+        d[i + 1] = Phaser.Math.Clamp((g - 255 * key) * inv, 0, 255);
+        d[i + 2] = Phaser.Math.Clamp((b - 255 * key) * inv, 0, 255);
+      }
+      d[i + 3] = Math.round(255 * (1 - key));
+    }
+    ctx.putImageData(img, 0, 0);
+
+    /* 按 alpha>16 扫描内容包围盒（隔行隔列扫描提速），裁剪为居中正方形 */
+    let minX = w, minY = h, maxX = -1, maxY = -1;
+    for (let y = 0; y < h; y += 2) {
+      for (let x = 0; x < w; x += 2) {
+        if (d[(y * w + x) * 4 + 3] > 16) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX < 0) return; // 全透明（抠图失败）：不生成纹理，Tower 端回退炮头
+    const cw = maxX - minX + 1, ch = maxY - minY + 1;
+    const side = Math.ceil(Math.max(cw, ch) * 1.2); // 12% 边距给缩放动效留余量
+    const ct = this.textures.createCanvas(outKey, side, side);
+    const cctx = ct.getContext();
+    cctx.clearRect(0, 0, side, side);
+    cctx.drawImage(off, minX, minY, cw, ch,
+      Math.round((side - cw) / 2), Math.round((side - ch) / 2), cw, ch);
+    ct.refresh();
   }
 
   /* 小工具：在一张临时 Graphics 上绘制并生成纹理 */

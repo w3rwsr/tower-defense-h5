@@ -17,6 +17,31 @@ class Projectile extends Phaser.GameObjects.Image {
     this.sourceTower = sourceTower || null; // 发射塔（风元素塔扩散冷却判定用）
     this.spin = pCfg.spin || 0;           // 风刃旋转速度（弧度/秒，0=不旋转）
 
+    /* 火元素塔（towerA）：按塔等级换火焰弹幕贴图，2级带短拖尾、3级带明显拖尾+火星。
+       拖尾为跟随弹幕的粒子发射器，impact 时随弹幕一并销毁。 */
+    this._trail = null;
+    const srcLv = sourceTower && sourceTower.isFire ? sourceTower.level : 0;
+    if (srcLv >= 1) {
+      const texKey = 'proj_fire_lv' + Math.min(srcLv, 3);
+      if (scene.textures.exists(texKey)) this.setTexture(texKey);
+      this.setScale(srcLv === 1 ? 1 : srcLv === 2 ? 1.05 : 1.15); // 等级越高弹幕越大
+      if (srcLv >= 2) {
+        this._trail = scene.add.particles(0, 0, texKey, {
+          speed: 0, scale: { start: srcLv === 2 ? 0.4 : 0.55, end: 0 },
+          alpha: { start: 0.55, end: 0 }, lifespan: srcLv === 2 ? 160 : 260,
+          frequency: srcLv === 2 ? 30 : 18, blendMode: 'ADD', follow: this
+        }).setDepth(39);
+        if (srcLv >= 3) {
+          // 3级额外火星：四散的小亮点
+          this._sparks = scene.add.particles(0, 0, 'proj_fire_lv1', {
+            speed: { min: 10, max: 40 }, scale: { start: 0.16, end: 0 },
+            alpha: { start: 0.9, end: 0 }, lifespan: 300, frequency: 40,
+            blendMode: 'ADD', follow: this
+          }).setDepth(39);
+        }
+      }
+    }
+
     // 落点（目标活着则每帧刷新）
     this.tx = target.x;
     this.ty = target.y;
@@ -46,14 +71,17 @@ class Projectile extends Phaser.GameObjects.Image {
     }
 
     this.setPosition(this.x + (dx / dist) * step, this.y + (dy / dist) * step);
-    /* 风刃（spin>0）持续旋转出旋风效果；普通圆弹贴图为圆形，朝向旋转无意义 */
+    /* 风刃（spin>0）持续旋转出旋风效果；火焰弹幕沿飞行方向朝向目标（贴图尖端朝右） */
     if (this.spin) this.rotation += this.spin * dt;
-    else this.rotation = Math.atan2(dy, dx); // 占位贴图为圆形，旋转留作换贴图时使用
+    else this.rotation = Math.atan2(dy, dx);
   }
 
   impact() {
     this.done = true;
     const scene = this.scene;
+    /* 火焰弹幕的拖尾/火星粒子随弹幕一并销毁，避免残留 */
+    if (this._trail) { this._trail.destroy(); this._trail = null; }
+    if (this._sparks) { this._sparks.destroy(); this._sparks = null; }
     /* 目标互斥：本弹锁定的是障碍物（isObstacle）→ 只结算障碍物；
        锁定的是小怪 → 只结算小怪，绝不伤害障碍物 */
     const vsObstacle = this.target && this.target.isObstacle;
