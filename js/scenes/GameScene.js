@@ -1584,11 +1584,11 @@ class GameScene extends Phaser.Scene {
 
     const title = this.add.text(-W / 2 + 12, -H / 2 + 8, '', {
       fontFamily: TD_FONT_STACK, fontSize: '15px',
-      fontStyle: 'bold', color: '#3a2c1a', resolution: TD_TEXT_RES
+      fontStyle: 'bold', color: '#3a2c1a'
     });
     const stats = this.add.text(-W / 2 + 12, -H / 2 + 30, '', {
       fontFamily: TD_FONT_STACK, fontSize: '13px',
-      color: '#5c431f', resolution: TD_TEXT_RES
+      color: '#5c431f'
     });
     panel.add([title, stats]);
 
@@ -1616,8 +1616,8 @@ class GameScene extends Phaser.Scene {
     };
     draw(color);
     const text = this.add.text(x, y, label, {
-      fontFamily: TD_FONT_STACK, fontSize: '14px',
-      fontStyle: 'bold', color: '#3a2c1a', resolution: TD_TEXT_RES
+      fontFamily: TD_FONT_STACK, fontSize: '13.5px',
+      fontStyle: 'bold', color: '#3a2c1a'
     }).setOrigin(0.5);
     const zone = this.add.zone(x, y, w + 12, h + 12).setInteractive({ useHandCursor: true });
     zone.setData('ui', true);
@@ -1774,9 +1774,8 @@ class GameScene extends Phaser.Scene {
     const costCy = Math.round(nameCy + nameFS / 2 + gapC + costFS / 2);
     const left = -innerW / 2 + itemW / 2;
 
-    /* 文字统一高分辨率：与画布 resolution 一致（TD_TEXT_RES = clamp(DPR,2,3)），
-       避免小字号半像素模糊；Phaser Text 不继承 game.config.resolution，必须显式设。 */
-    const textRes = TD_TEXT_RES;
+    /* 文字统一高分辨率：分辨率 = clamp(devicePixelRatio, 2, 3)，避免小字号半像素模糊 */
+    const textRes = Math.round(Math.min(Math.max(window.devicePixelRatio || 1, 2), 3));
 
     /* 4x 超采样烘焙塔图标纹理：在世界坐标画 52px 圆 → 缓存为 208px 纹理，
        缩小显示时边缘清晰（等效 128-256px PNG 方案，无外部资源依赖）。
@@ -2411,11 +2410,10 @@ class GameScene extends Phaser.Scene {
   }
 
   floatText(x, y, text, color) {
-    const t = this.add.text(Math.round(x), Math.round(y), text, {
+    const t = this.add.text(x, y, text, {
       fontFamily: TD_FONT_STACK,
       fontSize: '14px', fontStyle: 'bold',
-      color: '#' + color.toString(16).padStart(6, '0'),
-      resolution: TD_TEXT_RES
+      color: '#' + color.toString(16).padStart(6, '0')
     }).setOrigin(0.5).setDepth(700).setStroke('#2b2230', 3);
     this.tweens.add({
       targets: t, y: y - 34, alpha: 0,
@@ -2427,8 +2425,7 @@ class GameScene extends Phaser.Scene {
     const t = this.add.text(this.W / 2, this.H / 2 - 60, text, {
       fontFamily: TD_FONT_STACK,
       fontSize: '30px', fontStyle: 'bold',
-      color: '#' + color.toString(16).padStart(6, '0'),
-      resolution: TD_TEXT_RES
+      color: '#' + color.toString(16).padStart(6, '0')
     }).setOrigin(0.5).setDepth(800).setStroke('#2b2230', 5).setScale(0);
     this.tweens.chain({
       targets: t,
@@ -3226,13 +3223,11 @@ class GameScene extends Phaser.Scene {
 
       const title = this.add.text(0, -60, '', {
         fontFamily: TD_FONT_STACK,
-        fontSize: '24px', fontStyle: 'bold', color: '#2a4a7a',
-        resolution: TD_TEXT_RES
+        fontSize: '24px', fontStyle: 'bold', color: '#2a4a7a'
       }).setOrigin(0.5);
       const text = this.add.text(0, 0, '', {
         fontFamily: TD_FONT_STACK,
-        fontSize: '16px', color: '#4a3313', align: 'center', wordWrap: { width: cardW - 40 },
-        resolution: TD_TEXT_RES
+        fontSize: '16px', color: '#4a3313', align: 'center', wordWrap: { width: cardW - 40 }
       }).setOrigin(0.5);
       const btn = this.add.graphics();
       /* 按钮底色加深至 #2f6fc0，白字对比度 5.1:1（AA） */
@@ -3240,8 +3235,7 @@ class GameScene extends Phaser.Scene {
       btn.lineStyle(3, 0x245a9e, 1).strokeRoundedRect(-60, 50, 120, 40, 12);
       const btnText = this.add.text(0, 70, '知道了', {
         fontFamily: TD_FONT_STACK,
-        fontSize: '16px', fontStyle: 'bold', color: '#ffffff',
-        resolution: TD_TEXT_RES
+        fontSize: '16px', fontStyle: 'bold', color: '#ffffff'
       }).setOrigin(0.5);
       const btnZone = this.add.zone(0, 70, 120, 40).setInteractive({ useHandCursor: true });
       btnZone.on('pointerdown', () => {
