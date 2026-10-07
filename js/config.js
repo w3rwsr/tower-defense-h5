@@ -4,9 +4,21 @@
  * ============================================================ */
 
 /* 全局无衬线字体栈：优先系统内置高清字体（无需下载字体文件，零加载延迟），
-   覆盖 Android(Roboto) / iOS(PingFang) / Windows(YaHei/Segoe) / 桌面 Chrome(Inter) */
+   覆盖 Android(Roboto/Noto) / iOS(PingFang) / Windows(YaHei/Segoe) / 桌面 Chrome(Inter)。
+   全部是“字体名回退”：系统装了哪个用哪个，任何一个都不存在也不会报错或卡住。 */
 window.TD_FONT_STACK =
-  'Inter, Roboto, "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, Arial, sans-serif';
+  'Inter, Roboto, "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, Arial, sans-serif';
+
+/* 文字超采样倍率：只传给 Phaser Text 的 resolution（文字内部画布倍率），
+   不改变 canvas 尺寸 / 相机 / ScaleManager / 布局，因此不会影响场景渲染。
+   2x 起步保证清晰，最高 3x 避免高分屏显存占用过大；读取异常时回退 2，
+   确保任何情况下游戏主流程都不会因此中断。 */
+window.TD_TEXT_RES = (function () {
+  try {
+    var d = window.devicePixelRatio || 1;
+    return Math.min(Math.max(d, 2), 3);
+  } catch (e) { return 2; }
+})();
 
 window.TD_CONFIG = {
 

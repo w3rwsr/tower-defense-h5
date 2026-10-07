@@ -89,12 +89,14 @@ class LevelSelectScene extends Phaser.Scene {
     /* ---- 标题 ---- */
     this.add.text(W / 2, vl.titleY, '选择关卡', {
       fontFamily: TD_FONT_STACK,
-      fontSize: this.ls(36) + 'px', fontStyle: 'bold', color: '#ffffff'
+      fontSize: this.ls(36) + 'px', fontStyle: 'bold', color: '#ffffff',
+      resolution: TD_TEXT_RES
     }).setOrigin(0.5).setStroke('#24400f', 6).setShadow(0, 3, '#000000', 0.25);
 
     this.add.text(W / 2, vl.subY, '守护你的王国，逐关挑战！', {
       fontFamily: TD_FONT_STACK,
-      fontSize: this.ls(15) + 'px', color: '#1e4620'
+      fontSize: this.ls(15) + 'px', color: '#1e4620',
+      resolution: TD_TEXT_RES
     }).setOrigin(0.5).setStroke('#e6f7d8', 3);
 
     /* ---- 关卡数据 ---- */
@@ -122,7 +124,8 @@ class LevelSelectScene extends Phaser.Scene {
     /* ---- 底部提示 ---- */
     this.add.text(W / 2, vl.hintY, '通关第 1 关解锁塔D，通关第 2 关解锁塔E·电链弹跳，通关第 3 关解锁风元素塔', {
       fontFamily: TD_FONT_STACK,
-      fontSize: this.ls(13) + 'px', color: '#1e4620'
+      fontSize: this.ls(13) + 'px', color: '#1e4620',
+      resolution: TD_TEXT_RES
     }).setOrigin(0.5).setStroke('#e6f7d8', 3);
   }
 
@@ -166,23 +169,28 @@ class LevelSelectScene extends Phaser.Scene {
 
     const titleText = this.add.text(0, -h / 2 + bandH / 2, '第 ' + level + ' 关', {
       fontFamily: TD_FONT_STACK,
-      fontSize: 15 + 'px', fontStyle: 'bold', color: '#ffffff'
+      fontSize: 15 + 'px', fontStyle: 'bold', color: '#ffffff',
+      resolution: TD_TEXT_RES
     }).setOrigin(0.5).setStroke('#1d1610', 3);
 
     const emojiY = -h * 0.08;
     const nameY = h * 0.22;
     const descY = h * 0.38;
 
-    const emojiText = this.add.text(0, emojiY, info.emoji, { fontSize: 36 + 'px' }).setOrigin(0.5);
+    const emojiText = this.add.text(0, emojiY, info.emoji, {
+      fontSize: 36 + 'px', resolution: TD_TEXT_RES
+    }).setOrigin(0.5);
 
     const nameText = this.add.text(0, nameY, info.name, {
       fontFamily: TD_FONT_STACK,
       fontSize: 15 + 'px', fontStyle: 'bold',
-      color: unlocked ? '#4a3313' : '#3d352e'
+      color: unlocked ? '#4a3313' : '#3d352e',
+      resolution: TD_TEXT_RES
     }).setOrigin(0.5);
     const descText = this.add.text(0, descY, info.desc, {
       fontFamily: TD_FONT_STACK,
-      fontSize: 12 + 'px', color: unlocked ? '#5f4720' : '#3d352e'
+      fontSize: 12 + 'px', color: unlocked ? '#5f4720' : '#3d352e',
+      resolution: TD_TEXT_RES
     }).setOrigin(0.5);
 
     card.add([g, titleText, emojiText, nameText, descText]);
@@ -194,13 +202,16 @@ class LevelSelectScene extends Phaser.Scene {
       badge.fillStyle(0x6be86b, 1).fillCircle(bx, by, br);
       badge.lineStyle(2, 0x2e7d1c, 1).strokeCircle(bx, by, br);
       const check = this.add.text(bx, by, '✓', {
-        fontFamily: TD_FONT_STACK, fontSize: 14 + 'px', fontStyle: 'bold', color: '#1b5e10'
+        fontFamily: TD_FONT_STACK, fontSize: 14 + 'px', fontStyle: 'bold', color: '#1b5e10',
+        resolution: TD_TEXT_RES
       }).setOrigin(0.5);
       card.add([badge, check]);
     }
 
     if (!unlocked) {
-      const lock = this.add.text(0, emojiY, '🔒', { fontSize: 36 + 'px' })
+      const lock = this.add.text(0, emojiY, '🔒', {
+        fontSize: 36 + 'px', resolution: TD_TEXT_RES
+      })
         .setOrigin(0.5).setAlpha(0.85);
       card.add(lock);
     }
@@ -253,9 +264,10 @@ class LevelSelectScene extends Phaser.Scene {
   }
 
   showToast(msg, x, y) {
-    const t = this.add.text(x, y - 70, msg, {
+    const t = this.add.text(Math.round(x), Math.round(y - 70), msg, {
       fontFamily: TD_FONT_STACK,
-      fontSize: 20 + 'px', fontStyle: 'bold', color: '#7a2810'
+      fontSize: 20 + 'px', fontStyle: 'bold', color: '#7a2810',
+      resolution: TD_TEXT_RES
     }).setOrigin(0.5).setStroke('#ffffff', 4).setAlpha(0).setDepth(100);
 
     this.tweens.chain({
