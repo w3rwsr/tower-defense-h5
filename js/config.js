@@ -4,9 +4,17 @@
  * ============================================================ */
 
 /* 全局无衬线字体栈：优先系统内置高清字体（无需下载字体文件，零加载延迟），
-   覆盖 Android(Roboto) / iOS(PingFang) / Windows(YaHei/Segoe) / 桌面 Chrome(Inter) */
+   覆盖 Android(Roboto/Noto) / iOS(PingFang) / Windows(YaHei/Segoe) / 桌面 Chrome(Inter)。
+   系统字体天然包含完整 CJK 字形，不会出现方块/缺字；避免引入 10MB+ 的中文字体包
+   拖慢移动端首屏。 */
 window.TD_FONT_STACK =
-  'Inter, Roboto, "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, Arial, sans-serif';
+  '"Noto Sans SC", "Source Han Sans SC", Inter, Roboto, "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, Arial, sans-serif';
+
+/* 全局渲染分辨率：画布与所有文字统一按设备像素比渲染（clamp 到 2~3 倍），
+   避免 canvas 被浏览器放大导致文字/图形发虚。文字对象的 resolution 必须与
+   此值一致（Phaser Text 不继承 game.config.resolution，默认 1），否则文字
+   内部位图仍按 1x 绘制、再被高 DPR 画布放大→模糊。 */
+window.TD_TEXT_RES = Math.min(Math.max(window.devicePixelRatio || 1, 2), 3);
 
 window.TD_CONFIG = {
 
@@ -94,8 +102,8 @@ window.TD_CONFIG = {
       "iconR": 13,            // 元素色圆图标半径（4x超采样纹理缩小显示，边缘平滑）
       "offsetY": 22,          // 浮框距火力点的间隔
       "edgeMargin": 8,        // 浮框距画面边缘最小距离
-      "nameFS": 12,           // 塔名字号（resolution≥2 渲染，小字号也清晰）
-      "costFS": 11,           // 价格字号
+      "nameFS": 13,           // 塔名字号（resolution≥2 渲染，小字号也清晰）
+      "costFS": 12,           // 价格字号
       "iconColors": {         // 图标元素色：火红 / 冰蓝 / 水青 / 牵引灰 / 雷紫 / 风绿
         "towerA": 0xff5d4d,
         "towerB": 0x4aa8ff,

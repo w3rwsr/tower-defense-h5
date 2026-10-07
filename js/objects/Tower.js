@@ -23,7 +23,8 @@ class Tower extends Phaser.GameObjects.Container {
       fontFamily: TD_FONT_STACK,
       fontSize: '12px',
       fontStyle: 'bold',
-      color: '#ffffff'
+      color: '#ffffff',
+      resolution: TD_TEXT_RES
     }).setOrigin(0.5).setStroke('#3a2c1a', 3);
     this.add(this.badge);
 

@@ -374,7 +374,8 @@ class Enemy extends Phaser.GameObjects.Container {
     if (!this.vulnText && this.scene) {
       this.vulnText = this.scene.add.text(0, this.radius + 9, '', {
         fontFamily: TD_FONT_STACK,
-        fontSize: '11px', fontStyle: 'bold', color: '#ff5d5d'
+        fontSize: '12px', fontStyle: 'bold', color: '#ff5d5d',
+        resolution: TD_TEXT_RES
       }).setOrigin(0.5).setStroke('#3a0d0d', 3);
       this.add(this.vulnText);
     }

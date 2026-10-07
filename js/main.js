@@ -220,6 +220,38 @@
   });
 
   /* ============================================================
+   * Canvas 设备像素比（DPR）渲染：
+   * Phaser 3.80.1 的 ScaleManager 不读取 config.resolution，canvas
+   * backing store 恒为 960×540，被浏览器放大后发虚。这里在每次
+   * ScaleManager resize 后，把 canvas 宽高乘以 TD_TEXT_RES（2~3），
+   * 让 backing store 达到设备像素级，配合文字 resolution=TD_TEXT_RES
+   * 实现 1:1 清晰渲染。仅在首个非 Boot 场景启动后才应用，避免干扰
+   * BootScene 的程序化纹理生成；renderer.resize 同步更新投影矩阵。
+   * ============================================================ */
+  (function patchCanvasDPR() {
+    var res = window.TD_TEXT_RES || 2;
+    function apply() {
+      var cv = game.canvas;
+      if (!cv || !game.scale || !game.scale.baseSize) return;
+      /* BootScene 期间不调整 canvas，避免干扰其程序化纹理生成与场景启动 */
+      if (game.scene.isActive('BootScene') && !game.scene.isActive('LevelSelectScene') && !game.scene.isActive('GameScene')) return;
+      var w = Math.round(game.scale.baseSize.width * res);
+      var h = Math.round(game.scale.baseSize.height * res);
+      if (cv.width === w && cv.height === h) return;
+      cv.width = w;
+      cv.height = h;
+      if (game.renderer && game.renderer.resize) {
+        try { game.renderer.resize(w, h); } catch (e) { /* 忽略 */ }
+      }
+    }
+    /* 每次 ScaleManager resize 后，延迟到下一帧再应用，确保在
+       Phaser 自身的 resize 处理器（会把 canvas 复位为 baseSize）之后执行 */
+    game.scale.on('resize', function () { setTimeout(apply, 0); });
+    /* 兜底：游戏主循环每帧检查一次（仅当尺寸不符时才修正，开销极低） */
+    game.events.on('step', apply);
+  })();
+
+  /* ============================================================
    * 真机横竖屏切换：移动浏览器的 orientationchange 在视口尺寸更新前触发，
    * Phaser 自动 resize 可能读到过期的父容器尺寸，导致画布错位。
    * 这里在方向变化后强制重排 + 延迟刷新 Phaser ScaleManager。
