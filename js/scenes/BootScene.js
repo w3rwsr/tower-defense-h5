@@ -203,39 +203,46 @@ class BootScene extends Phaser.Scene {
         const lv = i + 1;
         const outKey = 'fire_tower_lv' + lv;
         if (this.textures.exists(rawKey)) {
-          this.chromaKeyTexture(rawKey, outKey, bgs[i]);
+          /* 输出尺寸 = 显示尺寸(42/48/56) × 4 超采样：运行时最多 1:1 或轻
+             微缩小，配合 LINEAR 采样保证清晰（不再用 256 固定输出） */
+          this.chromaKeyTexture(rawKey, outKey, bgs[i], [168, 192, 224][i]);
         }
       });
     } catch (e) { /* 抠图异常：忽略，Tower 端会回退到 turret_towerA 炮头 */ }
 
-    /* ---------- 火元素弹幕贴图（3 级风格：小火苗 / 中火球 / 大火球） ----------
-       外焰橙红 0xff5d1a、中焰橙黄 0xffa93b、内焰亮黄 0xffe76b，统一生成。 */
-    this.makeTexture('proj_fire_lv1', 18, 18, (g) => {
-      g.fillStyle(0xff5d1a, 1); g.fillCircle(9, 10, 7);
-      g.fillStyle(0xffa93b, 1); g.fillCircle(9, 9.5, 5);
-      g.fillStyle(0xffe76b, 1); g.fillCircle(9, 9, 2.6);
-    });
-    this.makeTexture('proj_fire_lv2', 24, 24, (g) => {
-      g.fillStyle(0xff5d1a, 1); g.fillCircle(12, 13, 10);
-      g.fillStyle(0xffa93b, 1); g.fillCircle(12, 12.5, 7);
-      g.fillStyle(0xffe76b, 1); g.fillCircle(12, 12, 3.6);
-    });
-    this.makeTexture('proj_fire_lv3', 30, 30, (g) => {
-      g.fillStyle(0xff5d1a, 1); g.fillCircle(15, 16, 13);
-      g.fillStyle(0xffa93b, 1); g.fillCircle(15, 15.5, 9.5);
-      g.fillStyle(0xffe76b, 1); g.fillCircle(15, 15, 5);
+    /* ---------- 火元素弹幕贴图（3 级：方向性火苗，尖端朝右 +x） ----------
+       外焰橙红 0xff5d1a、中焰橙黄 0xffa93b、内焰亮黄 0xffe76b；
+       头部为圆球在右，尾部向左收窄——运行时 rotation=atan2(dy,dx) 朝向目标。 */
+    const drawFireProj = (g, w, h) => {
+      const cy = h / 2, hr = h * 0.36;           // 头部半径
+      const hx = w - hr - 1;                     // 头部圆心 x
+      g.fillStyle(0xff5d1a, 1);                  // 外焰：左收窄椭圆 + 头圆
+      g.fillEllipse(w * 0.32, cy, w * 0.62, h * 0.74);
+      g.fillCircle(hx, cy, hr);
+      g.fillStyle(0xffa93b, 1);                  // 中焰
+      g.fillEllipse(w * 0.40, cy, w * 0.44, h * 0.5);
+      g.fillCircle(hx, cy, hr * 0.72);
+      g.fillStyle(0xffe76b, 1);                  // 内焰亮芯
+      g.fillEllipse(w * 0.50, cy, w * 0.26, h * 0.3);
+      g.fillCircle(hx + hr * 0.1, cy, hr * 0.42);
+    };
+    this.makeTexture('proj_fire_lv1', 26, 18, (g) => drawFireProj(g, 26, 18));
+    this.makeTexture('proj_fire_lv2', 34, 22, (g) => drawFireProj(g, 34, 22));
+    this.makeTexture('proj_fire_lv3', 44, 28, (g) => drawFireProj(g, 44, 28));
+    /* 圆形小火点：火焰粒子（塔身火星 / 弹幕拖尾）专用，无方向性 */
+    this.makeTexture('fire_dot', 8, 8, (g) => {
+      g.fillStyle(0xffa93b, 1); g.fillCircle(4, 4, 3.4);
+      g.fillStyle(0xffe76b, 1); g.fillCircle(4, 4, 1.7);
     });
 
     this.scene.start('LevelSelectScene');
   }
 
   /* 色度键抠图：把纯色背景（green/white）转透明，并做边缘去晕防白边/绿边；
-     随后按 alpha 裁剪到内容包围盒，缩放到适中输出尺寸（192×192）。
-     原图 1024×1024，内容包围盒可能 400~600px——直接作为纹理在 42~56px 显示
-     时，WebGL LINEAR 缩小 8~14 倍且无 mipmap，会产生明显模糊。
-     改为：先用浏览器 canvas 高质量平滑缩到 192px（Lanczos/bicubic），
-     再作为 Phaser 纹理。192px → 42~56px 显示仅 3~4 倍缩小，LINEAR 清晰。 */
-  chromaKeyTexture(rawKey, outKey, bg) {
+     随后按 alpha 裁剪到内容包围盒，缩放到 outSize（= 显示尺寸×4 超采样）。
+     原图 1024×1024，内容包围盒 400~600px，canvas 高质量缩到 168/192/224，
+     显示 42/48/56 时最多 1:1 采样，不需要 mipmap 也清晰。 */
+  chromaKeyTexture(rawKey, outKey, bg, outSize) {
     if (this.textures.exists(outKey)) this.textures.remove(outKey);
     const src = this.textures.get(rawKey).getSourceImage();
     const w = src.width, h = src.height;
@@ -273,6 +280,7 @@ class BootScene extends Phaser.Scene {
         d[i + 2] = Phaser.Math.Clamp((b - 255 * key) * inv, 0, 255);
       }
       d[i + 3] = Math.round(255 * (1 - key));
+      if (d[i + 3] < 40) d[i + 3] = 0; // 残边清除：过淡的半透明像素直接全透明，防虚影
     }
     ctx.putImageData(img, 0, 0);
 
@@ -290,14 +298,14 @@ class BootScene extends Phaser.Scene {
     }
     if (maxX < 0) return; // 全透明（抠图失败）：不生成纹理，Tower 端回退炮头
     const cw = maxX - minX + 1, ch = maxY - minY + 1;
-    /* 输出纹理固定 256×256（2 的幂 → WebGL 可生成 mipmap，缩小清晰）；
+    /* 输出纹理尺寸按显示尺寸 ×4 超采样（调用方传入，默认 256）；
        留 12% 边距给缩放动效余量，剩余区域高质量缩放 */
-    const OUT = 256;
+    const OUT = outSize || 256;
     const side = Math.ceil(Math.max(cw, ch) * 1.12); // 12% 边距
     const ct = this.textures.createCanvas(outKey, OUT, OUT);
     const cctx = ct.getContext();
     cctx.clearRect(0, 0, OUT, OUT);
-    /* 开启浏览器高质量平滑（Lanczos/bicubic）缩放到 192px */
+    /* 开启浏览器高质量平滑（Lanczos/bicubic）缩放到输出尺寸 */
     cctx.imageSmoothingEnabled = true;
     cctx.imageSmoothingQuality = 'high';
     const drawW = Math.round(OUT * (cw / side));

@@ -25,16 +25,18 @@ class Projectile extends Phaser.GameObjects.Image {
       const texKey = 'proj_fire_lv' + Math.min(srcLv, 3);
       if (scene.textures.exists(texKey)) this.setTexture(texKey);
       this.setScale(srcLv === 1 ? 1 : srcLv === 2 ? 1.05 : 1.15); // 等级越高弹幕越大
+      /* 方向性火苗贴图：初始即朝目标偏转（update 中每帧随目标位置修正） */
+      if (target) this.rotation = Math.atan2(target.y - y, target.x - x);
       if (srcLv >= 2) {
-        this._trail = scene.add.particles(0, 0, texKey, {
-          speed: 0, scale: { start: srcLv === 2 ? 0.4 : 0.55, end: 0 },
+        this._trail = scene.add.particles(0, 0, 'fire_dot', {
+          speed: 0, scale: { start: srcLv === 2 ? 0.9 : 1.3, end: 0 },
           alpha: { start: 0.55, end: 0 }, lifespan: srcLv === 2 ? 160 : 260,
           frequency: srcLv === 2 ? 30 : 18, blendMode: 'ADD', follow: this
         }).setDepth(39);
         if (srcLv >= 3) {
           // 3级额外火星：四散的小亮点
-          this._sparks = scene.add.particles(0, 0, 'proj_fire_lv1', {
-            speed: { min: 10, max: 40 }, scale: { start: 0.16, end: 0 },
+          this._sparks = scene.add.particles(0, 0, 'fire_dot', {
+            speed: { min: 10, max: 40 }, scale: { start: 0.5, end: 0 },
             alpha: { start: 0.9, end: 0 }, lifespan: 300, frequency: 40,
             blendMode: 'ADD', follow: this
           }).setDepth(39);

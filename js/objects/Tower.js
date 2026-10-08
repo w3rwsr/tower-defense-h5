@@ -27,7 +27,7 @@ class Tower extends Phaser.GameObjects.Container {
     }
     this.add(this.turret);
 
-    /* 火塔燃烧动效：1级轻跳 / 2级跳幅稍大 / 3级跳+火星+光晕（升级时重建） */
+    /* 火塔燃烧动效：缩放脉冲+纵向窜动+明灭，2/3级加火星（升级时重建） */
     this._fireFx = [];
     if (this.isFire) this._buildFireFx();
 
@@ -73,32 +73,40 @@ class Tower extends Phaser.GameObjects.Container {
     return this.level >= 3 ? 56 : this.level === 2 ? 48 : 42;
   }
 
-  /* 火塔燃烧动效（Tween 缩放跳动 + 3级火星/光晕），与等级匹配；全部挂在本容器 */
+  /* 火塔燃烧动效：缩放脉冲 + 纵向窜动 + 火苗明灭（2/3 级加火星飘散）。
+     不使用垫底复制贴图的光晕层，避免半透明残影；全部挂在本容器 */
   _buildFireFx() {
     this._clearFireFx();
     const lv = this.level, sc = this.scene;
-    // 火焰跳动：缩放脉冲，等级越高幅度越大
-    const amp = lv === 1 ? 0.06 : lv === 2 ? 0.10 : 0.14;
+    const sx = this.turret.scaleX, sy = this.turret.scaleY;
+    const dur = lv === 1 ? 300 : lv === 2 ? 240 : 200;
+    // 火焰跳动：纵向拉伸为主、横向微收的缩放脉冲（模拟火舌蹿动）
+    const ampY = lv === 1 ? 0.12 : lv === 2 ? 0.18 : 0.24;
     this._fireFx.push(sc.tweens.add({
       targets: this.turret,
-      scaleX: { from: this.turret.scaleX, to: this.turret.scaleX * (1 + amp) },
-      scaleY: { from: this.turret.scaleY, to: this.turret.scaleY * (1 + amp) },
-      duration: lv === 1 ? 340 : 240, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+      scaleY: { from: sy, to: sy * (1 + ampY) },
+      scaleX: { from: sx, to: sx * (1 - ampY * 0.3) },
+      duration: dur, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
     }));
-    if (lv === 3) {
-      // 光晕
-      const ds = this._fireDisplaySize();
-      this._halo = sc.add.image(0, -6, 'fire_tower_lv3').setDisplaySize(ds + 10, ds + 10).setAlpha(0.25).setDepth(0);
-      this.add(this._halo);
-      this.sendToBack(this._halo);
-      this._fireFx.push(sc.tweens.add({
-        targets: this._halo, alpha: { from: 0.15, to: 0.4 }, duration: 480, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
-      }));
-      // 火星：向上飘散的小光点
-      this._sparks = sc.add.particles(0, -6, 'proj_fire_lv1', {
-        speed: { min: 14, max: 34 }, angle: { min: 240, max: 300 },
-        scale: { start: 0.18, end: 0 }, alpha: { start: 0.9, end: 0 },
-        lifespan: 900, frequency: 120, quantity: 1, blendMode: 'ADD'
+    // 纵向轻微浮动（火焰向上窜）
+    this._fireFx.push(sc.tweens.add({
+      targets: this.turret,
+      y: { from: -6, to: -6 - (lv === 1 ? 1.5 : lv === 2 ? 2.2 : 3) },
+      duration: dur, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+    }));
+    // 火苗明灭
+    this._fireFx.push(sc.tweens.add({
+      targets: this.turret,
+      alpha: { from: 1, to: 0.88 },
+      duration: dur * 0.7, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+    }));
+    if (lv >= 2) {
+      // 火星：向上飘散的小火点（无方向性贴图 fire_dot）
+      this._sparks = sc.add.particles(0, -6, 'fire_dot', {
+        speed: { min: 12, max: 32 }, angle: { min: 240, max: 300 },
+        scale: { start: lv === 2 ? 0.5 : 0.8, end: 0 }, alpha: { start: 0.9, end: 0 },
+        lifespan: lv === 2 ? 600 : 850, frequency: lv === 2 ? 200 : 110,
+        quantity: 1, blendMode: 'ADD'
       });
       this.add(this._sparks);
     }
@@ -107,7 +115,6 @@ class Tower extends Phaser.GameObjects.Container {
   _clearFireFx() {
     (this._fireFx || []).forEach((t) => { if (t && t.stop) t.stop(); });
     this._fireFx = [];
-    if (this._halo) { this._halo.destroy(); this._halo = null; }
     if (this._sparks) { this._sparks.destroy(); this._sparks = null; }
   }
 
