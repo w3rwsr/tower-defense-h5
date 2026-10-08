@@ -1200,6 +1200,7 @@ class GameScene extends Phaser.Scene {
     if (tower) {
       this.setPlacement(null);
       this.closeTowerPicker(true);
+      this.cancelAllObstacleAttacks();  // 点塔时取消所有障碍物攻击
       this.selectTower(tower);
       return;
     }
@@ -1251,6 +1252,7 @@ class GameScene extends Phaser.Scene {
       this.hidePanel();
       this.selectedTower = null;
       this.rangeGfx.clear();
+      this.cancelAllObstacleAttacks();  // 点道路时取消所有障碍物攻击
       return;
     }
 
@@ -1259,6 +1261,7 @@ class GameScene extends Phaser.Scene {
     //    b) 否则不弹选塔框，仅高亮所有可放置区域，提示玩家哪里能放塔。
     if (this._spotHint) {
       this.closeTowerPicker(true);
+      this.cancelAllObstacleAttacks();  // 再次点空白取消障碍物攻击
       return;
     }
     this.closeTowerPicker(true, true);   // 关浮框但保留高亮层，随后重绘为纯提示态
@@ -1267,6 +1270,7 @@ class GameScene extends Phaser.Scene {
     this.rangeGfx.clear();
     this._spotHint = true;
     this.highlightPlacementPoints(null);
+    this.cancelAllObstacleAttacks();  // 点空白时取消所有障碍物攻击
   }
 
   /** 放置模式下的热区吸附 + 校验 + 落子（供左键点击与拖动共用） */
@@ -1404,10 +1408,13 @@ class GameScene extends Phaser.Scene {
     const ocfg = TD_CONFIG.obstacles;
     const img = this.add.image(x, y, 'obst_' + kind).setDepth(8);
     const bar = this.add.graphics().setDepth(30);
+    /* 攻击选中高亮环：被塔转火攻击时显示金色脉冲圈 */
+    const ring = this.add.graphics().setDepth(7);
     const ob = {
       isObstacle: true, x, y, kind,
       hp: ocfg.hp, maxHp: ocfg.hp, radius: ocfg.radius,
-      img, bar, baseScale: 1,
+      img, bar, ring, ringTween: null,
+      baseScale: 1,
       barY: -(img.height / 2) - 10,       // 血条挂在顶上方
       assignedTower: null, dead: false
     };
@@ -1460,6 +1467,7 @@ class GameScene extends Phaser.Scene {
     this.syncHud();
     this.floatText(ob.x, ob.y - 34, '+' + reward, 0xffd84a);
     ob.bar.destroy();
+    this.hideObstacleRing(ob);
     this.tweens.add({
       targets: ob.img, alpha: 0, scale: ob.baseScale * 0.4, angle: 30,
       duration: 240, ease: 'Cubic.in', onComplete: () => ob.img.destroy()
@@ -1478,15 +1486,19 @@ class GameScene extends Phaser.Scene {
     return best;
   }
 
-  /** 点击障碍物：只在【射程圈能覆盖到障碍物本体】的伤害型塔中，指派距离最近
-   *  的一座转火攻击。
-   *  - 覆盖口径：塔心到障碍物中心 ≤ tower.range + ob.radius（射程擦到障碍物
-   *    实体即可打，与 AttackBehavior 的开火判定完全同口径，杜绝“指派了却
-   *    打不到/打空气”）；
-   *  - 哪怕物理距离更近，射程覆盖不到的塔也绝不入选；
-   *  - 没有任何塔覆盖时：不攻击、不转火，仅给一行文字反馈；
-   *  - 塔D（无伤害的范围吸引塔）不能攻击障碍物，不参与指派。 */
+  /** 点击障碍物：切换攻击状态。
+   *  - 已被攻击 → 取消攻击（解除锁定、关闭高亮环、塔恢复打小怪）；
+   *  - 未被攻击 → 指派射程覆盖到它的最近伤害型塔转火攻击，并显示高亮环；
+   *  - 无塔覆盖 → 不攻击、不转火，仅给一行文字反馈。
+   *  覆盖口径：塔心到障碍物中心 ≤ tower.range + ob.radius（射程擦到障碍物
+   *  实体即可打，与 AttackBehavior 的开火判定同口径，杜绝指派了却打不到）。 */
   clickObstacle(ob) {
+    /* 再次点击已攻击中的障碍物 → 取消 */
+    if (ob.assignedTower) {
+      this.cancelObstacleAttack(ob);
+      this.floatText(ob.x, ob.y - 30, '停止攻击', 0xffe27a);
+      return;
+    }
     let best = null, bestD2 = Infinity;
     for (const t of this.towers) {
       if (!t.stats.damage) continue;                       // 无伤害塔（塔D）跳过
@@ -1503,15 +1515,62 @@ class GameScene extends Phaser.Scene {
       return;
     }
     /* 一座塔只锁定一个障碍物、一个障碍物只有一座塔在打：互斥切换 */
-    if (best.obstacleTarget && best.obstacleTarget !== ob) best.obstacleTarget.assignedTower = null;
-    if (ob.assignedTower && ob.assignedTower !== best) ob.assignedTower.obstacleTarget = null;
+    if (best.obstacleTarget && best.obstacleTarget !== ob) {
+      this.cancelObstacleAttack(best.obstacleTarget);
+    }
+    if (ob.assignedTower && ob.assignedTower !== best) {
+      ob.assignedTower.obstacleTarget = null;
+    }
     best.obstacleTarget = ob;
     ob.assignedTower = best;
+    this.showObstacleRing(ob);
     this.floatText(ob.x, ob.y - 30, best.cfg.name + ' 开火！', 0xffe27a);
     this.tweens.add({
       targets: ob.img, scaleX: ob.baseScale * 1.12, scaleY: ob.baseScale * 0.9,
       duration: 90, yoyo: true
     });
+  }
+
+  /** 取消障碍物攻击：解除塔锁定 + 关闭高亮环 */
+  cancelObstacleAttack(ob) {
+    if (!ob) return;
+    if (ob.assignedTower) {
+      ob.assignedTower.obstacleTarget = null;
+      ob.assignedTower = null;
+    }
+    this.hideObstacleRing(ob);
+  }
+
+  /** 显示障碍物攻击高亮环（金色脉冲圈） */
+  showObstacleRing(ob) {
+    const r = (ob.radius || 20) + 8;
+    ob.ring.clear();
+    ob.ring.setPosition(ob.x, ob.y);
+    ob.ring.lineStyle(3, 0xffd84a, 0.9);
+    ob.ring.strokeCircle(0, 0, r);
+    ob.ring.setVisible(true);
+    if (ob.ringTween) ob.ringTween.stop();
+    ob.ringTween = this.tweens.add({
+      targets: ob.ring,
+      alpha: { from: 0.5, to: 1.0 },
+      scale: { from: 0.92, to: 1.08 },
+      duration: 500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+    });
+  }
+
+  /** 隐藏障碍物攻击高亮环 */
+  hideObstacleRing(ob) {
+    if (!ob.ring) return;
+    if (ob.ringTween) { ob.ringTween.stop(); ob.ringTween = null; }
+    ob.ring.clear();
+    ob.ring.setVisible(false);
+  }
+
+  /** 取消所有障碍物攻击（点击其他位置时调用） */
+  cancelAllObstacleAttacks() {
+    for (const o of this.obstacles) {
+      if (o.assignedTower) this.cancelObstacleAttack(o);
+    }
   }
 
   /** 放置预览：绿色=可放 / 红色=非法，并显示射程 */

@@ -230,9 +230,11 @@ class BootScene extends Phaser.Scene {
   }
 
   /* 色度键抠图：把纯色背景（green/white）转透明，并做边缘去晕防白边/绿边；
-     随后按 alpha 裁剪到内容包围盒（四周留 12% 边距，供缩放动效余量），
-     输出正方形纹理——原图火焰占比小，不裁剪直接显示会缩成一团。
-     全程离线 canvas 处理，不改任何 canvas/相机/缩放。 */
+     随后按 alpha 裁剪到内容包围盒，缩放到适中输出尺寸（192×192）。
+     原图 1024×1024，内容包围盒可能 400~600px——直接作为纹理在 42~56px 显示
+     时，WebGL LINEAR 缩小 8~14 倍且无 mipmap，会产生明显模糊。
+     改为：先用浏览器 canvas 高质量平滑缩到 192px（Lanczos/bicubic），
+     再作为 Phaser 纹理。192px → 42~56px 显示仅 3~4 倍缩小，LINEAR 清晰。 */
   chromaKeyTexture(rawKey, outKey, bg) {
     if (this.textures.exists(outKey)) this.textures.remove(outKey);
     const src = this.textures.get(rawKey).getSourceImage();
@@ -249,9 +251,9 @@ class BootScene extends Phaser.Scene {
       const r = d[i], g = d[i + 1], b = d[i + 2];
       let key; // 0=主体, 1=背景, 0~1=边缘混合度
       if (isGreen) {
-        // 纯绿幕：绿分量远高于红蓝则视为背景；用"超出红蓝的量"做线性键控去绿晕
+        // 纯绿幕：绿分量远高于红蓝则视为背景；收紧过渡带（50→更硬边）
         const excess = g - Math.max(r, b);
-        key = Phaser.Math.Clamp(excess / 90, 0, 1);
+        key = Phaser.Math.Clamp(excess / 50, 0, 1);
       } else {
         /* 纯白幕：RGB 最小分量足够接近 255 才算背景（m≥235 全透明，m≤165 全保留）。
            亮黄内焰 m≈107、橙红外焰 m≈20 均远低于 165，不会被误抠出洞；
@@ -288,12 +290,20 @@ class BootScene extends Phaser.Scene {
     }
     if (maxX < 0) return; // 全透明（抠图失败）：不生成纹理，Tower 端回退炮头
     const cw = maxX - minX + 1, ch = maxY - minY + 1;
-    const side = Math.ceil(Math.max(cw, ch) * 1.2); // 12% 边距给缩放动效留余量
-    const ct = this.textures.createCanvas(outKey, side, side);
+    /* 输出纹理固定 256×256（2 的幂 → WebGL 可生成 mipmap，缩小清晰）；
+       留 12% 边距给缩放动效余量，剩余区域高质量缩放 */
+    const OUT = 256;
+    const side = Math.ceil(Math.max(cw, ch) * 1.12); // 12% 边距
+    const ct = this.textures.createCanvas(outKey, OUT, OUT);
     const cctx = ct.getContext();
-    cctx.clearRect(0, 0, side, side);
+    cctx.clearRect(0, 0, OUT, OUT);
+    /* 开启浏览器高质量平滑（Lanczos/bicubic）缩放到 192px */
+    cctx.imageSmoothingEnabled = true;
+    cctx.imageSmoothingQuality = 'high';
+    const drawW = Math.round(OUT * (cw / side));
+    const drawH = Math.round(OUT * (ch / side));
     cctx.drawImage(off, minX, minY, cw, ch,
-      Math.round((side - cw) / 2), Math.round((side - ch) / 2), cw, ch);
+      Math.round((OUT - drawW) / 2), Math.round((OUT - drawH) / 2), drawW, drawH);
     ct.refresh();
   }
 
