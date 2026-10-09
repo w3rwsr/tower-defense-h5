@@ -2100,8 +2100,11 @@ class GameScene extends Phaser.Scene {
    * 弹道与特效
    * ============================================================ */
   fireProjectile(tower, target) {
+    /* 发射点：火塔从旋转后的火焰根部（底部中心）出弹；其他塔保持塔中心 */
+    const m = (typeof tower.getMuzzlePos === 'function')
+      ? tower.getMuzzlePos() : { x: tower.x, y: tower.y - 4 };
     this.projectiles.push(
-      new Projectile(this, tower.x, tower.y - 4, target, tower.cfg.projectile, tower.stats.damage, tower)
+      new Projectile(this, m.x, m.y, target, tower.cfg.projectile, tower.stats.damage, tower)
     );
   }
 

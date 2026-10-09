@@ -33,19 +33,26 @@ class Tower extends Phaser.GameObjects.Container {
       this.add(this.turret);
     }
 
-    /* 火塔燃烧视频叠加层：黑底 MP4 + ADD 混合（黑色自然透明），挂在 head 中，
-       与静态贴图同锚点（head 中心）。每等级全游戏共享一个解码器/纹理
-       （见 FireBurn.js）。纹理未就绪或设备不支持时保持隐藏，静态贴图+Tween
-       即为降级效果；视频一旦就绪即隐藏静态贴图，两层绝不叠加显示。
-       在 badge 之前 add，保证等级文字始终在火焰之上。 */
+    /* 火塔燃烧视频叠加层：黑底 MP4。WebGL 下走专用 FireVideo 管线——
+       片元着色器把黑底亮度换算成真 alpha、火焰 rgb 原色保留，NORMAL
+       混合（旧 ADD 会与绿色地面相加，把外焰橙红加成纯金黄色）；
+       Canvas 渲染器 / 管线缺失时回退 ADD 混合。挂在 head 中与静态贴图
+       同锚点（head 中心）。每等级全游戏共享一个解码器/纹理（FireBurn.js）。
+       纹理未就绪时隐藏，静态贴图+Tween 即降级效果；视频一旦就绪即隐藏
+       静态贴图，两层绝不叠加。在 badge 之前 add，保证等级文字在上。 */
     this._burnLv = 1;
     this._burnActive = false;     // 视频层是否已接管（接管后静态贴图隐藏）
     this.burnImg = null;
     this._burnOk = (typeof FIRE_BURN !== 'undefined') && FIRE_BURN.supported;
     if (this.isFire && this._burnOk) {
-      this.burnImg = scene.add.image(0, 0, 'fire_dot')
-        .setVisible(false)
-        .setBlendMode(Phaser.BlendModes.ADD);
+      this._burnColorPipeline =
+        (typeof fireVideoPipelineReady === 'function') && fireVideoPipelineReady(scene);
+      this.burnImg = scene.add.image(0, 0, 'fire_dot').setVisible(false);
+      if (this._burnColorPipeline) {
+        this.burnImg.setPipeline('FireVideo');        // 黑底→真alpha，保色
+      } else {
+        this.burnImg.setBlendMode(Phaser.BlendModes.ADD); // 旧环境降级
+      }
       this.head.add(this.burnImg);
       FIRE_BURN.whenReady(1, (key) => this._showBurn(key));
       FIRE_BURN.use(1);
@@ -226,6 +233,19 @@ class Tower extends Phaser.GameObjects.Container {
     // 升级小动画
     this.scene.tweens.add({ targets: this, scale: 1.18, duration: 110, yoyo: true });
     return cost;
+  }
+
+  /* 弹幕发射点（世界坐标）。
+     火塔：火焰根部（底部中心），位于 head 本地 (0,+半高)；head 随目标
+     旋转，根部要跟着旋转后的朝向走（指向右侧时根部在尾部左侧）。
+     其他塔：保持塔中心（既有行为，不动）。 */
+  getMuzzlePos() {
+    if (this.isFire && this.head) {
+      const L = this._fireDisplaySize() * 0.5;
+      const c = Math.cos(this.head.rotation), s = Math.sin(this.head.rotation);
+      return { x: this.x - L * s, y: this.y - 6 + L * c };
+    }
+    return { x: this.x, y: this.y };
   }
 
   /* 攻击模块每帧回调：更新目标方向。其他塔炮头（零角朝右）即时指向；

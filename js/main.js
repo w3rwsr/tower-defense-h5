@@ -195,7 +195,7 @@
 
   const world = TD_CONFIG.world;
 
-  const game = new Phaser.Game({
+  const gameCfg = {
     type: Phaser.AUTO,
     parent: 'game-container',
     backgroundColor: '#7cc24e',
@@ -217,7 +217,15 @@
       pixelArt: false
     },
     scene: [BootScene, LevelSelectScene, GameScene]
-  });
+  };
+  /* 火塔燃烧视频专用管线（黑底亮度→真 alpha，保色不偏黄）；
+     脚本缺失/异常时不注册，Tower 端自动回退 ADD 混合，绝不阻断启动 */
+  try {
+    if (typeof FireVideoPipeline !== 'undefined') {
+      gameCfg.render.pipeline = { FireVideo: FireVideoPipeline };
+    }
+  } catch (e) { /* 忽略：回退 ADD */ }
+  const game = new Phaser.Game(gameCfg);
 
   /* ============================================================
    * 真机横竖屏切换：移动浏览器的 orientationchange 在视口尺寸更新前触发，
