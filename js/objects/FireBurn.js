@@ -15,9 +15,20 @@
  *    用户触摸后解锁播放。
  * ============================================================ */
 const FIRE_BURN = (() => {
-  const VER = '20261009a';                 // 素材版本号（破 file:// 缓存）
+  const VER = '20261009b';                 // 素材版本号（破 file:// 缓存，仅文件回退用）
   const LEVELS = [1, 2, 3];
   const TEX_KEY = { 1: 'fire_burn_lv1', 2: 'fire_burn_lv2', 3: 'fire_burn_lv3' };
+  /* 视频来源：优先 base64 data URI（FireBurnData.js 内嵌，与 assets 下 mp4
+     逐字节一致）。file:// 协议下 Chromium 把本地文件视频视为跨域数据，
+     WebGL texImage2D 上传会抛 SecurityError → 视频纹理永远建不出来，
+     火塔只能显示静态贴图；data: URI 属同源干净数据不触发污染，
+     file:// / http:// / 微信 X5 全环境通用。data URI 加载失败时
+     自动回退到文件 URL（http:// 环境兜底）。 */
+  const MIME = 'data:video/mp4;base64,';
+  const hasData = (typeof FIRE_BURN_DATA !== 'undefined') && FIRE_BURN_DATA;
+  const srcFor = (lv) => (hasData && FIRE_BURN_DATA[lv])
+    ? MIME + FIRE_BURN_DATA[lv]
+    : 'assets/fire_burn_lv' + lv + '.mp4?v=' + VER;
   /* 静态贴图显示尺寸（与 Tower._fireDisplaySize 一致） */
   const BASE_DISPLAY = { 1: 42, 2: 48, 3: 56 };
   /* 视频画面内火焰占比小于静态贴图纹理（静态贴图按包围盒裁剪、视频保留
@@ -55,7 +66,7 @@ const FIRE_BURN = (() => {
       v.setAttribute('muted', '');
       v.setAttribute('playsinline', '');
       v.setAttribute('webkit-playsinline', '');
-      const item = { video: v, ready: false, failed: false, refs: 0, waiters: [] };
+      const item = { video: v, ready: false, failed: false, refs: 0, waiters: [], triedFile: false };
       this.items[lv] = item;
 
       v.addEventListener('loadeddata', () => {
@@ -78,9 +89,19 @@ const FIRE_BURN = (() => {
           ws.forEach((fn) => { try { fn(key); } catch (e) { /* 回调方已销毁 */ } });
         } catch (e) { item.failed = true; }
       });
-      v.addEventListener('error', () => { item.failed = true; });
+      v.addEventListener('error', () => {
+        /* data URI 失败（个别内核不支持 base64 视频）→ 回退文件 URL 重试；
+           文件 URL 也失败才判定 failed（Tower 保持静态贴图兜底） */
+        if (!item.triedFile && v.src.indexOf('data:') === 0) {
+          item.triedFile = true;
+          v.src = 'assets/fire_burn_lv' + lv + '.mp4?v=' + VER;
+          v.load();
+          return;
+        }
+        item.failed = true;
+      });
 
-      v.src = 'assets/fire_burn_lv' + lv + '.mp4?v=' + VER;
+      v.src = srcFor(lv);
     });
 
     /* 首次用户手势后解锁（pointer/touch/mouse 三类全监听，兼容旧 X5 内核） */

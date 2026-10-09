@@ -5,8 +5,11 @@
 class BootScene extends Phaser.Scene {
   constructor() { super('BootScene'); }
 
-  /* 加载火元素塔（towerA）1/2/3 级美术图；加载失败不影响游戏，create 中做回退 */
+  /* 加载火元素塔（towerA）1/2/3 级美术图；加载失败不影响游戏，create 中做回退。
+     FireTowerArtData.js 内嵌离线抠图 data URI 时跳过原图加载（file:// 下本地
+     图片无法上传 WebGL、getImageData 也被禁，运行时抠图路径不可用）。 */
   preload() {
+    if (typeof FIRE_TOWER_ART !== 'undefined' && FIRE_TOWER_ART) return;
     try {
       this.load.image('fire_tower_lv1_raw', 'assets/fire_tower_lv1.png');
       this.load.image('fire_tower_lv2_raw', 'assets/fire_tower_lv2.png');
@@ -196,23 +199,50 @@ class BootScene extends Phaser.Scene {
       g.fillEllipse(21, 8, 24, 7);
     });
 
-    /* ---------- 火元素塔（towerA）1/2/3 级美术贴图：色度键抠图转透明 ----------
-       lv1/lv3 绿幕（纯绿 #00ff00），lv2 白幕（纯白 #ffffff），纯色且与火焰
-       颜色无重叠，用 canvas 像素级抠图 + 边缘去晕，结果存为 fire_tower_lvN。
-       任何一步失败都会保留对应等级的程序化炮头回退，绝不影响游戏启动。 */
-    try {
-      const bgKeys = ['fire_tower_lv1_raw', 'fire_tower_lv2_raw', 'fire_tower_lv3_raw'];
-      const bgs = ['green', 'white', 'green'];
-      bgKeys.forEach((rawKey, i) => {
-        const lv = i + 1;
-        const outKey = 'fire_tower_lv' + lv;
-        if (this.textures.exists(rawKey)) {
-          /* 输出尺寸 = 显示尺寸(42/48/56) × 4 超采样：运行时最多 1:1 或轻
-             微缩小，配合 LINEAR 采样保证清晰（不再用 256 固定输出） */
-          this.chromaKeyTexture(rawKey, outKey, bgs[i], [168, 192, 224][i]);
-        }
+    /* ---------- 火元素塔（towerA）1/2/3 级美术贴图 ----------
+       优先 FireTowerArtData.js：离线已按同一算法抠图的 data URI（同源干净，
+       file:// 也可上传 WebGL），异步解码完成后注册纹理。注意此处只登记异步
+       任务、不提前 return——后续 proj_fire/fire_dot 贴图仍需同步创建，
+       仅场景跳转延迟到贴图就绪（或超时兜底）。无数据模块时回退原路径：
+       加载原图 + 运行时色度键抠图（仅 http:// 等可读画布环境可用）。 */
+    const hasArtData = (typeof FIRE_TOWER_ART !== 'undefined') && FIRE_TOWER_ART;
+    let artJobs = null;
+    if (hasArtData) {
+      artJobs = [];
+      [1, 2, 3].forEach((lv) => {
+        const durl = FIRE_TOWER_ART[lv];
+        if (!durl) return;
+        const key = 'fire_tower_lv' + lv;
+        artJobs.push(new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            try {
+              if (this.textures.exists(key)) this.textures.remove(key);
+              this.textures.addImage(key, img);
+              resolve(true);
+            } catch (e) { resolve(false); }
+          };
+          img.onerror = () => resolve(false);
+          img.src = durl;
+        }));
       });
-    } catch (e) { /* 抠图异常：忽略，Tower 端会回退到 turret_towerA 炮头 */ }
+      if (!artJobs.length) artJobs = null;
+    }
+    if (!artJobs) {
+      try {
+        const bgKeys = ['fire_tower_lv1_raw', 'fire_tower_lv2_raw', 'fire_tower_lv3_raw'];
+        const bgs = ['green', 'white', 'green'];
+        bgKeys.forEach((rawKey, i) => {
+          const lv = i + 1;
+          const outKey = 'fire_tower_lv' + lv;
+          if (this.textures.exists(rawKey)) {
+            /* 输出尺寸 = 显示尺寸(42/48/56) × 4 超采样：运行时最多 1:1 或轻
+               微缩小，配合 LINEAR 采样保证清晰（不再用 256 固定输出） */
+            this.chromaKeyTexture(rawKey, outKey, bgs[i], [168, 192, 224][i]);
+          }
+        });
+      } catch (e) { /* 抠图异常：忽略，Tower 端会回退到 turret_towerA 炮头 */ }
+    }
 
     /* ---------- 火元素弹幕贴图（3 级：方向性火苗，尖端朝右 +x） ----------
        外焰橙红 0xff5d1a、中焰橙黄 0xffa93b、内焰亮黄 0xffe76b；
@@ -239,6 +269,14 @@ class BootScene extends Phaser.Scene {
       g.fillStyle(0xffe76b, 1); g.fillCircle(4, 4, 1.7);
     });
 
+    /* 内嵌贴图就绪后再进选关（小图解码通常几十 ms；超时兜底绝不阻断启动） */
+    if (artJobs) {
+      let started = false;
+      const go = () => { if (!started) { started = true; this.scene.start('LevelSelectScene'); } };
+      Promise.all(artJobs).then(go);
+      setTimeout(go, 800);
+      return;
+    }
     this.scene.start('LevelSelectScene');
   }
 
