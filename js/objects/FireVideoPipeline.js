@@ -17,20 +17,29 @@
  *      - despill：g 压到不超过 max(r,b)+spill，消除轮廓绿晕；
  *    NORMAL 混合，背景完全透明，无绿方块/绿边/半透明残留。
  *
- * Canvas 渲染器 / 管线缺失时：黑底由 Tower 端回退 ADD；绿幕无法
- * 用 ADD（会显亮绿块），Tower 端保持静态贴图兜底，不显示视频层。
+ * C. FireVideoWKPipeline（'FireVideoWK'，白幕色度键，备用）
+ *    白底视频（纯白或白+浅色渐变）用 whiteness = min(r,g,b) 区分：
+ *      - 白背景 min≈0.75~1.0；火焰饱和色 min 低（亮黄内焰≈0.45）；
+ *      - alpha = 1 − smoothstep(low, high, whiteness)。
+ *
+ * 背景类型由 FireBurn 读视频边缘像素自动判定（white/green/black）；
+ * Canvas 渲染器 / 管线缺失时：黑底由 Tower 端回退 ADD，绿幕/白幕
+ * 保持静态贴图兜底（ADD 会把亮色背景直接叠成色块/白框）。
  * ============================================================ */
 (function () {
   const CFG = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.towers &&
     TD_CONFIG.towers.towerA && TD_CONFIG.towers.towerA.fireVideo) || {};
   const BK = CFG.blackKey || { gain: 1.5, floor: 0.01 };
   const GK = CFG.greenKey || { low: 0.1, high: 0.42, spill: 0.03 };
+  const WK = CFG.whiteKey || { low: 0.55, high: 0.74 };
   const n = (v, d) => (typeof v === 'number' && isFinite(v) ? v : d);
   const BLACK_GAIN = n(BK.gain, 1.5);
   const BLACK_FLOOR = n(BK.floor, 0.01);
   const GK_LOW = n(GK.low, 0.1);
   const GK_HIGH = Math.max(n(GK.high, 0.42), GK_LOW + 0.001);
   const GK_SPILL = n(GK.spill, 0.03);
+  const WK_LOW = n(WK.low, 0.55);
+  const WK_HIGH = Math.max(n(WK.high, 0.74), WK_LOW + 0.001);
 
   const PRECISION = [
     '#ifdef GL_FRAGMENT_PRECISION_HIGH',
@@ -79,6 +88,23 @@
     '}'
   ].join('\n');
 
+  /* C. 白幕色度键 */
+  const FIRE_VIDEO_WK_FS = PRECISION + '\n' + [
+    'void main ()',
+    '{',
+    '    vec4 tex = texture2D(uMainSampler, outTexCoord);',
+    '    /* whiteness：白背景 min(r,g,b) 接近 1，饱和火焰颜色偏低 */',
+    '    float wh = min(min(tex.r, tex.g), tex.b);',
+    '    float a = 1.0 - smoothstep(' + WK_LOW.toFixed(3) + ', ' + WK_HIGH.toFixed(3) + ', wh);',
+    '    vec3 rgb = tex.rgb * outTint.bgr;',
+    '    if (outTintEffect == 2.0) {',
+    '        gl_FragColor = vec4(outTint.bgr, a * outTint.a);',
+    '    } else {',
+    '        gl_FragColor = vec4(rgb, a * outTint.a);',
+    '    }',
+    '}'
+  ].join('\n');
+
   class FireVideoPipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipeline {
     constructor(game) {
       super({ game, fragShader: FIRE_VIDEO_FS });
@@ -87,6 +113,11 @@
   class FireVideoGKPipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipeline {
     constructor(game) {
       super({ game, fragShader: FIRE_VIDEO_GK_FS });
+    }
+  }
+  class FireVideoWKPipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipeline {
+    constructor(game) {
+      super({ game, fragShader: FIRE_VIDEO_WK_FS });
     }
   }
 
@@ -101,5 +132,6 @@
 
   window.FireVideoPipeline = FireVideoPipeline;
   window.FireVideoGKPipeline = FireVideoGKPipeline;
+  window.FireVideoWKPipeline = FireVideoWKPipeline;
   window.fireVideoPipelineReady = fireVideoPipelineReady;
 })();

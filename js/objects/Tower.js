@@ -33,18 +33,20 @@ class Tower extends Phaser.GameObjects.Container {
       this.add(this.turret);
     }
 
-    /* 火塔燃烧视频叠加层。lv1/lv3 为亮绿幕素材（FireVideoGK 色度键管线：
-       green-excess 抠绿+despill 去绿边），lv2 为黑底（FireVideo 亮度键）。
-       均 NORMAL 混合、火焰原色保留。管线在 _applyBurnPipeline 按等级切换；
-       绿幕管线不可用（Canvas 渲染器等）时视频层永不接管——ADD 混合会把
-       亮绿幕直接显示成绿方块，那种环境保持静态贴图+Tween 兜底。
-       黑底管线不可用时回退 ADD（旧环境降级）。 */
+    /* 火塔燃烧视频叠加层。背景类型由 FireBurn 读像素自动检测：
+       green=FireVideoGK 绿幕色度键、white=FireVideoWK 白幕色度键、
+       black=FireVideo 黑底亮度键；均 NORMAL 混合、火焰原色保留。
+       管线在 _applyBurnPipeline 按等级背景切换。绿幕/白幕管线不可用
+       （Canvas 渲染器、shader 编译失败等）时视频层永不接管——ADD 混合
+       会把亮色背景叠成绿块/白框，那种环境保持静态贴图+Tween 兜底；
+       黑底管线不可用时才回退 ADD（黑底+ADD 等价透明，旧环境降级）。 */
     this._burnLv = 1;
     this._burnActive = false;     // 视频层是否已接管（接管后静态贴图隐藏）
     this.burnImg = null;
     this._burnOk = (typeof FIRE_BURN !== 'undefined') && FIRE_BURN.supported;
     if (this.isFire && this._burnOk) {
       this.burnImg = scene.add.image(0, 0, 'fire_dot').setVisible(false);
+      this.burnImg.setBlendMode(Phaser.BlendModes.NORMAL); // 锁死初始 NORMAL
       this._applyBurnPipeline(1);
       this.head.add(this.burnImg);
       FIRE_BURN.whenReady(1, (key) => this._showBurn(key));
@@ -107,24 +109,35 @@ class Tower extends Phaser.GameObjects.Container {
     return FIRE_BURN.displaySize(this.level);
   }
 
-  /* 按等级素材背景类型配置视频层渲染管线。
+  /* 按等级素材【自动检测到的】背景类型配置视频层渲染管线。
      green + FireVideoGK 就绪 → 绿幕色度键 NORMAL（返回 true）；
-     green + 管线缺失        → 不可接管（返回 false，保持静态兜底，防绿块）；
+     white + FireVideoWK 就绪 → 白幕色度键 NORMAL（返回 true）；
+     green/white + 管线缺失或 setPipeline 失败 → 不可接管（false，
+       保持静态兜底，绝不让亮色背景走 ADD 显绿块/白框）；
      black + FireVideo 就绪  → 黑底亮度键 NORMAL（返回 true）；
      black + 管线缺失        → 回默认管线 + ADD（返回 true，旧环境降级）。 */
   _applyBurnPipeline(lv) {
     if (!this.burnImg) return false;
     const ready = (name) => (typeof fireVideoPipelineReady === 'function') &&
       !!fireVideoPipelineReady(this.scene, name);
-    const green = FIRE_BURN.bgMode(lv) === 'green';
-    if (green) {
-      if (!ready('FireVideoGK')) return false;
-      this.burnImg.setPipeline('FireVideoGK');
+    const mode = FIRE_BURN.bgMode(lv);
+    if (mode === 'green' || mode === 'white') {
+      const pipe = mode === 'green' ? 'FireVideoGK' : 'FireVideoWK';
+      if (!ready(pipe)) return false;
+      try {
+        this.burnImg.setPipeline(pipe);
+      } catch (e) {
+        return false;   // shader 编译/绑定失败：不接管，防异常色块
+      }
       this.burnImg.setBlendMode(Phaser.BlendModes.NORMAL);
       return true;
     }
     if (ready('FireVideo')) {
-      this.burnImg.setPipeline('FireVideo');
+      try { this.burnImg.setPipeline('FireVideo'); } catch (e) {
+        try { if (this.burnImg.resetPipeline) this.burnImg.resetPipeline(); } catch (e2) {}
+        this.burnImg.setBlendMode(Phaser.BlendModes.ADD);
+        return true;
+      }
       this.burnImg.setBlendMode(Phaser.BlendModes.NORMAL);
     } else {
       try { if (this.burnImg.resetPipeline) this.burnImg.resetPipeline(); } catch (e) {}

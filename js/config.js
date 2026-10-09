@@ -314,18 +314,21 @@ window.TD_CONFIG = {
       },
 
       /* 燃烧视频（lv1/lv3 为亮绿幕 640x640，lv2 为黑底 192x192）。
-         WebGL 下由 FireVideo / FireVideoGK 两条片元管线实时抠像。 */
+         WebGL 下由 FireVideo / FireVideoGK / FireVideoWK 三条片元管线
+         实时抠像；背景类型由 FireBurn 加载后读像素【自动检测】，
+         检测失败（跨域污染）才回退下方 bgMode 配置。 */
       "fireVideo": {
         /* 视频容器显示像素（正方形）。以"火焰实际像素高度"定标：
            displaySize × 画面内火焰高度占比 = 视觉火焰高度。
-           实测火焰占比 rY：lv1=0.486、lv2=0.714、lv3=0.780，
-           目标视觉高度约 36 / 52 / 72px（三级≈二级 1.38 倍）。 */
-        "displaySize": { "1": 74, "2": 73, "3": 92 },
+           实测火焰占比 rY：lv1=0.483、lv2=0.703、lv3=0.777，
+           目标视觉高度约 28 / 36 / 48px（三级≈二级 1.33 倍），
+           均小于路面 50px 宽度量级，不遮挡道路。 */
+        "displaySize": { "1": 58, "2": 51, "3": 62 },
         /* 火焰根部（底部钝端）在视频画面中的纵向比例（上=0 下=1），
-           实测火焰包围盒 maxY：lv1=0.75、lv2=0.83、lv3=0.88。
+           实测火焰包围盒 maxY：lv1=0.75、lv2=0.82、lv3=0.88。
            弹幕发射点 L = displaySize × (muzzleBottom − 0.5)。 */
-        "muzzleBottom": { "1": 0.75, "2": 0.83, "3": 0.88 },
-        /* 各等级素材背景类型：green=色度键绿幕，black=黑底亮度键 */
+        "muzzleBottom": { "1": 0.75, "2": 0.82, "3": 0.88 },
+        /* 自动检测失败时的回退背景类型：green/white/black */
         "bgMode": { "1": "green", "2": "black", "3": "green" },
         /* 黑底键控（lv2）：alpha = clamp(亮度×gain − floor, 0, 1) */
         "blackKey": { "gain": 1.5, "floor": 0.01 },
@@ -335,7 +338,11 @@ window.TD_CONFIG = {
            excess≤low 完全保留，≥high 完全抠除，之间 smoothstep 抗锯齿；
            spill 为去绿边（despill）允许量：g 超过 max(r,b)+spill 的
            部分压掉，消除火焰轮廓绿晕。 */
-        "greenKey": { "low": 0.10, "high": 0.42, "spill": 0.03 }
+        "greenKey": { "low": 0.10, "high": 0.42, "spill": 0.03 },
+        /* 白幕色度键（备用，自动检测到白底视频时启用）。
+           whiteness = min(r,g,b)：纯白=1，火焰亮黄内焰 min≈0.45。
+           whiteness≤low 完全保留，≥high 完全抠除，之间 smoothstep。 */
+        "whiteKey": { "low": 0.55, "high": 0.74 }
       }
     },
 
