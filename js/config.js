@@ -313,14 +313,15 @@ window.TD_CONFIG = {
         "cooldown": 0.85
       },
 
-      /* 燃烧视频（lv1/lv3 为亮绿幕 640x640，lv2 为黑底 192x192）。
-         WebGL 下由 FireVideo / FireVideoGK / FireVideoWK 三条片元管线
-         实时抠像；背景类型由 FireBurn 加载后读像素【自动检测】，
-         检测失败（跨域污染）才回退下方 bgMode 配置。 */
+      /* 燃烧视频：lv1/lv3 已由 process_green_videos.py 离线把绿幕物理
+         抠成纯黑底（边缘黑度=0），三级全部走 FireVideo 黑底亮度键；
+         即使旧缓存走 ADD、任意 GPU shader 失效，黑底仍透明，矩形框
+         在像素层面不可能出现。greenKey/whiteKey 参数与 GK/WK 管线
+         保留，供将来直接给绿/白幕素材时自动检测启用。 */
       "fireVideo": {
         /* 视频容器显示像素（正方形）。以"火焰实际像素高度"定标：
            displaySize × 画面内火焰高度占比 = 视觉火焰高度。
-           实测火焰占比 rY：lv1=0.483、lv2=0.703、lv3=0.777，
+           实测火焰占比 rY：lv1=0.486、lv2=0.703、lv3=0.780，
            目标视觉高度约 28 / 36 / 48px（三级≈二级 1.33 倍），
            均小于路面 50px 宽度量级，不遮挡道路。 */
         "displaySize": { "1": 58, "2": 51, "3": 62 },
@@ -328,8 +329,8 @@ window.TD_CONFIG = {
            实测火焰包围盒 maxY：lv1=0.75、lv2=0.82、lv3=0.88。
            弹幕发射点 L = displaySize × (muzzleBottom − 0.5)。 */
         "muzzleBottom": { "1": 0.75, "2": 0.82, "3": 0.88 },
-        /* 自动检测失败时的回退背景类型：green/white/black */
-        "bgMode": { "1": "green", "2": "black", "3": "green" },
+        /* 自动检测失败时的回退背景类型（三级视频均为离线黑底） */
+        "bgMode": { "1": "black", "2": "black", "3": "black" },
         /* 黑底键控（lv2）：alpha = clamp(亮度×gain − floor, 0, 1) */
         "blackKey": { "gain": 1.5, "floor": 0.01 },
         /* 绿幕色度键（lv1/lv3）。excess = g − max(r,b)（归一化 0~1）：

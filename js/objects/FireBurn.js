@@ -39,7 +39,7 @@ const FIRE_BURN = (() => {
   const FV_CFG = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.towers &&
     TD_CONFIG.towers.towerA && TD_CONFIG.towers.towerA.fireVideo) || null;
   const DISP_FALLBACK = { 1: 58, 2: 51, 3: 62 };
-  const BG_FALLBACK = { 1: 'green', 2: 'black', 3: 'green' };
+  const BG_FALLBACK = { 1: 'black', 2: 'black', 3: 'black' };
   const cfgNum = (obj, key, lv, fb) => {
     try {
       const v = obj && obj[key] && Number(obj[key][lv]);
