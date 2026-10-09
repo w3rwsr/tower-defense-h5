@@ -27,6 +27,23 @@ class Tower extends Phaser.GameObjects.Container {
     }
     this.add(this.turret);
 
+    /* 火塔燃烧视频叠加层：黑底 MP4 + ADD 混合（黑色自然透明），与静态贴图
+       同位置同中心。每等级全游戏共享一个解码器/纹理（见 FireBurn.js）。
+       纹理未就绪或设备不支持时保持隐藏，静态贴图+Tween 即为降级效果。
+       必须在 badge 之前 add，保证等级文字始终在视频之上。 */
+    this._burnLv = 1;
+    this._burnTweens = [];
+    this.burnImg = null;
+    this._burnOk = (typeof FIRE_BURN !== 'undefined') && FIRE_BURN.supported;
+    if (this.isFire && this._burnOk) {
+      this.burnImg = scene.add.image(0, -6, 'fire_dot')
+        .setVisible(false)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      this.add(this.burnImg);
+      FIRE_BURN.whenReady(1, (key) => this._showBurn(key));
+      FIRE_BURN.use(1);
+    }
+
     /* 火塔燃烧动效：缩放脉冲+纵向窜动+明灭，2/3级加火星（升级时重建） */
     this._fireFx = [];
     if (this.isFire) this._buildFireFx();
@@ -71,6 +88,38 @@ class Tower extends Phaser.GameObjects.Container {
   /* 火塔显示尺寸：贴图已裁剪到内容包围盒，等级越高尺寸越大（42/48/56） */
   _fireDisplaySize() {
     return this.level >= 3 ? 56 : this.level === 2 ? 48 : 42;
+  }
+
+  /* 燃烧视频显示尺寸：静态贴图尺寸 × 匹配系数（视频画面内火焰占比小于
+     静态贴图纹理，容器需放大才能与静态火焰等大，系数按包围盒实测） */
+  _burnDisplaySize() {
+    return FIRE_BURN.displaySize(this.level);
+  }
+
+  /* 视频纹理就绪 / 升级换级时：换纹理、对齐尺寸位置，并重建与静态贴图
+     节奏一致的缩放脉冲+纵向窜动（视频自身已含火苗动态，不做明灭） */
+  _showBurn(key) {
+    if (!this.burnImg || !this.burnImg.active || !this.scene) return;
+    this.burnImg.setTexture(key);
+    const d = this._burnDisplaySize();
+    this.burnImg.setPosition(0, -6).setDisplaySize(d, d).setVisible(true);
+    this._burnTweens.forEach((t) => { if (t && t.stop) t.stop(); });
+    this._burnTweens = [];
+    const lv = this.level;
+    const dur = lv === 1 ? 300 : lv === 2 ? 240 : 200;
+    const ampY = lv === 1 ? 0.12 : lv === 2 ? 0.18 : 0.24;
+    const bs = this.burnImg.scaleX;
+    this._burnTweens.push(this.scene.tweens.add({
+      targets: this.burnImg,
+      scaleY: { from: bs, to: bs * (1 + ampY) },
+      scaleX: { from: bs, to: bs * (1 - ampY * 0.3) },
+      duration: dur, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+    }));
+    this._burnTweens.push(this.scene.tweens.add({
+      targets: this.burnImg,
+      y: { from: -6, to: -6 - (lv === 1 ? 1.5 : lv === 2 ? 2.2 : 3) },
+      duration: dur, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+    }));
   }
 
   /* 火塔燃烧动效：缩放脉冲 + 纵向窜动 + 火苗明灭（2/3 级加火星飘散）。
@@ -165,6 +214,14 @@ class Tower extends Phaser.GameObjects.Container {
       const ds = this._fireDisplaySize();
       this.turret.setDisplaySize(ds, ds);
       this._buildFireFx();
+      /* 燃烧视频：释放旧等级播放引用 → 注册新等级 → 换纹理（已就绪立即换，
+         未就绪则等 whenReady 回调；期间静态贴图始终兜底） */
+      if (this._burnOk) {
+        FIRE_BURN.release(this._burnLv);
+        this._burnLv = this.level;
+        FIRE_BURN.use(this._burnLv);
+        FIRE_BURN.whenReady(this._burnLv, (key) => this._showBurn(key));
+      }
     }
     // 升级小动画
     this.scene.tweens.add({ targets: this, scale: 1.18, duration: 110, yoyo: true });
@@ -181,5 +238,15 @@ class Tower extends Phaser.GameObjects.Container {
 
   update(dt, ctx) {
     this.behavior.update(dt, ctx);
+  }
+
+  /* 出售 / 场景关闭：先注销燃烧视频播放引用（引用计数归零会暂停解码省电），
+     再走容器销毁（级联销毁 burnImg 等全部子对象） */
+  destroy(fromScene) {
+    if (this._burnOk) {
+      FIRE_BURN.release(this._burnLv);
+      this._burnTweens.forEach((t) => { if (t && t.stop) t.stop(); });
+    }
+    super.destroy(fromScene);
   }
 }

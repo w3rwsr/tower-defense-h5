@@ -17,6 +17,10 @@ class BootScene extends Phaser.Scene {
   create() {
     const C = TD_CONFIG;
 
+    /* 火塔燃烧视频（全局共享解码器；不支持/加载失败时自动降级静态贴图，
+       任何异常都不阻断启动） */
+    try { FIRE_BURN.init(this); } catch (e) { /* 忽略：Tower 端静态兜底 */ }
+
     /* ---------- 塔底座阴影（所有塔共用） ---------- */
     this.makeTexture('tower_base', 64, 64, (g) => {
       g.fillStyle(0x000000, 0.18);

@@ -65,6 +65,9 @@ class GameScene extends Phaser.Scene {
     this.paused = false;
     this.speedMul = 1;
 
+    /* 火塔燃烧视频：新一局重置引用计数并暂停全部解码器（塔放置时重新注册） */
+    try { FIRE_BURN.enterScene(); } catch (e) {}
+
     /* ---- 波次状态机：ready(可开战) / active(出怪中) / won / lost ---- */
     this.state = 'ready';
     this.waveIndex = 0;
@@ -717,6 +720,8 @@ class GameScene extends Phaser.Scene {
    * 主循环
    * ============================================================ */
   update(time, delta) {
+    // 火塔燃烧视频帧上传共享纹理（内部仅在有火塔且未暂停时工作，每帧最多3次）
+    try { FIRE_BURN.tick(); } catch (e) {}
     // 暂停或结算时冻结全部逻辑（画面保持）
     const rawDt = Math.min(delta, 50) / 1000;
     const dt = (this.paused || this.state === 'won' || this.state === 'lost')
@@ -3339,6 +3344,8 @@ class GameScene extends Phaser.Scene {
     this.tweens.timeScale = v ? 0 : this.speedMul;
     document.getElementById('overlay-pause').classList.toggle('hidden', !v);
     if (v) this.clearPlacementHighlight();   // 暂停时关闭可能残留的放塔高亮
+    /* 火塔燃烧视频随暂停停播/恢复（省电；共享解码器由引用计数统一调度） */
+    try { FIRE_BURN.setPaused(v); } catch (e) {}
   }
 
   toggleSpeed() {
