@@ -37,6 +37,24 @@ class Projectile extends Phaser.GameObjects.Image {
            { superSample: 3, scale: {} });
         const lvScale = (lb.scale && lb.scale[lv]) != null ? lb.scale[lv] : 1;
         this.setScale(lvScale / (lb.superSample || 3));
+        /* 代码拖尾：贴图仅球体本体，拖尾/火星由粒子生成，强度随等级递增。
+           粒子 speed=0、follow 本弹——发射后滞留原地，形成朝后的橙红尾迹。 */
+        const t = (lb.trail && lb.trail[lv]) || null;
+        if (t) {
+          this._trail = scene.add.particles(0, 0, 'fire_dot', {
+            speed: 0, scale: { start: t.scale, end: 0 },
+            alpha: { start: t.alpha, end: 0 }, lifespan: t.lifespan,
+            frequency: t.frequency, blendMode: 'ADD', follow: this
+          }).setDepth(39);
+          if (t.sparks) {
+            // 三级额外火星：四散的小亮点
+            this._sparks = scene.add.particles(0, 0, 'fire_dot', {
+              speed: { min: 10, max: 40 }, scale: { start: 0.5, end: 0 },
+              alpha: { start: 0.9, end: 0 }, lifespan: 300, frequency: 40,
+              blendMode: 'ADD', follow: this
+            }).setDepth(39);
+          }
+        }
       } else {
         this.setScale(srcLv === 1 ? 1 : srcLv === 2 ? 1.05 : 1.15); // 等级越高弹幕越大
         if (srcLv >= 2) {
