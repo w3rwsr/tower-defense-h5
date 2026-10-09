@@ -2525,8 +2525,9 @@ class GameScene extends Phaser.Scene {
 
     bindOnce('btn-pause', 'click', () => window.__tdScene && window.__tdScene.togglePause());
     bindOnce('btn-resume', 'click', () => window.__tdScene && window.__tdScene.togglePause());
+    /* 暂停菜单「返回选关」：退出当前关卡回选关页（进度不保存，goToLevelSelect 统一处理） */
+    bindOnce('btn-pause-levels', 'click', () => window.__tdScene && window.__tdScene.goToLevelSelect());
     bindOnce('btn-speed', 'click', () => window.__tdScene && window.__tdScene.toggleSpeed());
-    bindOnce('btn-levels', 'click', () => window.__tdScene && window.__tdScene.goToLevelSelect());
     bindOnce('btn-wave', 'click', () => {
       const s = window.__tdScene;
       if (s && s.state === 'ready') s.startWave();

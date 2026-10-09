@@ -18,6 +18,14 @@ class BootScene extends Phaser.Scene {
   }
 
   create() {
+    /* Phaser 就绪：移除 index.html 的启动加载提示层（仅启动时执行一次，
+       本场景不会重进，无重复移除问题） */
+    try {
+      window.__tdBootOK = true;
+      const bl = document.getElementById('boot-loading');
+      if (bl && bl.parentNode) bl.parentNode.removeChild(bl);
+    } catch (e) { /* 忽略：提示层缺失不影响游戏 */ }
+
     const C = TD_CONFIG;
 
     /* 火塔燃烧视频（全局共享解码器；不支持/加载失败时自动降级静态贴图，

@@ -5,11 +5,43 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>卡通塔防 H5（Phaser 3）</title>
-  <link rel="stylesheet" href="style.css?v=20260929a" />
-  <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js） -->
-  <script src="vendor/phaser.min.js?v=20260920h"></script>
+  <link rel="stylesheet" href="style.css?v=20261009n" />
+  <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js）。
+       全部脚本 defer：浏览器先渲染加载提示层，再并行下载、按序执行，消除手机端白屏 -->
+  <script defer src="vendor/phaser.min.js?v=20260920h"></script>
 </head>
 <body>
+  <!-- 启动加载提示层（#app 之外，不参与视觉横屏旋转；Phaser 就绪后由 BootScene 移除） -->
+  <div id="boot-loading">
+    <div class="boot-box">
+      <div class="boot-flame">🔥</div>
+      <div class="boot-text">游戏加载中…</div>
+      <div class="boot-dots"><i></i><i></i><i></i></div>
+      <div id="boot-loading-tip"></div>
+    </div>
+  </div>
+  <script>
+    /* 启动守护（同步内联，先于所有 defer 脚本注册）：
+       1. 脚本/样式加载失败 → 提示刷新，不静默卡死；
+       2. 8 秒仍未就绪 → 提示可能网络较慢；BootScene 就绪后置 __tdBootOK 并移除提示层 */
+    (function () {
+      window.__tdBootOK = false;
+      window.addEventListener('error', function (e) {
+        if (window.__tdBootOK) return;
+        var t = e && e.target;
+        if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
+          var el = document.getElementById('boot-loading-tip');
+          if (el) el.textContent = '⚠ 资源加载失败，请检查网络后刷新重试';
+        }
+      }, true);
+      setTimeout(function () {
+        if (!window.__tdBootOK) {
+          var el = document.getElementById('boot-loading-tip');
+          if (el) el.textContent = '加载时间较长，请耐心等待；若长时间无响应请刷新';
+        }
+      }, 8000);
+    })();
+  </script>
   <div id="app">
     <!-- Phaser 画布容器 -->
     <div id="game-container"></div>
@@ -23,7 +55,6 @@
         <span class="chip chip-wave">🌊 <b id="hud-wave">0/0</b></span>
       </div>
       <div class="controls">
-        <button id="btn-levels" class="btn btn-ctrl" type="button">🗺 选关</button>
         <button id="btn-speed" class="btn btn-ctrl" type="button">1x</button>
         <button id="btn-pause" class="btn btn-ctrl" type="button">⏸ 暂停</button>
       </div>
@@ -37,11 +68,12 @@
       </div>
     </div>
 
-    <!-- 暂停遮罩 -->
+    <!-- 暂停遮罩：继续（主操作）在上，返回选关（次操作）在下，进度不保存 -->
     <div id="overlay-pause" class="overlay hidden">
       <div class="overlay-card">
         <h2>⏸ 已暂停</h2>
-        <button id="btn-resume" class="btn btn-resume" type="button">▶ 继续</button>
+        <button id="btn-resume" class="btn btn-resume" type="button">▶ 继续游戏</button>
+        <button id="btn-pause-levels" class="btn btn-to-levels btn-pause-levels" type="button">🗺 返回选关</button>
       </div>
     </div>
 
@@ -72,23 +104,24 @@
        任何握持角度下面板始终横向、完整可读（真机排查用，#dbg 时显示） -->
   <div id="dbg-panel" hidden>方向诊断：等待检测…</div>
 
-  <!-- ===== 脚本按依赖顺序加载 ===== -->
-  <script src="js/config.js?v=20261009m"></script>
-  <script src="js/storage.js?v=20260927a"></script>
+  <!-- ===== 脚本按依赖顺序加载（全部 defer：按文档顺序执行，下载并行） =====
+       FireBurnData.js（~600KB 内嵌燃烧视频）不在此同步加载——由 main.js 在
+       Phaser 启动前后台动态注入，选关页先行进入，视频数据就绪后自动挂接 -->
+  <script defer src="js/config.js?v=20261009m"></script>
+  <script defer src="js/storage.js?v=20260927a"></script>
   <!-- 开发调试工具：仅 URL 带 #dbg 时激活（全内容解锁 + 应用内浏览器），无 #dbg 的正式环境脚本立即退出，不创建 DOM、不写任何存储 -->
-  <script src="js/debugTools.js?v=20260921r"></script>
-  <script src="js/attackModule.js?v=20260929b"></script>
-  <script src="js/objects/Enemy.js?v=20261007h"></script>
-  <script src="js/objects/Projectile.js?v=20261009m"></script>
-  <script src="js/FireBurnData.js?v=20261009j"></script>
-  <script src="js/FireTowerArtData.js?v=20261009j"></script>
-  <script src="js/LavaBulletData.js?v=20261009l"></script>
-  <script src="js/objects/FireBurn.js?v=20261009j"></script>
-  <script src="js/objects/FireVideoPipeline.js?v=20261009j"></script>
-  <script src="js/objects/Tower.js?v=20261009j"></script>
-  <script src="js/scenes/BootScene.js?v=20261009k"></script>
-  <script src="js/scenes/LevelSelectScene.js?v=20261007h"></script>
-  <script src="js/scenes/GameScene.js?v=20261009e"></script>
-  <script src="js/main.js?v=20261009j"></script>
+  <script defer src="js/debugTools.js?v=20260921r"></script>
+  <script defer src="js/attackModule.js?v=20260929b"></script>
+  <script defer src="js/objects/Enemy.js?v=20261007h"></script>
+  <script defer src="js/objects/Projectile.js?v=20261009m"></script>
+  <script defer src="js/FireTowerArtData.js?v=20261009j"></script>
+  <script defer src="js/LavaBulletData.js?v=20261009l"></script>
+  <script defer src="js/objects/FireBurn.js?v=20261009n"></script>
+  <script defer src="js/objects/FireVideoPipeline.js?v=20261009j"></script>
+  <script defer src="js/objects/Tower.js?v=20261009j"></script>
+  <script defer src="js/scenes/BootScene.js?v=20261009n"></script>
+  <script defer src="js/scenes/LevelSelectScene.js?v=20261007h"></script>
+  <script defer src="js/scenes/GameScene.js?v=20261009n"></script>
+  <script defer src="js/main.js?v=20261009n"></script>
 </body>
 </html>

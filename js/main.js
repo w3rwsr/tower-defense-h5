@@ -7,6 +7,28 @@
   'use strict';
 
   /* ============================================================
+   * FireBurnData.js 懒加载（~600KB 内嵌燃烧视频，移动端加载大头）：
+   * 从 index.html 同步脚本中移除，改为 Phaser 启动前后台动态注入——
+   * 选关页先进入，视频数据并行下载；就绪后挂接到 FIRE_BURN（若其已
+   * 初始化则重设 data URI，未初始化则 init 时直接读全局变量）。
+   * 加载失败静默：FireBurn 自带文件 URL 回退 + 静态贴图兜底。
+   * ============================================================ */
+  (function lazyFireBurnData() {
+    try {
+      const s = document.createElement('script');
+      s.src = 'js/FireBurnData.js?v=20261009j';
+      s.onload = () => {
+        try {
+          if (typeof FIRE_BURN !== 'undefined' && FIRE_BURN && FIRE_BURN.attachData) {
+            FIRE_BURN.attachData();
+          }
+        } catch (e) { /* 兜底链接管：忽略 */ }
+      };
+      document.head.appendChild(s);
+    } catch (e) { /* 极端环境：FireBurn 走文件 URL/静态贴图兜底 */ }
+  })();
+
+  /* ============================================================
    * 移动端识别：给 <html> 加 is-mobile class。
    * 微信/QQ 等 App 内置浏览器（WebView）在 Android 上通常锁死竖屏方向，
    * 系统旋转锁定开启时 WebView 视口永远竖屏，横屏"检测不到"——

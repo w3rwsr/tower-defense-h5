@@ -27,9 +27,12 @@ const FIRE_BURN = (() => {
      lv1/lv3 使用用户重新制作的 _new 视频（640x640，火焰占满画面）；
      lv2 保持原视频。 */
   const MIME = 'data:video/mp4;base64,';
-  const hasData = (typeof FIRE_BURN_DATA !== 'undefined') && FIRE_BURN_DATA;
+  /* 数据模块 FireBurnData.js 由 main.js 后台懒加载（不在 index.html 同步加载，
+     ~600KB 不阻塞首屏），可能在 FIRE_BURN 创建之后才就绪——因此必须动态
+     检查而非固化布尔值；就绪后 main.js 会调用 api.attachData() 挂接。 */
+  const hasData = () => (typeof FIRE_BURN_DATA !== 'undefined') && FIRE_BURN_DATA;
   const FILE_NAME = { 1: 'fire_burn_lv1_new', 2: 'fire_burn_lv2', 3: 'fire_burn_lv3_new' };
-  const srcFor = (lv) => (hasData && FIRE_BURN_DATA[lv])
+  const srcFor = (lv) => (hasData() && FIRE_BURN_DATA[lv])
     ? MIME + FIRE_BURN_DATA[lv]
     : 'assets/' + FILE_NAME[lv] + '.mp4?v=' + VER;
   /* 视频容器显示尺寸 / 背景键控模式：统一从 config.js 的
@@ -54,6 +57,21 @@ const FIRE_BURN = (() => {
     _scenePaused: false,
     items: {},              // lv -> {video, ready, failed, refs, waiters}
     textures: null
+  };
+
+  /* 懒加载挂接：FireBurnData.js 就绪后由 main.js 调用一次。
+     对尚未就绪的视频（含文件 URL 加载中 / 已 failed / 纹理建失败），
+     重设为 data URI 重新加载——file:// 下文件 URL 建不出 WebGL 纹理，
+     data URI 是唯一可靠来源；已就绪的（http 文件 URL 成功）不打断。 */
+  api.attachData = function () {
+    if (!hasData()) return;
+    LEVELS.forEach((lv) => {
+      const it = this.items[lv];
+      if (!it || it.ready || !FIRE_BURN_DATA[lv]) return;
+      it.triedFile = true;   // 数据已到，error 时不再回退文件 URL
+      it.video.src = MIME + FIRE_BURN_DATA[lv];
+      try { it.video.load(); } catch (e) { /* 忽略：下次 loadeddata 前的状态异常 */ }
+    });
   };
 
   /* BootScene.create 中调用一次（renderer / TextureManager 已就绪） */

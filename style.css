@@ -5,6 +5,67 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* ============================================================
+   启动加载提示层：#app 外全屏固定（不参与视觉横屏旋转），
+   所有游戏脚本 defer 执行期间可见；BootScene 就绪后移除。
+   ============================================================ */
+#boot-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, #3f7d4e 0%, #2f6b3d 60%, #26552f 100%);
+}
+#boot-loading.boot-done { display: none; }
+.boot-box {
+  text-align: center;
+  color: #fffaf0;
+  background: rgba(16, 28, 16, 0.55);
+  border: 3px solid rgba(255, 250, 240, 0.85);
+  border-radius: 24px;
+  padding: 26px 44px;
+  box-shadow: 0 10px 0 rgba(0, 0, 0, 0.18);
+  max-width: 86vw;
+}
+.boot-flame {
+  font-size: clamp(34px, 9vmin, 56px);
+  line-height: 1.1;
+  animation: boot-bounce 0.9s ease-in-out infinite;
+}
+.boot-text {
+  margin-top: 8px;
+  font-size: clamp(15px, 3.4vmin, 20px);
+  font-weight: 700;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.25);
+}
+.boot-dots { margin-top: 10px; }
+.boot-dots i {
+  display: inline-block;
+  width: 10px; height: 10px;
+  margin: 0 5px;
+  border-radius: 50%;
+  background: #ffd84a;
+  animation: boot-dot 1s ease-in-out infinite;
+}
+.boot-dots i:nth-child(2) { animation-delay: 0.15s; }
+.boot-dots i:nth-child(3) { animation-delay: 0.3s; }
+#boot-loading-tip {
+  margin-top: 10px;
+  font-size: clamp(12px, 2.6vmin, 15px);
+  color: #ffd84a;
+  min-height: 1.4em;
+}
+@keyframes boot-bounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%      { transform: translateY(-6px) scale(1.08); }
+}
+@keyframes boot-dot {
+  0%, 100% { opacity: 0.35; transform: translateY(0); }
+  50%      { opacity: 1;    transform: translateY(-4px); }
+}
+
 html, body {
   width: 100%;
   /* 移动端：100dvh 会随浏览器地址栏显示/收起动态调整，
@@ -275,6 +336,12 @@ html, body {
   font-size: clamp(15px, 3vmin, 20px);
   background: #7ec8ff;
   color: #0f3b66;
+}
+/* 暂停菜单「返回选关」：主操作「继续」在下层按钮堆叠中的次操作样式 */
+.btn-pause-levels {
+  display: block;
+  margin: 10px auto 0;
+  min-width: 200px;
 }
 @keyframes pop {
   from { transform: scale(.85); opacity: 0; }
