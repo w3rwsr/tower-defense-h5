@@ -90,6 +90,7 @@ class Tower extends Phaser.GameObjects.Container {
     else if (eff && eff.type === 'windSpread') BehaviorClass = TDAttack.WindSpreadBehavior;
     this.behavior = new BehaviorClass(this, this.cfg);
     this.aimAngle = -Math.PI / 2;          // 初始朝上
+    this.hasTarget = false;                // 火塔：无目标时火焰自然竖立
     if (!this.isFire) this.turret.rotation = this.aimAngle;  // 其他塔炮口即时指向
   }
 
@@ -235,9 +236,11 @@ class Tower extends Phaser.GameObjects.Container {
     return cost;
   }
 
-  /* 弹幕发射点（世界坐标）。
-     火塔：火焰根部（底部中心），位于 head 本地 (0,+半高)；head 随目标
-     旋转，根部要跟着旋转后的朝向走（指向右侧时根部在尾部左侧）。
+  /* 弹幕发射点（世界坐标）= 旋转后的火焰根部（贴图底部钝端、与地面接触
+     那端）。根部在 head 本地 (0,+半高)，经 head 旋转矩阵换算：
+       wx = -L·sinθ,  wy = L·cosθ
+     配合 update 的约定 θ=aimAngle−π/2，根部恰好落在"塔心→敌人"连线
+     向外 L 处（右敌在右、左敌在左），弹幕即从此处朝目标直线飞出。
      其他塔：保持塔中心（既有行为，不动）。 */
   getMuzzlePos() {
     if (this.isFire && this.head) {
@@ -249,10 +252,13 @@ class Tower extends Phaser.GameObjects.Container {
   }
 
   /* 攻击模块每帧回调：更新目标方向。其他塔炮头（零角朝右）即时指向；
-     火塔火焰贴图/视频零角朝上（-Y），由 update 中平滑旋转 head 跟随。 */
+     火塔只记录目标方向/有无目标，平滑旋转在 update 中做。 */
   setTarget(target) {
     if (target) {
       this.aimAngle = Phaser.Math.Angle.Between(this.x, this.y, target.x, target.y);
+      this.hasTarget = true;
+    } else {
+      this.hasTarget = false;
     }
     if (!this.isFire) this.turret.rotation = this.aimAngle;
   }
@@ -260,10 +266,11 @@ class Tower extends Phaser.GameObjects.Container {
   update(dt, ctx) {
     this.behavior.update(dt, ctx);
     if (this.isFire && this.head) {
-      /* 零角朝上的火焰指向 aimAngle 需 +90°；RotateTo 自动取最短旋转弧，
-         10 rad/s 限速保证转向平滑不突兀（约 0.3s 转 90°+），无目标时
-         aimAngle 保持最后方向，火焰停在最后朝向 */
-      const targetRot = this.aimAngle + Math.PI / 2;
+      /* 旋转约定：贴图根部（钝端）朝本地 +Y（角度 π/2）。要让根部指向
+         目标方向 aimAngle，需 π/2 + θ = aimAngle，即 θ = aimAngle − π/2。
+         RotateTo 自动走最短弧，10 rad/s 限速平滑（约 0.3s 转 90°）。
+         无目标时平滑回正 θ=0：火焰自然竖立、根部向下贴底座。 */
+      const targetRot = this.hasTarget ? (this.aimAngle - Math.PI / 2) : 0;
       this.head.rotation =
         Phaser.Math.Angle.RotateTo(this.head.rotation, targetRot, 10 * dt);
     }
