@@ -33,26 +33,19 @@ class Tower extends Phaser.GameObjects.Container {
       this.add(this.turret);
     }
 
-    /* 火塔燃烧视频叠加层：黑底 MP4。WebGL 下走专用 FireVideo 管线——
-       片元着色器把黑底亮度换算成真 alpha、火焰 rgb 原色保留，NORMAL
-       混合（旧 ADD 会与绿色地面相加，把外焰橙红加成纯金黄色）；
-       Canvas 渲染器 / 管线缺失时回退 ADD 混合。挂在 head 中与静态贴图
-       同锚点（head 中心）。每等级全游戏共享一个解码器/纹理（FireBurn.js）。
-       纹理未就绪时隐藏，静态贴图+Tween 即降级效果；视频一旦就绪即隐藏
-       静态贴图，两层绝不叠加。在 badge 之前 add，保证等级文字在上。 */
+    /* 火塔燃烧视频叠加层。lv1/lv3 为亮绿幕素材（FireVideoGK 色度键管线：
+       green-excess 抠绿+despill 去绿边），lv2 为黑底（FireVideo 亮度键）。
+       均 NORMAL 混合、火焰原色保留。管线在 _applyBurnPipeline 按等级切换；
+       绿幕管线不可用（Canvas 渲染器等）时视频层永不接管——ADD 混合会把
+       亮绿幕直接显示成绿方块，那种环境保持静态贴图+Tween 兜底。
+       黑底管线不可用时回退 ADD（旧环境降级）。 */
     this._burnLv = 1;
     this._burnActive = false;     // 视频层是否已接管（接管后静态贴图隐藏）
     this.burnImg = null;
     this._burnOk = (typeof FIRE_BURN !== 'undefined') && FIRE_BURN.supported;
     if (this.isFire && this._burnOk) {
-      this._burnColorPipeline =
-        (typeof fireVideoPipelineReady === 'function') && fireVideoPipelineReady(scene);
       this.burnImg = scene.add.image(0, 0, 'fire_dot').setVisible(false);
-      if (this._burnColorPipeline) {
-        this.burnImg.setPipeline('FireVideo');        // 黑底→真alpha，保色
-      } else {
-        this.burnImg.setBlendMode(Phaser.BlendModes.ADD); // 旧环境降级
-      }
+      this._applyBurnPipeline(1);
       this.head.add(this.burnImg);
       FIRE_BURN.whenReady(1, (key) => this._showBurn(key));
       FIRE_BURN.use(1);
@@ -114,12 +107,40 @@ class Tower extends Phaser.GameObjects.Container {
     return FIRE_BURN.displaySize(this.level);
   }
 
-  /* 视频纹理就绪 / 升级换级时：换纹理并固定居中显示。
+  /* 按等级素材背景类型配置视频层渲染管线。
+     green + FireVideoGK 就绪 → 绿幕色度键 NORMAL（返回 true）；
+     green + 管线缺失        → 不可接管（返回 false，保持静态兜底，防绿块）；
+     black + FireVideo 就绪  → 黑底亮度键 NORMAL（返回 true）；
+     black + 管线缺失        → 回默认管线 + ADD（返回 true，旧环境降级）。 */
+  _applyBurnPipeline(lv) {
+    if (!this.burnImg) return false;
+    const ready = (name) => (typeof fireVideoPipelineReady === 'function') &&
+      !!fireVideoPipelineReady(this.scene, name);
+    const green = FIRE_BURN.bgMode(lv) === 'green';
+    if (green) {
+      if (!ready('FireVideoGK')) return false;
+      this.burnImg.setPipeline('FireVideoGK');
+      this.burnImg.setBlendMode(Phaser.BlendModes.NORMAL);
+      return true;
+    }
+    if (ready('FireVideo')) {
+      this.burnImg.setPipeline('FireVideo');
+      this.burnImg.setBlendMode(Phaser.BlendModes.NORMAL);
+    } else {
+      try { if (this.burnImg.resetPipeline) this.burnImg.resetPipeline(); } catch (e) {}
+      this.burnImg.setBlendMode(Phaser.BlendModes.ADD);
+    }
+    return true;
+  }
+
+  /* 视频纹理就绪 / 升级换级时：按新等级背景切管线、换纹理并固定居中显示。
      不添加任何缩放/位移 Tween——视频自身已含火苗燃烧动态，再叠加 Tween
      会产生明显抖动（等级越高 Tween 越快）。同时隐藏静态美术贴图并清除
-     其兜底 Tween 与火星：两层同时显示经 ADD 混合会过曝出金黄色虚影。 */
+     其兜底 Tween 与火星：两层同时显示会过曝出虚影/色块。 */
   _showBurn(key) {
     if (!this.burnImg || !this.burnImg.active || !this.scene) return;
+    /* 绿幕素材在无抠像管线的环境绝不显示（否则亮绿方块直接上墙） */
+    if (!this._applyBurnPipeline(this._burnLv)) return;
     this.burnImg.setTexture(key);
     const d = this._burnDisplaySize();
     this.burnImg.setPosition(0, 0).setDisplaySize(d, d).setVisible(true);
@@ -236,15 +257,22 @@ class Tower extends Phaser.GameObjects.Container {
     return cost;
   }
 
-  /* 弹幕发射点（世界坐标）= 旋转后的火焰根部（贴图底部钝端、与地面接触
-     那端）。根部在 head 本地 (0,+半高)，经 head 旋转矩阵换算：
+  /* 弹幕发射点（世界坐标）= 旋转后的火焰根部（火焰底部钝端）。
+     根部在 head 本地 (0,+L)，经 head 旋转矩阵换算：
        wx = -L·sinθ,  wy = L·cosθ
      配合 update 的约定 θ=aimAngle−π/2，根部恰好落在"塔心→敌人"连线
      向外 L 处（右敌在右、左敌在左），弹幕即从此处朝目标直线飞出。
-     其他塔：保持塔中心（既有行为，不动）。 */
+     视频接管时 L = 容器尺寸 ×（实测根部纵向比例 − 0.5），换视频/换级
+     后根部仍精准；静态兜底时用静态贴图半高。其他塔返回塔中心。 */
   getMuzzlePos() {
     if (this.isFire && this.head) {
-      const L = this._fireDisplaySize() * 0.5;
+      let L;
+      if (this._burnActive) {
+        L = FIRE_BURN.displaySize(this._burnLv) *
+          (FIRE_BURN.muzzleBottom(this._burnLv) - 0.5);
+      } else {
+        L = this._fireDisplaySize() * 0.5;
+      }
       const c = Math.cos(this.head.rotation), s = Math.sin(this.head.rotation);
       return { x: this.x - L * s, y: this.y - 6 + L * c };
     }

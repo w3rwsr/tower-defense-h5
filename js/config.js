@@ -311,6 +311,31 @@ window.TD_CONFIG = {
         "damage": 1.65,
         "range": 1.10,
         "cooldown": 0.85
+      },
+
+      /* 燃烧视频（lv1/lv3 为亮绿幕 640x640，lv2 为黑底 192x192）。
+         WebGL 下由 FireVideo / FireVideoGK 两条片元管线实时抠像。 */
+      "fireVideo": {
+        /* 视频容器显示像素（正方形）。以"火焰实际像素高度"定标：
+           displaySize × 画面内火焰高度占比 = 视觉火焰高度。
+           实测火焰占比 rY：lv1=0.486、lv2=0.714、lv3=0.780，
+           目标视觉高度约 36 / 52 / 72px（三级≈二级 1.38 倍）。 */
+        "displaySize": { "1": 74, "2": 73, "3": 92 },
+        /* 火焰根部（底部钝端）在视频画面中的纵向比例（上=0 下=1），
+           实测火焰包围盒 maxY：lv1=0.75、lv2=0.83、lv3=0.88。
+           弹幕发射点 L = displaySize × (muzzleBottom − 0.5)。 */
+        "muzzleBottom": { "1": 0.75, "2": 0.83, "3": 0.88 },
+        /* 各等级素材背景类型：green=色度键绿幕，black=黑底亮度键 */
+        "bgMode": { "1": "green", "2": "black", "3": "green" },
+        /* 黑底键控（lv2）：alpha = clamp(亮度×gain − floor, 0, 1) */
+        "blackKey": { "gain": 1.5, "floor": 0.01 },
+        /* 绿幕色度键（lv1/lv3）。excess = g − max(r,b)（归一化 0~1）：
+           实测背景 excess：lv1≈0.55~0.59、lv3≈0.77~0.89；
+           火焰任意像素 r≥g，excess≤0。
+           excess≤low 完全保留，≥high 完全抠除，之间 smoothstep 抗锯齿；
+           spill 为去绿边（despill）允许量：g 超过 max(r,b)+spill 的
+           部分压掉，消除火焰轮廓绿晕。 */
+        "greenKey": { "low": 0.10, "high": 0.42, "spill": 0.03 }
       }
     },
 

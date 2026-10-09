@@ -218,13 +218,15 @@
     },
     scene: [BootScene, LevelSelectScene, GameScene]
   };
-  /* 火塔燃烧视频专用管线（黑底亮度→真 alpha，保色不偏黄）；
-     脚本缺失/异常时不注册，Tower 端自动回退 ADD 混合，绝不阻断启动 */
+  /* 火塔燃烧视频专用管线：FireVideo=黑底亮度键（lv2），
+     FireVideoGK=绿幕色度键（lv1/lv3）。脚本缺失/异常时不注册，
+     Tower 端黑底回退 ADD、绿幕回退静态贴图，绝不阻断启动 */
   try {
-    if (typeof FireVideoPipeline !== 'undefined') {
-      gameCfg.render.pipeline = { FireVideo: FireVideoPipeline };
-    }
-  } catch (e) { /* 忽略：回退 ADD */ }
+    const pipes = {};
+    if (typeof FireVideoPipeline !== 'undefined') pipes.FireVideo = FireVideoPipeline;
+    if (typeof FireVideoGKPipeline !== 'undefined') pipes.FireVideoGK = FireVideoGKPipeline;
+    if (pipes.FireVideo || pipes.FireVideoGK) gameCfg.render.pipeline = pipes;
+  } catch (e) { /* 忽略：按等级回退 */ }
   const game = new Phaser.Game(gameCfg);
 
   /* ============================================================

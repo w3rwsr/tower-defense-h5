@@ -32,12 +32,20 @@ const FIRE_BURN = (() => {
   const srcFor = (lv) => (hasData && FIRE_BURN_DATA[lv])
     ? MIME + FIRE_BURN_DATA[lv]
     : 'assets/' + FILE_NAME[lv] + '.mp4?v=' + VER;
-  /* 静态贴图显示尺寸（与 Tower._fireDisplaySize 一致） */
-  const BASE_DISPLAY = { 1: 42, 2: 48, 3: 56 };
-  /* 视频画面内火焰占比与静态贴图纹理的比例系数：displaySize = BASE_DISPLAY * SCALE。
-     旧视频火焰只占画面约 55%（故 SCALE≈1.8），新 640x640 视频火焰占满画面
-     （content ratio≈1.0），故 SCALE=1.0；lv2 保持原视频与原系数。 */
-  const SCALE = { 1: 1.00, 2: 1.70, 3: 1.00 };
+  /* 视频容器显示尺寸 / 背景键控模式：统一从 config.js 的
+     towers.towerA.fireVideo 读取（JSON 驱动，方便调整）；
+     读取异常时回退内置默认。旧 SCALE 系数废弃——新视频火焰占比经
+     实测后直接配置最终容器像素，保证 lv1<lv2<lv3 递增。 */
+  const FV_CFG = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.towers &&
+    TD_CONFIG.towers.towerA && TD_CONFIG.towers.towerA.fireVideo) || null;
+  const DISP_FALLBACK = { 1: 74, 2: 73, 3: 92 };
+  const BG_FALLBACK = { 1: 'green', 2: 'black', 3: 'green' };
+  const cfgNum = (obj, key, lv, fb) => {
+    try {
+      const v = obj && obj[key] && Number(obj[key][lv]);
+      return (typeof v === 'number' && isFinite(v) && v > 0) ? v : fb;
+    } catch (e) { return fb; }
+  };
 
   const api = {
     supported: false,
@@ -136,7 +144,17 @@ const FIRE_BURN = (() => {
   };
 
   api.isReady = function (lv) { return !!(this.items[lv] && this.items[lv].ready); };
-  api.displaySize = function (lv) { return Math.round(BASE_DISPLAY[lv] * SCALE[lv]); };
+  /* 视频容器显示像素：config fireVideo.displaySize（lv1<lv2<lv3 递增） */
+  api.displaySize = function (lv) { return Math.round(cfgNum(FV_CFG, 'displaySize', lv, DISP_FALLBACK[lv])); };
+  /* 该等级素材背景键控模式：'green' 绿幕色度键 / 'black' 黑底亮度键 */
+  api.bgMode = function (lv) {
+    try {
+      const m = FV_CFG && FV_CFG.bgMode && FV_CFG.bgMode[lv];
+      return (m === 'green' || m === 'black') ? m : BG_FALLBACK[lv];
+    } catch (e) { return BG_FALLBACK[lv]; }
+  };
+  /* 火焰根部在视频画面的纵向比例（上=0 下=1），弹幕发射点用 */
+  api.muzzleBottom = function (lv) { return cfgNum(FV_CFG, 'muzzleBottom', lv, 0.8); };
 
   /* GameScene 每帧调用：把当前视频帧上传到共享 GL 纹理（全场最多 3 次） */
   api.tick = function () {
