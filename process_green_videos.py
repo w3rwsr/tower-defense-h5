@@ -40,10 +40,14 @@ JOBS = {
     3: ('fire_burn_lv3_new.mp4', 'fire_lv3_green_raw_20261009.mp4'),
 }
 FPS = 24                # 项目约定 24fps（源 24.15fps，98 帧差异 <1%）
-CRF = '17'              # 高质量，抑制火焰/黑底交界宏块噪声
-# 色度键（与 FireVideoGK shader 的 0.10/0.42、spill 0.03 一致，255 量化）
-KEY_LOW = 0.10 * 255
-KEY_HIGH = 0.42 * 255
+CRF = '14'              # 高质量压环铃：残留归因实测 crf17 的 DCT 环铃是
+                        # 黑底晕圈来源之一，降 CRF + 密集关键帧抑制块效应
+GOP = '12'
+# 色度键（与 FireVideoGK shader 的 0.10/0.42、spill 0.03 同源，255 量化）
+KEY_LOW = 0.10 * 255    # flood-fill 生长条件（混色边缘并入背景连通区）
+KEY_HIGH = 0.42 * 255   # flood-fill 种子阈值（可靠绿幕）
+FEATHER_LOW = 0.14 * 255   # 连通区外羽化带略收缩：混色像素更快归零，
+FEATHER_HIGH = 0.40 * 255  # 火焰本体（excess<=0）完全不受影响
 SPILL = 0.03 * 255
 EDGE_KEEP = 2           # 边缘 N 像素环强制纯黑（双保险，物理杜绝矩形边）
 
@@ -53,13 +57,42 @@ def smoothstep(edge0, edge1, x):
     return t * t * (3.0 - 2.0 * t)
 
 
+def background_mask(ex):
+    """与画面四边连通的绿幕区（含混色边缘）-> bool mask。
+
+    残留归因：母带 4:2:0 色度抽样在绿/火交界产生数百~上千个
+    "半绿半火"混色像素/帧，旧全局羽化只给半透明 -> 预乘黑底后
+    成为火焰外一圈暗色晕圈。连通性判定把绿幕本体与混色环一并
+    归零（纯 numpy 迭代传播，无 scipy 依赖），火焰内部偏色不动。
+    """
+    green = ex > KEY_LOW
+    if not green.any():
+        return np.zeros_like(green)
+    seed = np.zeros_like(green)
+    seed[0, :] = green[0, :]
+    seed[-1, :] |= green[-1, :]
+    seed[:, 0] |= green[:, 0]
+    seed[:, -1] |= green[:, -1]
+    cur = seed
+    prev = -1
+    while cur.sum() != prev:
+        prev = cur.sum()
+        grown = cur.copy()
+        grown[1:, :] |= cur[:-1, :]
+        grown[:-1, :] |= cur[1:, :]
+        grown[:, 1:] |= cur[:, :-1]
+        grown[:, :-1] |= cur[:, 1:]
+        cur = grown & green
+    return cur
+
+
 def key_frame(rgb):
     """一帧绿幕 RGB(uint8) -> 黑底合成 RGB(uint8)。"""
     f = rgb.astype(np.float32)
     r, g, b = f[..., 0], f[..., 1], f[..., 2]
     ex = g - np.maximum(r, b)
-    key = smoothstep(KEY_LOW, KEY_HIGH, ex)     # 1=背景 0=火焰
-    alpha = 1.0 - key
+    alpha = 1.0 - smoothstep(FEATHER_LOW, FEATHER_HIGH, ex)
+    alpha[background_mask(ex)] = 0.0     # 连通绿幕+混色环彻底归零
     # despill：压掉火焰轮廓溢出的绿色
     g2 = np.minimum(g, np.maximum(r, b) + SPILL)
     out = np.stack([r, g2, b], axis=-1) * alpha[..., None]
@@ -108,7 +141,7 @@ def process_one(lv, name, backup_name):
         tmp_out = os.path.join(tmp, name)
         run_ffmpeg(['-y', '-framerate', str(FPS), '-i', os.path.join(fout, 'f%05d.png'),
                     '-c:v', 'libx264', '-profile:v', 'high', '-pix_fmt', 'yuv420p',
-                    '-crf', CRF, '-an', '-movflags', '+faststart', tmp_out])
+                    '-crf', CRF, '-g', GOP, '-an', '-movflags', '+faststart', tmp_out])
         shutil.copy2(tmp_out, src)
         print('lv%d 完成 -> %s (%d bytes)' % (lv, name, os.path.getsize(src)))
     finally:

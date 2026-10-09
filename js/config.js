@@ -353,8 +353,11 @@ window.TD_CONFIG = {
         "muzzleBottom": { "1": 0.75, "2": 0.82, "3": 0.88 },
         /* 自动检测失败时的回退背景类型（三级视频均为离线黑底） */
         "bgMode": { "1": "black", "2": "black", "3": "black" },
-        /* 黑底键控（lv2）：alpha = clamp(亮度×gain − floor, 0, 1) */
-        "blackKey": { "gain": 1.5, "floor": 0.01 },
+        /* 黑底键控（三级同构）：alpha = clamp(亮度×gain − floor, 0, 1)。
+           残留归因实测：旧成品火焰外环带晕圈亮度 0.024~0.035（crf17 环铃
+           + 4:2:0 混色），gain1.35/floor0.03 使 lum≤0.0222 全切、0.031→0.012，
+           浅色地面上不可见；火焰暗部 0.1→0.105 仅略降透明度。 */
+        "blackKey": { "gain": 1.35, "floor": 0.03 },
         /* 绿幕色度键（lv1/lv3）。excess = g − max(r,b)（归一化 0~1）：
            实测背景 excess：lv1≈0.55~0.59、lv3≈0.77~0.89；
            火焰任意像素 r≥g，excess≤0。

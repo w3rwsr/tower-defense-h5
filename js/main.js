@@ -16,7 +16,7 @@
   (function lazyFireBurnData() {
     try {
       const s = document.createElement('script');
-      s.src = 'js/FireBurnData.js?v=20261009j';
+      s.src = 'js/FireBurnData.js?v=20261009o';
       s.onload = () => {
         try {
           if (typeof FIRE_BURN !== 'undefined' && FIRE_BURN && FIRE_BURN.attachData) {
