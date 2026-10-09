@@ -17,29 +17,42 @@ class Projectile extends Phaser.GameObjects.Image {
     this.sourceTower = sourceTower || null; // 发射塔（风元素塔扩散冷却判定用）
     this.spin = pCfg.spin || 0;           // 风刃旋转速度（弧度/秒，0=不旋转）
 
-    /* 火元素塔（towerA）：按塔等级换火焰弹幕贴图，2级带短拖尾、3级带明显拖尾+火星。
-       拖尾为跟随弹幕的粒子发射器，impact 时随弹幕一并销毁。 */
+    /* 火元素塔（towerA）：按塔等级换熔岩弹贴图（裂纹/拖尾/火星随等级增强）。
+       离线贴图（window.__lavaBulletArt）自带拖尾火星，不再挂粒子；
+       data URI 缺失回退程序火苗贴图时，保留旧的粒子拖尾表现。 */
     this._trail = null;
     const srcLv = sourceTower && sourceTower.isFire ? sourceTower.level : 0;
     if (srcLv >= 1) {
-      const texKey = 'proj_fire_lv' + Math.min(srcLv, 3);
+      const lv = Math.min(srcLv, 3);
+      const texKey = 'proj_fire_lv' + lv;
       if (scene.textures.exists(texKey)) this.setTexture(texKey);
-      this.setScale(srcLv === 1 ? 1 : srcLv === 2 ? 1.05 : 1.15); // 等级越高弹幕越大
-      /* 方向性火苗贴图：初始即朝目标偏转（update 中每帧随目标位置修正） */
+      /* 方向性熔岩弹：初始即朝目标偏转（update 中每帧随目标位置修正） */
       if (target) this.rotation = Math.atan2(target.y - y, target.x - x);
-      if (srcLv >= 2) {
-        this._trail = scene.add.particles(0, 0, 'fire_dot', {
-          speed: 0, scale: { start: srcLv === 2 ? 0.9 : 1.3, end: 0 },
-          alpha: { start: 0.55, end: 0 }, lifespan: srcLv === 2 ? 160 : 260,
-          frequency: srcLv === 2 ? 30 : 18, blendMode: 'ADD', follow: this
-        }).setDepth(39);
-        if (srcLv >= 3) {
-          // 3级额外火星：四散的小亮点
-          this._sparks = scene.add.particles(0, 0, 'fire_dot', {
-            speed: { min: 10, max: 40 }, scale: { start: 0.5, end: 0 },
-            alpha: { start: 0.9, end: 0 }, lifespan: 300, frequency: 40,
-            blendMode: 'ADD', follow: this
+      if (window.__lavaBulletArt === true) {
+        /* 离线贴图按球径等比烘焙（球纹素=ballDisplay×superSample=45px）：
+           setScale = 等级系数 / superSample，三颗球显示几乎等大（15/15.75/16.5px），
+           缩放系数由 config.towers.towerA.projectile.lavaBullet 驱动 */
+        const lb = (pCfg.lavaBullet) ||
+          (((typeof TD_CONFIG !== 'undefined') && TD_CONFIG.towers.towerA.projectile.lavaBullet) ||
+           { superSample: 3, scale: {} });
+        const lvScale = (lb.scale && lb.scale[lv]) != null ? lb.scale[lv] : 1;
+        this.setScale(lvScale / (lb.superSample || 3));
+      } else {
+        this.setScale(srcLv === 1 ? 1 : srcLv === 2 ? 1.05 : 1.15); // 等级越高弹幕越大
+        if (srcLv >= 2) {
+          this._trail = scene.add.particles(0, 0, 'fire_dot', {
+            speed: 0, scale: { start: srcLv === 2 ? 0.9 : 1.3, end: 0 },
+            alpha: { start: 0.55, end: 0 }, lifespan: srcLv === 2 ? 160 : 260,
+            frequency: srcLv === 2 ? 30 : 18, blendMode: 'ADD', follow: this
           }).setDepth(39);
+          if (srcLv >= 3) {
+            // 3级额外火星：四散的小亮点
+            this._sparks = scene.add.particles(0, 0, 'fire_dot', {
+              speed: { min: 10, max: 40 }, scale: { start: 0.5, end: 0 },
+              alpha: { start: 0.9, end: 0 }, lifespan: 300, frequency: 40,
+              blendMode: 'ADD', follow: this
+            }).setDepth(39);
+          }
         }
       }
     }

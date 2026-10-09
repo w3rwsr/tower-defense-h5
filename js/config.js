@@ -303,7 +303,17 @@ window.TD_CONFIG = {
         "color": 0x9fd0ff,
         "element": "fire",        // 火元素印记（纯视觉标记，伤害不变；供风元素塔扩散）
         "elementDuration": 4,     // 印记持续秒数
-        "effect": { "type": "damage", "value": 42 }
+        "effect": { "type": "damage", "value": 42 },
+        /* 熔岩弹弹幕贴图（assets/lava_bullets.png 离线裁切，见
+           build_lava_bullets.py；data URI 模块 LavaBulletData.js）。
+           三颗贴图按球径等比烘焙（球纹素 = ballDisplay×superSample=45px），
+           运行时 setScale = 等级系数 / superSample，三颗球显示几乎等大，
+           等级差异只靠裂纹/拖尾/火星细节。 */
+        "lavaBullet": {
+          "ballDisplay": 15,
+          "superSample": 3,
+          "scale": { "1": 1.0, "2": 1.05, "3": 1.10 }
+        }
       },
       "upgrade": {
         "maxLevel": 3,

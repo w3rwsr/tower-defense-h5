@@ -269,6 +269,35 @@ class BootScene extends Phaser.Scene {
       g.fillStyle(0xffe76b, 1); g.fillCircle(4, 4, 1.7);
     });
 
+    /* ---------- 熔岩弹弹幕贴图（LavaBulletData.js，三级三连图离线裁切） ----------
+       data URI 同源干净，file:// 也可上传 WebGL；上面的程序火苗贴图作为
+       解码失败时的兜底。三张全部就绪才置 window.__lavaBulletArt，
+       Projectile 据此启用 1/superSample 归一化缩放并停用自带的粒子拖尾
+       （新贴图已烘焙拖尾火星，避免双重拖尾）。同样并入 artJobs 等待链。 */
+    const hasLavaData = (typeof LAVA_BULLET_DATA !== 'undefined') && LAVA_BULLET_DATA;
+    if (hasLavaData) {
+      if (!artJobs) artJobs = [];
+      const lavaJobs = [1, 2, 3].map((lv) => new Promise((resolve) => {
+        const durl = LAVA_BULLET_DATA[lv];
+        if (!durl) { resolve(false); return; }
+        const key = 'proj_fire_lv' + lv;
+        const img = new Image();
+        img.onload = () => {
+          try {
+            if (this.textures.exists(key)) this.textures.remove(key);
+            this.textures.addImage(key, img);
+            resolve(true);
+          } catch (e) { resolve(false); }
+        };
+        img.onerror = () => resolve(false);
+        img.src = durl;
+      }));
+      artJobs.push(Promise.all(lavaJobs).then((oks) => {
+        if (oks.every((v) => v)) window.__lavaBulletArt = true;
+        return true;
+      }));
+    }
+
     /* 内嵌贴图就绪后再进选关（小图解码通常几十 ms；超时兜底绝不阻断启动） */
     if (artJobs) {
       let started = false;
