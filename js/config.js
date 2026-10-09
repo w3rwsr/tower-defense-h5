@@ -314,11 +314,16 @@ window.TD_CONFIG = {
           "superSample": 3,
           "scale": { "1": 1.0, "2": 1.05, "3": 1.10 },
           /* 代码生成的拖尾/火星（贴图仅球体本体，不含拖尾）。
-             强度随等级递增：frequency 越小火星越密，lifespan 越长拖尾越长。 */
+             拖尾长度 = 弹速(460px/s) × lifespan，故拖尾长度只由 lifespan 控制；
+             frequency 越小火星越密（拖尾越连贯）。
+             目标尾长：lv1≈30px、lv2≈45px、lv3≈65px（短→稍长，差异微妙）。 */
           "trail": {
-            "1": { "frequency": 70, "lifespan": 130, "scale": 0.55, "alpha": 0.5 },
-            "2": { "frequency": 38, "lifespan": 200, "scale": 0.85, "alpha": 0.55 },
-            "3": { "frequency": 20, "lifespan": 300, "scale": 1.15, "alpha": 0.65, "sparks": true }
+            "1": { "frequency": 80, "lifespan": 70, "scale": 0.5, "alpha": 0.5 },
+            "2": { "frequency": 55, "lifespan": 100, "scale": 0.7, "alpha": 0.55 },
+            "3": {
+              "frequency": 35, "lifespan": 140, "scale": 0.85, "alpha": 0.6,
+              "sparks": { "frequency": 70, "lifespan": 140, "scale": 0.45, "speedMax": 30 }
+            }
           }
         }
       },

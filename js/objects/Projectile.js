@@ -47,10 +47,13 @@ class Projectile extends Phaser.GameObjects.Image {
             frequency: t.frequency, blendMode: 'ADD', follow: this
           }).setDepth(39);
           if (t.sparks) {
-            // 三级额外火星：四散的小亮点
+            // 三级额外火星：四散的小亮点（参数全部由 config.lavaBullet.trail[3].sparks 驱动）
+            const sp = t.sparks;
             this._sparks = scene.add.particles(0, 0, 'fire_dot', {
-              speed: { min: 10, max: 40 }, scale: { start: 0.5, end: 0 },
-              alpha: { start: 0.9, end: 0 }, lifespan: 300, frequency: 40,
+              speed: { min: 8, max: sp.speedMax || 30 },
+              scale: { start: sp.scale || 0.45, end: 0 },
+              alpha: { start: 0.9, end: 0 },
+              lifespan: sp.lifespan || 140, frequency: sp.frequency || 70,
               blendMode: 'ADD', follow: this
             }).setDepth(39);
           }
