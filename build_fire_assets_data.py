@@ -106,10 +106,12 @@ def main():
         print('lv%d keyed -> %s (%d bytes)' % (lv, os.path.basename(keyed), os.path.getsize(keyed)))
 
     vid_lines = []
+    # 一级、三级使用用户重新制作的 _new 视频；二级保持原视频
+    VID_FILE = {1: 'fire_burn_lv1_new.mp4', 2: 'fire_burn_lv2.mp4', 3: 'fire_burn_lv3_new.mp4'}
     for lv in LEVELS:
-        vid = os.path.join(ASSETS, 'fire_burn_lv%d.mp4' % lv)
+        vid = os.path.join(ASSETS, VID_FILE[lv])
         vid_lines.append("  %d: '%s'" % (lv, to_b64(vid)))
-        print('lv%d video -> base64 (%d bytes raw)' % (lv, os.path.getsize(vid)))
+        print('lv%d video -> %s (%d bytes raw)' % (lv, os.path.basename(vid), os.path.getsize(vid)))
 
     hdr = ('/* ============================================================\n'
            ' * %s\n'

@@ -15,7 +15,7 @@
  *    用户触摸后解锁播放。
  * ============================================================ */
 const FIRE_BURN = (() => {
-  const VER = '20261009b';                 // 素材版本号（破 file:// 缓存，仅文件回退用）
+  const VER = '20261009g';                 // 素材版本号（破 file:// 缓存，仅文件回退用）
   const LEVELS = [1, 2, 3];
   const TEX_KEY = { 1: 'fire_burn_lv1', 2: 'fire_burn_lv2', 3: 'fire_burn_lv3' };
   /* 视频来源：优先 base64 data URI（FireBurnData.js 内嵌，与 assets 下 mp4
@@ -23,18 +23,21 @@ const FIRE_BURN = (() => {
      WebGL texImage2D 上传会抛 SecurityError → 视频纹理永远建不出来，
      火塔只能显示静态贴图；data: URI 属同源干净数据不触发污染，
      file:// / http:// / 微信 X5 全环境通用。data URI 加载失败时
-     自动回退到文件 URL（http:// 环境兜底）。 */
+     自动回退到文件 URL（http:// 环境兜底）。
+     lv1/lv3 使用用户重新制作的 _new 视频（640x640，火焰占满画面）；
+     lv2 保持原视频。 */
   const MIME = 'data:video/mp4;base64,';
   const hasData = (typeof FIRE_BURN_DATA !== 'undefined') && FIRE_BURN_DATA;
+  const FILE_NAME = { 1: 'fire_burn_lv1_new', 2: 'fire_burn_lv2', 3: 'fire_burn_lv3_new' };
   const srcFor = (lv) => (hasData && FIRE_BURN_DATA[lv])
     ? MIME + FIRE_BURN_DATA[lv]
-    : 'assets/fire_burn_lv' + lv + '.mp4?v=' + VER;
+    : 'assets/' + FILE_NAME[lv] + '.mp4?v=' + VER;
   /* 静态贴图显示尺寸（与 Tower._fireDisplaySize 一致） */
   const BASE_DISPLAY = { 1: 42, 2: 48, 3: 56 };
-  /* 视频画面内火焰占比小于静态贴图纹理（静态贴图按包围盒裁剪、视频保留
-     完整画面），叠加容器需放大才能让火焰视觉尺寸与静态贴图一致。
-     系数 = 静态纹理内容占比 / 视频内容占比（包围盒实测） */
-  const SCALE = { 1: 1.83, 2: 1.70, 3: 1.15 };
+  /* 视频画面内火焰占比与静态贴图纹理的比例系数：displaySize = BASE_DISPLAY * SCALE。
+     旧视频火焰只占画面约 55%（故 SCALE≈1.8），新 640x640 视频火焰占满画面
+     （content ratio≈1.0），故 SCALE=1.0；lv2 保持原视频与原系数。 */
+  const SCALE = { 1: 1.00, 2: 1.70, 3: 1.00 };
 
   const api = {
     supported: false,
@@ -94,7 +97,7 @@ const FIRE_BURN = (() => {
            文件 URL 也失败才判定 failed（Tower 保持静态贴图兜底） */
         if (!item.triedFile && v.src.indexOf('data:') === 0) {
           item.triedFile = true;
-          v.src = 'assets/fire_burn_lv' + lv + '.mp4?v=' + VER;
+          v.src = 'assets/' + FILE_NAME[lv] + '.mp4?v=' + VER;
           v.load();
           return;
         }
