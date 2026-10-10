@@ -32,10 +32,14 @@ TOWER_XRANGES = {
     2: (872, 1665),
     3: (1685, 2796),
 }
-TOWER_SS = 4                                   # 超采样
+TOWER_SS = 6                                   # 超采样（提升清晰度）
 TOWER_BASE = 48.0                              # 显示基准高度（× config.art.scale）
 TOWER_SCALE = {1: 0.88, 2: 1.0, 3: 1.12}       # 等级差异明显但不过大
 COMP_KEEP = 0.0025                             # 连通域保留阈值
+# 各等级炮口相对贴图中心的角度（度，数学坐标系：0=右，90=下，180=左，-90=上）。
+# 由原图目测定标：lv1 炮口左上、lv2 炮口右下、lv3 炮口左。
+# 旋转 -BARREL_ANGLE 度（PIL 逆时针为正）使炮口统一朝右。
+BARREL_ANGLE = {1: 138.0, 2: 52.0, 3: 176.0}
 
 # ---------------- 水弹：程序生成（无原始素材） ----------------
 BULLET_SS = 3
@@ -143,8 +147,114 @@ def alpha_bbox(a):
     return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
 
 
-def save_normalized_height(rgba, lv, out_png):
-    """塔：按显示高度×SS 归一化（保长宽比），居中输出。"""
+def find_nozzle(rgba):
+    """检测水枪炮口（炮管末端深色开口）的像素坐标。
+    策略：
+      1. 找到离质心最远的不透明点 → 炮管末端方向（炮管是最长的突出物）。
+      2. 找到所有深色圆形连通域（炮口开口、水箱球体都是深色圆）。
+      3. 选离"最远点"最近的深色圆 → 炮口开口（水箱球体在主体上，离末端远）。
+    """
+    from collections import deque
+    alpha = rgba[..., 3]
+    opaque = alpha * 255 >= ALPHA_CUT
+    if not opaque.any():
+        return rgba.shape[1] // 2, rgba.shape[0] // 2
+    ys, xs = np.where(opaque)
+    com = np.array([xs.mean(), ys.mean()])
+    pts = np.column_stack([xs, ys]).astype(float)
+    d = np.linalg.norm(pts - com, axis=1)
+    tip_idx = np.argmax(d)
+    tip = pts[tip_idx]   # 炮管末端轮廓点
+
+    # 找深色圆形连通域
+    rgb = rgba[..., :3].mean(axis=2)
+    dark_mask = opaque & (rgb < 0.4)
+    comps = []
+    if dark_mask.any():
+        h, w = dark_mask.shape
+        seen = np.zeros_like(dark_mask)
+        for sy, sx in zip(*np.where(dark_mask)):
+            if seen[sy, sx]:
+                continue
+            q = deque([(sy, sx)]); seen[sy, sx] = True
+            cpts = []
+            while q:
+                y, x = q.popleft(); cpts.append((y, x))
+                for dy, dx in ((1,0),(-1,0),(0,1),(0,-1)):
+                    ny, nx = y+dy, x+dx
+                    if 0<=ny<h and 0<=nx<w and dark_mask[ny,nx] and not seen[ny,nx]:
+                        seen[ny,nx]=True; q.append((ny,nx))
+            if len(cpts) < 15:
+                continue
+            cys = [p[0] for p in cpts]; cxs = [p[1] for p in cpts]
+            cy, cx = sum(cys)/len(cys), sum(cxs)/len(cpts)
+            bw = max(cxs)-min(cxs)+1; bh = max(cys)-min(cys)+1
+            circ = len(cpts) / (bw*bh)
+            comps.append((cx, cy, len(cpts), circ))
+    if comps:
+        # 炮口开口位于细长炮管的末端：选深色圆中【其方向上最靠近轮廓边界】的。
+        # 对每个深色圆，计算从质心到它的方向上的最远不透明点距离；
+        # 若深色圆距该边界 < 30% 半径，则它在末端（炮口）。
+        ys_arr, xs_arr = np.where(opaque)
+        pts_all = np.column_stack([xs_arr, ys_arr]).astype(float)
+        tip_candidates = []
+        for cx, cy, area, circ in comps:
+            dx, dy = cx - com[0], cy - com[1]
+            dlen = math.hypot(dx, dy)
+            if dlen < 1:
+                continue
+            ux, uy = dx / dlen, dy / dlen
+            # 该方向上最远的不透明点
+            proj = pts_all[:, 0] * ux + pts_all[:, 1] * uy
+            max_proj = proj.max()
+            my_proj = cx * ux + cy * uy
+            if (max_proj - my_proj) < max_proj * 0.35:  # 距边界 < 35% 半径
+                tip_candidates.append((cx, cy, dlen))
+        if tip_candidates:
+            best = max(tip_candidates, key=lambda c: c[2])
+            return (best[0], best[1])
+        # 回退：选最远的深色圆
+        best = max(comps, key=lambda c: math.hypot(c[0]-com[0], c[1]-com[1]))
+        return (best[0], best[1])
+    # 无深色圆：直接用末端点作为炮口
+    return (float(tip[0]), float(tip[1]))
+
+
+def rotate_to_barrel_right(rgba, nozzle):
+    """将贴图旋转，使炮口指向正右方（角度 0）。
+    返回旋转后的 RGBA 数组与新的喷嘴坐标。
+    旋转方式：以贴图中心为轴，将 喷嘴→中心 方向转到 朝左（即炮口朝右）。"""
+    h, w = rgba.shape[:2]
+    cx, cy = w / 2.0, h / 2.0
+    nx, ny = nozzle
+    ang = math.atan2(ny - cy, nx - cx)        # 喷嘴相对中心的角度
+    # 要让喷嘴朝右（角度 0），需把整个贴图旋转 -ang
+    deg = -math.degrees(ang)
+    img = Image.fromarray((np.round(rgba * 255)).astype(np.uint8), 'RGBA')
+    rot = img.rotate(deg, resample=Image.BICUBIC, expand=True)
+    ra = np.asarray(rot).astype(np.float32) / 255.0
+    # 计算旋转后喷嘴的新坐标
+    # 旋转矩阵（PIL rotate 逆时针为正，角度 deg）：
+    rad = math.radians(deg)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    # PIL rotate 以图像中心为轴；expand=True 后画布中心偏移
+    nw, nh = rot.size
+    # 旧中心相对旧画布左上角 (cx, cy)，新画布中心 (nw/2, nh/2)
+    # 点 P 旋转后：P' = center + R*(P - center)，其中 R 为逆时针旋转矩阵
+    rx = cx + (nx - cx) * cos_a - (ny - cy) * sin_a
+    ry = cy + (nx - cx) * sin_a + (ny - cy) * cos_a
+    # expand=True 时画布扩展，新画布左上角相对旧画布的偏移
+    # PIL expand 模式下，旋转后的图像被平移到新画布左上角
+    # 偏移量 = (nw/2 - cx, nh/2 - cy) 大致，但需用包围盒精确计算
+    # 更稳妥：直接在旋转后的图上重新检测喷嘴
+    new_nozzle = find_nozzle(ra)
+    return ra, new_nozzle
+
+
+def save_tower_normalized(rgba, nozzle, lv, out_png):
+    """塔：裁 alpha 包围盒 → 按显示高度×SS 归一化（保长宽比）。
+    返回 (size, muzzle_dist)，其中 muzzle_dist 为炮口到贴图中心的水平距离
+    （像素，归一化后的纹素坐标），供游戏内计算旋转后的枪口世界坐标。"""
     x0, y0, x1, y1 = alpha_bbox(rgba[..., 3])
     crop = rgba[y0:y1, x0:x1, :]
     target_h = int(round(TOWER_BASE * TOWER_SCALE[lv] * TOWER_SS))
@@ -152,9 +262,65 @@ def save_normalized_height(rgba, lv, out_png):
     nw = max(1, int(round(crop.shape[1] * s)))
     img = Image.fromarray((np.round(crop * 255)).astype(np.uint8), 'RGBA')
     img = img.resize((nw, target_h), Image.LANCZOS)
-    img.putalpha(img.getchannel('A').filter(ImageFilter.GaussianBlur(0.8)))
+    # 轻微 alpha 羽化仅 0.4px（去锯齿但不糊边），之前 0.8px 过强导致发虚
+    img.putalpha(img.getchannel('A').filter(ImageFilter.GaussianBlur(0.4)))
     img.save(out_png, optimize=True)
-    return img.size
+    # 归一化后喷嘴坐标
+    ncx = (nozzle[0] - x0) * s
+    ncy = (nozzle[1] - y0) * s
+    # 炮口到贴图中心的水平距离（炮口已朝右，故 y 偏差忽略，取水平分量）
+    muzzle_dist = ncx - nw / 2.0
+    return (nw, target_h), muzzle_dist
+
+
+def find_nozzle_right(rgba):
+    """炮口已朝右后，检测右侧炮口深色开口的 x 坐标（返回 (nx, ny)）。
+    在右半部分找离右边缘最近的深色圆形连通域。"""
+    from collections import deque
+    rgb = rgba[..., :3].mean(axis=2)
+    alpha = rgba[..., 3]
+    mask = (alpha * 255 >= ALPHA_CUT) & (rgb < 0.4)
+    h, w = rgba.shape[:2]
+    if not mask.any():
+        # 回退：右半部分最右的不透明点
+        ys, xs = np.where(alpha * 255 >= ALPHA_CUT)
+        right = xs >= w / 2
+        if right.any():
+            idx = np.argmax(xs[right])
+            return float(xs[right][idx]), float(ys[right][idx])
+        return w / 2, h / 2
+    seen = np.zeros_like(mask)
+    comps = []
+    for sy, sx in zip(*np.where(mask)):
+        if seen[sy, sx]:
+            continue
+        q = deque([(sy, sx)]); seen[sy, sx] = True
+        cpts = []
+        while q:
+            y, x = q.popleft(); cpts.append((y, x))
+            for dy, dx in ((1,0),(-1,0),(0,1),(0,-1)):
+                ny, nx = y+dy, x+dx
+                if 0<=ny<h and 0<=nx<w and mask[ny,nx] and not seen[ny,nx]:
+                    seen[ny,nx]=True; q.append((ny,nx))
+        if len(cpts) < 10:
+            continue
+        cys = [p[0] for p in cpts]; cxs = [p[1] for p in cpts]
+        cy, cx = sum(cys)/len(cys), sum(cxs)/len(cpts)
+        comps.append((cx, cy, len(cpts)))
+    if comps:
+        # 选 x 最大的深色圆（最靠右 = 炮口）
+        best = max(comps, key=lambda c: c[0])
+        return (best[0], best[1])
+    ys, xs = np.where(alpha * 255 >= ALPHA_CUT)
+    idx = np.argmax(xs)
+    return float(xs[idx]), float(ys[idx])
+
+
+def rotate_by_angle(rgba, deg):
+    """按指定角度旋转（PIL 逆时针为正），expand=True 保留全部内容。"""
+    img = Image.fromarray((np.round(rgba * 255)).astype(np.uint8), 'RGBA')
+    rot = img.rotate(deg, resample=Image.BICUBIC, expand=True)
+    return np.asarray(rot).astype(np.float32) / 255.0
 
 
 def build_towers():
@@ -162,19 +328,27 @@ def build_towers():
     h, w = frame.shape[:2]
     print('水塔源图 %dx%d' % (w, h))
     arts = {}
+    muzzles = {}
     for lv in (1, 2, 3):
         bx0, bx1 = TOWER_XRANGES[lv]
         pad = 16
         c = frame[:, max(0, bx0 - pad):min(w, bx1 + pad), :]
         rgba = white_key(c)
         rgba[..., 3] = components_keep(rgba[..., 3])
+        # 按定标角度旋转，使炮口统一朝右（PIL 逆时针为正，故取负角）
+        rgba = rotate_by_angle(rgba, -BARREL_ANGLE[lv])
+        rgba[..., 3] = components_keep(rgba[..., 3])   # 旋转后边缘重新清杂
+        # 炮口已在右侧，检测右侧深色开口
+        nozzle = find_nozzle_right(rgba)
         p = os.path.join(ASSETS, 'water_tower_lv%d.png' % lv)
-        size = save_normalized_height(rgba, lv, p)
+        size, mdist = save_tower_normalized(rgba, nozzle, lv, p)
         with open(p, 'rb') as f:
             arts[lv] = base64.b64encode(f.read()).decode('ascii')
-        print('  lv%d -> %s %dx%d' % (lv, os.path.basename(p), size[0], size[1]))
-    write_js('WaterTowerArtData.js', 'WATER_TOWER_ART', 'water_tower_lv', arts,
-             '水元素塔美术贴图（白幕三连图离线裁切，水枪塔本体）')
+        muzzles[lv] = round(mdist, 2)
+        print('  lv%d -> %s %dx%d  muzzle_dist=%.1fpx' %
+              (lv, os.path.basename(p), size[0], size[1], mdist))
+    write_tower_js('WaterTowerArtData.js', 'WATER_TOWER_ART', 'water_tower_lv', arts, muzzles,
+                   '水元素塔美术贴图（白幕三连图裁切；炮口统一朝右；含炮口偏移 muzzleDist）')
 
 
 # ---------------- 水弹贴图：程序生成（水滴/水柱/水球本体，无拖尾） ----------------
@@ -317,6 +491,23 @@ def build_bullets():
               (lv, os.path.basename(p), out.width, out.height, s))
     write_js('WaterBulletData.js', 'WATER_BULLET_DATA', 'proj_water_lv', arts,
              '水弹贴图（仅水珠/水柱/水球本体；拖尾与水雾由代码粒子生成）')
+
+
+def write_tower_js(fname, var, tex_prefix, arts, muzzles, desc):
+    """水塔数据：{level: {data: dataURI, muzzleDist: 炮口到中心水平像素距离}}。"""
+    lines = ["  %d: { data: 'data:image/png;base64,%s', muzzleDist: %s }" %
+             (lv, b64, muzzles[lv]) for lv, b64 in arts.items()]
+    hdr = ('/* ============================================================\n'
+           ' * %s —— %s\n'
+           ' * 由 build_water_assets.py 自动生成，请勿手改。\n'
+           ' * 纹理键 %s1/2/3；炮口统一朝右；muzzleDist 为炮口到贴图中心的水平\n'
+           ' * 纹素距离，游戏内乘以显示缩放后按旋转角换算枪口世界坐标。\n'
+           ' * ============================================================ */\n') % (
+        fname, desc, tex_prefix)
+    p = os.path.join(JS, fname)
+    with open(p, 'w', encoding='utf-8') as f:
+        f.write(hdr + 'const %s = {\n' % var + ',\n'.join(lines) + '\n};\n')
+    print('%s written, %d bytes' % (fname, os.path.getsize(p)))
 
 
 def write_js(fname, var, tex_prefix, arts, desc):

@@ -27,7 +27,8 @@ class Tower extends Phaser.GameObjects.Container {
     this.isIce = (typeKey === 'towerB') &&
       window.__iceTowerArt === true && scene.textures.exists('ice_tower_lv1');
     /* 水元素塔（towerC）：水枪塔美术贴图（water_tower_lvN，按等级切换）。
-       水枪为竖立造型，不随目标旋转（静态贴图层），索敌/攻击逻辑不变；
+       炮口统一朝右（离线烘焙时已旋转），运行时炮头平滑旋转跟踪敌人，
+       弹幕从旋转后的炮口位置发射（见 getMuzzlePos）；
        贴图缺失时回退程序化炮头 turret_towerC。 */
     this.isWater = (typeKey === 'towerC') &&
       window.__waterTowerArt === true && scene.textures.exists('water_tower_lv1');
@@ -44,7 +45,8 @@ class Tower extends Phaser.GameObjects.Container {
       this.add(this.turret);
     } else if (this.isWater) {
       this.head = null;
-      this.turret = scene.add.image(0, -6, this._waterTexKey());
+      // 炮头位于容器原点，旋转轴即贴图中心
+      this.turret = scene.add.image(0, 0, this._waterTexKey());
       this._waterApplyArt();
       this.add(this.turret);
     } else {
@@ -106,8 +108,8 @@ class Tower extends Phaser.GameObjects.Container {
     this.behavior = new BehaviorClass(this, this.cfg);
     this.aimAngle = -Math.PI / 2;          // 初始朝上
     this.hasTarget = false;                // 火塔：无目标时火焰自然竖立
-    // 火塔/冰塔/水塔贴图不随目标旋转；其他塔炮口即时指向
-    if (!this.isFire && !this.isIce && !this.isWater) this.turret.rotation = this.aimAngle;
+    // 火塔/冰塔贴图不随目标旋转；水塔与其他塔炮口即时/平滑指向
+    if (!this.isFire && !this.isIce) this.turret.rotation = this.aimAngle;
   }
 
   /* 冰塔当前等级的美术贴图 key（缺失时逐级回退，最终回退程序炮头） */
@@ -360,6 +362,16 @@ class Tower extends Phaser.GameObjects.Container {
       const c = Math.cos(this.head.rotation), s = Math.sin(this.head.rotation);
       return { x: this.x - L * s, y: this.y - 6 + L * c };
     }
+    /* 水塔：炮口在贴图中心右侧 muzzleDist 纹素处（离线烘焙炮口朝右），
+       经 turret.rotation 旋转后换算世界坐标。
+       L = muzzleDist × turret.scaleX（显示缩放），方向 = turret.rotation。 */
+    if (this.isWater) {
+      const mdist = (window.__waterTowerMuzzle &&
+        window.__waterTowerMuzzle[this.level]) || 0;
+      const L = mdist * this.turret.scaleX;
+      const c = Math.cos(this.turret.rotation), s = Math.sin(this.turret.rotation);
+      return { x: this.x + L * c, y: this.y + L * s };
+    }
     return { x: this.x, y: this.y };
   }
 
@@ -372,11 +384,19 @@ class Tower extends Phaser.GameObjects.Container {
     } else {
       this.hasTarget = false;
     }
+    // 火塔/冰塔贴图不随目标旋转；水塔平滑旋转在 update 中做；其他塔即时指向
     if (!this.isFire && !this.isIce && !this.isWater) this.turret.rotation = this.aimAngle;
   }
 
   update(dt, ctx) {
     this.behavior.update(dt, ctx);
+    if (this.isWater) {
+      /* 水塔炮头平滑旋转到目标方向 aimAngle。炮口已离线烘焙朝右（角度 0），
+         故直接把 turret.rotation 转到 aimAngle 即指向敌人。
+         RotateTo 走最短弧，12 rad/s 限速（约 0.26s 转 90°），平滑不跳变。 */
+      this.turret.rotation =
+        Phaser.Math.Angle.RotateTo(this.turret.rotation, this.aimAngle, 12 * dt);
+    }
     if (this.isFire && this.head) {
       /* 旋转约定：贴图根部（钝端）朝本地 +Y（角度 π/2）。要让根部指向
          目标方向 aimAngle，需 π/2 + θ = aimAngle，即 θ = aimAngle − π/2。

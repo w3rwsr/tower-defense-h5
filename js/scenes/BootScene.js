@@ -386,8 +386,13 @@ class BootScene extends Phaser.Scene {
     const hasWaterTowerData = (typeof WATER_TOWER_ART !== 'undefined') && WATER_TOWER_ART;
     if (hasWaterTowerData) {
       if (!artJobs) artJobs = [];
+      /* 新版 WATER_TOWER_ART 格式：{level: {data: dataURI, muzzleDist: 炮口偏移纹素}}
+         旧版兼容：若值为字符串则当作 dataURI，muzzleDist 回退 0。 */
+      window.__waterTowerMuzzle = {};
       const waterTowerJobs = [1, 2, 3].map((lv) => new Promise((resolve) => {
-        const durl = WATER_TOWER_ART[lv];
+        const entry = WATER_TOWER_ART[lv];
+        const durl = (typeof entry === 'string') ? entry : (entry && entry.data);
+        const mdist = (entry && typeof entry.muzzleDist === 'number') ? entry.muzzleDist : 0;
         if (!durl) { resolve(false); return; }
         const key = 'water_tower_lv' + lv;
         const img = new Image();
@@ -395,6 +400,7 @@ class BootScene extends Phaser.Scene {
           try {
             if (this.textures.exists(key)) this.textures.remove(key);
             this.textures.addImage(key, img);
+            window.__waterTowerMuzzle[lv] = mdist;
             resolve(true);
           } catch (e) { resolve(false); }
         };
