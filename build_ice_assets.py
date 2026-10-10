@@ -41,15 +41,15 @@ COMP_KEEP = 0.0025                             # 连通域保留阈值（滤 32p
 
 # ---------------- 冰弹：实测雪花中心/臂展 R/底切 y（全局原图坐标） -------------
 BULLET_SRC = os.path.join(ASSETS, 'ice_bullets.png')
-BULLET_BOXES = {   # 宽松区域（含光晕与拖尾），遮罩负责剔除
-    1: (180, 350, 560, 780),
-    2: (700, 290, 1245, 905),
-    3: (1240, 150, 1990, 905),
+BULLET_BOXES = {   # 宽松区域（含光晕；避开相邻雪花），遮罩负责剔除拖尾
+    1: (150, 350, 600, 780),
+    2: (660, 290, 1245, 905),
+    3: (1100, 150, 2000, 905),
 }
-FLAKE = {   # (cx, cy), R=臂展（不含拖尾方向，用左/上方位测得）, ycut=文字条带顶
-    1: ((349, 525), 135, 720),
-    2: ((935, 526), 190, 850),
-    3: ((1576, 501), 300, 865),
+FLAKE = {   # (cx, cy)=六折旋转对称中心（对称搜索+目视校正），R=臂展，ycut=文字条带顶
+    1: ((345, 523), 138, 720),
+    2: ((911, 502), 190, 850),
+    3: ((1524, 453), 300, 865),
 }
 BULLET_SS = 3
 BODY_DISPLAY = 18.0                            # 雪花臂展显示直径基准 px
@@ -236,23 +236,44 @@ def build_bullets():
         a_soft[ycut:, :] = 0.0
         a_fill[ycut:, :] = 0.0
 
-        # 3) 分别按半径整形（六出雪花臂尖止于 r=R）：
-        #    本体 r≤R 全保、R→1.12R 收掉填洞前沿锯齿/拖尾口袋；
-        #    光晕保留自然外扩，1.05→1.35R 渐隐。
+        # 3) 六折雪花形本体遮罩：六瓣臂沿 0/60/.../300° 中心线伸到 r=R，
+        #    中央六棱体到 .60R，侧枝小刺到 ~.72R，臂间是自然镂空。
+        #    armW：离最近臂中心线的角距离（≤7° 全保，≥20° 无臂）。
         dist = np.hypot(xx0 - cx, yy0 - cy)
-        body = a_fill * (1.0 - smoothstep((dist - R) / (0.12 * R)))
+        ang_d = np.degrees(np.arctan2(yy0 - cy, xx0 - cx)) % 360.0
+        da = np.minimum(ang_d % 60.0, 60.0 - ang_d % 60.0)
+        arm_w = 1.0 - smoothstep((da - 7.0) / 13.0)
+        r_limit = R * (0.60 + 0.40 * arm_w)          # 中心 .60R → 臂尖 R
+        snow_shape = 1.0 - smoothstep((dist - r_limit) / (0.12 * R))
+        body = a_fill * snow_shape
+        # 光晕保留近体外扩，1.05→1.35R 渐隐
         glow = a_soft * (1.0 - smoothstep((dist - 1.05 * R) / (0.30 * R)))
         alpha = np.maximum(body, glow) * block
 
-        # 4) 斜向锥切：烘焙拖尾从雪花右下（+45°，0°/60°两臂空隙）伸出。
-        #    ±35°锥内 0.95R→1.15R 归零：锥内残余的拖尾青白光（含亮芯口袋
-        #    在软层里的部分）被切净；60°臂尖仅最外缘约 16% 羽化，18px 下不可见。
         vx = (xx0 - cx) / np.maximum(dist, 1e-6)
         vy = (yy0 - cy) / np.maximum(dist, 1e-6)
-        in_cone = ((vx + vy) * 0.7071 > 0.819)    # 与 (1,1)/√2 夹角 <35°
-        cone = np.where(in_cone,
-                        1.0 - smoothstep((dist - 0.95 * R) / (0.20 * R)), 1.0)
-        alpha *= cone
+
+        # 4) 烘焙拖尾切除（仅 lv2/lv3，lv1 无烘焙光束）：
+        #    a) 仅拖尾侧象限的臂间空隙收光晕（其他方向保圆形光晕）；
+        #    b) 主光束扇 + 远端渐宽扇，越过臂尖外的光束全部渐隐，
+        #       60° 臂本体止于 r=R 不受影响。
+        if lv >= 2:
+            # 只在拖尾侧（15°~95° 单象限）的臂间空隙收光晕，其余方向保留
+            # 与 lv1 一致的圆形光晕，避免出现六边形轮廓
+            tgx, tgy = np.cos(np.radians(55.0)), np.sin(np.radians(55.0))
+            trail_side = smoothstep(((vx * tgx + vy * tgy) - 0.55) / 0.20)
+            gap_w = np.clip((da - 12.0) / 14.0, 0.0, 1.0) * trail_side
+            trail_cut = smoothstep((dist - 0.82 * R) / (0.38 * R))
+            alpha *= 1.0 - gap_w * trail_cut
+            # 主光束扇（30°~58°，约 4 点方向），.88→1.20R 切净
+            ax2, ay2 = np.cos(np.radians(44.0)), np.sin(np.radians(44.0))
+            cut_a = ((vx * ax2 + vy * ay2) > np.cos(np.radians(14.0))) * \
+                    smoothstep((dist - 0.88 * R) / (0.32 * R))
+            # 远端渐宽扇（59°~91°，越过 60° 臂尖后才起切，臂本体安全）
+            ax3, ay3 = np.cos(np.radians(75.0)), np.sin(np.radians(75.0))
+            cut_b = ((vx * ax3 + vy * ay3) > np.cos(np.radians(16.0))) * \
+                    smoothstep((dist - 1.02 * R) / (0.33 * R))
+            alpha *= 1.0 - np.maximum(cut_a, cut_b)
         # 边缘硬环防溢
         alpha[:2, :] = 0; alpha[-2:, :] = 0; alpha[:, :2] = 0; alpha[:, -2:] = 0
 
@@ -262,6 +283,12 @@ def build_bullets():
         rr = np.clip((r0 - k) * inv, 0, 1)
         gg = np.clip((g0 - k) * inv, 0, 1)
         bb = np.clip((b0 - k) * inv, 0, 1)
+        # 抬升底色：源图臂窝深青阴影在 18px 显示下会变成近黑碎点，
+        # 统一托到冰青色底，保持冰晶透亮
+        col_floor = 0.28
+        rr = np.maximum(rr, col_floor * 0.55)
+        gg = np.maximum(gg, col_floor * 0.90)
+        bb = np.maximum(bb, col_floor)
 
         x0, y0, x1, y1 = alpha_bbox(alpha)
         sub = np.stack([rr, gg, bb, alpha], axis=-1)[y0:y1, x0:x1, :]

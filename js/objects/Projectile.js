@@ -78,6 +78,60 @@ class Projectile extends Phaser.GameObjects.Image {
       }
     }
 
+    /* 冰元素塔（towerB）：按塔等级换雪花冰弹贴图（proj_ice_lvN）。
+       离线贴图只含雪花本体（烘焙拖尾/冰雾/文字已剔除），拖尾完全由代码
+       生成——冰蓝粒子向后飘散 + 一条浅蓝渐变光带，强度随等级递增，
+       参数全部读 config towerB.projectile.iceBullet（JSON 驱动）。
+       雪花六出对称，不朝向目标，改为持续轻微自转增加动感。 */
+    this.isIce = false;
+    this.iceSpin = 0;
+    this._ribbon = null;
+    const iceSrcLv = sourceTower && sourceTower.isIce ? sourceTower.level : 0;
+    if (iceSrcLv >= 1) {
+      const lv = Math.min(iceSrcLv, 3);
+      const texKey = 'proj_ice_lv' + lv;
+      if (window.__iceBulletArt === true && scene.textures.exists(texKey)) {
+        const ib = pCfg.iceBullet ||
+          (((typeof TD_CONFIG !== 'undefined') && TD_CONFIG.towers.towerB.projectile.iceBullet) || null);
+        if (ib) {
+          this.isIce = true;
+          this.setTexture(texKey);
+          /* 臂展等比烘焙（臂展纹素=bodyDisplay×superSample=54px）：
+             setScale=等级系数/superSample → 臂展显示 18/18.9/19.8px */
+          const lvScale = (ib.scale && ib.scale[lv] != null) ? ib.scale[lv] : 1;
+          this.setScale(lvScale / (ib.superSample || 3));
+          this.iceSpin = (ib.spin && ib.spin[lv] != null) ? ib.spin[lv] : 0;
+
+          const headDeg = target
+            ? Phaser.Math.RadToDeg(Math.atan2(target.y - y, target.x - x)) : 0;
+          /* 冰蓝粒子：follow 本弹发射，speed 沿飞行反方向飘散 */
+          const t = (ib.trail && ib.trail[lv]) || null;
+          if (t) {
+            const spread = t.angleSpread || 0;
+            this._trail = scene.add.particles(0, 0, 'ice_dot', {
+              speed: { min: (t.speed || 0) * 0.6, max: t.speed || 0 },
+              angle: { min: headDeg + 180 - spread / 2, max: headDeg + 180 + spread / 2 },
+              scale: { start: t.scale, end: 0 },
+              alpha: { start: t.alpha, end: 0 },
+              tint: t.tint, lifespan: t.lifespan,
+              frequency: t.frequency, quantity: t.quantity || 1,
+              blendMode: 'ADD', follow: this
+            }).setDepth(39);
+          }
+          /* 渐变光带：右端钉在弹心、沿弹尾延伸，随飞行方向偏转 */
+          const rb = (ib.ribbon && ib.ribbon[lv]) || null;
+          if (rb) {
+            this._ribbon = scene.add.image(x, y, 'ice_ribbon')
+              .setOrigin(1, 0.5)
+              .setScale((rb.length || 16) / 40, (rb.thickness || 3) / 8)
+              .setAlpha(rb.alpha != null ? rb.alpha : 0.35)
+              .setBlendMode(Phaser.BlendModes.ADD)
+              .setDepth(39);
+          }
+        }
+      }
+    }
+
     // 落点（目标活着则每帧刷新）
     this.tx = target.x;
     this.ty = target.y;
@@ -107,8 +161,26 @@ class Projectile extends Phaser.GameObjects.Image {
     }
 
     this.setPosition(this.x + (dx / dist) * step, this.y + (dy / dist) * step);
-    /* 风刃（spin>0）持续旋转出旋风效果；火焰弹幕沿飞行方向朝向目标（贴图尖端朝右） */
-    if (this.spin) this.rotation += this.spin * dt;
+    /* 风刃（spin>0）持续旋转出旋风效果；火焰弹幕沿飞行方向朝向目标（贴图尖端朝右）；
+       冰雪花不朝向目标，持续轻微自转，并同步光带朝向与粒子飘散方向 */
+    if (this.isIce) {
+      this.rotation += this.iceSpin * dt;
+      const head = Math.atan2(dy, dx);
+      if (this._ribbon) {
+        this._ribbon.setPosition(this.x, this.y);
+        this._ribbon.rotation = head;
+      }
+      /* 粒子发射角随飞行方向修正到"反方向 ± 张角"（配置 angleSpread）；
+         setAngle 的 step 参数按 value±step/2 随机，失败不影响主流程 */
+      if (this._trail && typeof this._trail.setAngle === 'function') {
+        try {
+          const tc = this.pCfg.iceBullet;
+          const lvt = tc && tc.trail && tc.trail[Math.min((this.sourceTower && this.sourceTower.level) || 1, 3)];
+          const spread = lvt ? (lvt.angleSpread || 0) : 0;
+          this._trail.setAngle(Phaser.Math.RadToDeg(head) + 180, spread);
+        } catch (e) { /* 角度运行时更新失败：保留构造时的发射角 */ }
+      }
+    } else if (this.spin) this.rotation += this.spin * dt;
     else this.rotation = Math.atan2(dy, dx);
   }
 
@@ -118,6 +190,7 @@ class Projectile extends Phaser.GameObjects.Image {
     /* 火焰弹幕的拖尾/火星粒子随弹幕一并销毁，避免残留 */
     if (this._trail) { this._trail.destroy(); this._trail = null; }
     if (this._sparks) { this._sparks.destroy(); this._sparks = null; }
+    if (this._ribbon) { this._ribbon.destroy(); this._ribbon = null; }
     /* 目标互斥：本弹锁定的是障碍物（isObstacle）→ 只结算障碍物；
        锁定的是小怪 → 只结算小怪，绝不伤害障碍物 */
     const vsObstacle = this.target && this.target.isObstacle;

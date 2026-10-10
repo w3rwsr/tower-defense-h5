@@ -379,6 +379,15 @@ window.TD_CONFIG = {
       "color": 0x53d8e6,
       "darkColor": 0x2a9aa8,
       "targeting": "furthest",
+      /* 冰元素塔美术贴图（assets/ice_towers.png 离线裁切，见 build_ice_assets.py；
+         纹理键 ice_tower_lv1/2/3）。贴图按高度归一化烘焙（纹素高 =
+         baseHeight×superSample=192px，超采样系数在离线脚本中），运行时只按
+         高度定标：显示高 = baseHeight × scale[等级]（43.2 / 48 / 52.8px），
+         宽按纹理原比例自适应。 */
+      "art": {
+        "baseHeight": 48,
+        "scale": { "1": 0.9, "2": 1.0, "3": 1.1 }
+      },
       "stats": {
         "damage": 9,
         "range": 135,
@@ -395,6 +404,47 @@ window.TD_CONFIG = {
           "splashRadius": 68,
           "slowFactor": 0.50,      // 减速到 50% 移速
           "slowDuration": 1.6      // 持续秒数
+        },
+        /* 冰弹贴图（assets/ice_bullets.png 离线裁切，见 build_ice_assets.py；
+           data URI 模块 IceBulletData.js，纹理键 proj_ice_lv1/2/3）。
+           贴图只含雪花本体+近体光晕，烘焙拖尾/冰雾/文字标签均已剔除；
+           三颗按雪花臂展等比烘焙（臂展纹素 = bodyDisplay×superSample=54px），
+           运行时 setScale = 等级系数 / superSample，臂展显示 18/18.9/19.8px。 */
+        "iceBullet": {
+          "bodyDisplay": 18,
+          "superSample": 3,
+          "scale": { "1": 1.0, "2": 1.05, "3": 1.10 },
+          /* 雪花持续自转（弧度/秒），六出对称、轻微转动即可增加动感 */
+          "spin": { "1": 2.2, "2": 2.8, "3": 3.4 },
+          /* 代码生成的冰蓝粒子拖尾（贴图仅雪花本体）。冰弹速度 330px/s，
+             拖尾长度 ≈ 弹速 × lifespan：lv1≈30px（很短）、lv2≈46px（中等）、
+             lv3≈66px（稍长，仍远小于射程，不遮挡画面）。
+             每个粒子沿飞行反方向飘散（speed/angleSpread 控制飘散力度与张角），
+             frequency 越小粒子越密；所有参数按等级 JSON 驱动。 */
+          "trail": {
+            "1": {
+              "frequency": 110, "lifespan": 90, "quantity": 1,
+              "speed": 8, "angleSpread": 55,
+              "scale": 0.42, "alpha": 0.5, "tint": [0xffffff, 0x9fdcff]
+            },
+            "2": {
+              "frequency": 75, "lifespan": 140, "quantity": 1,
+              "speed": 12, "angleSpread": 50,
+              "scale": 0.58, "alpha": 0.6, "tint": [0xffffff, 0xbfeaff]
+            },
+            "3": {
+              "frequency": 50, "lifespan": 200, "quantity": 2,
+              "speed": 16, "angleSpread": 45,
+              "scale": 0.72, "alpha": 0.7, "tint": [0xffffff, 0x9fdcff]
+            }
+          },
+          /* 可选：叠加一条浅蓝→透明的渐变光带（ice_ribbon 程序纹理），
+             位于弹体后方；长度/粗细/透明度同样随等级 JSON 递增 */
+          "ribbon": {
+            "1": { "length": 13, "thickness": 2.6, "alpha": 0.28 },
+            "2": { "length": 20, "thickness": 3.2, "alpha": 0.34 },
+            "3": { "length": 28, "thickness": 4.0, "alpha": 0.4 }
+          }
         }
       },
       "upgrade": {

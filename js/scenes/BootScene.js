@@ -276,6 +276,23 @@ class BootScene extends Phaser.Scene {
       g.fillStyle(0xffa93b, 1); g.fillCircle(4, 4, 3.4);
       g.fillStyle(0xffe76b, 1); g.fillCircle(4, 4, 1.7);
     });
+    /* 圆形冰点：冰弹粒子拖尾专用，外冰蓝 0x9fdcff、内白，运行时可再 tint */
+    this.makeTexture('ice_dot', 8, 8, (g) => {
+      g.fillStyle(0x9fdcff, 1); g.fillCircle(4, 4, 3.4);
+      g.fillStyle(0xffffff, 1); g.fillCircle(4, 4, 1.8);
+    });
+    /* 冰弹渐变光带：横向 40×8，右侧（起点 x=40）亮、向左渐隐为透明；
+       使用时 origin(1,0.5) 钉在弹体中心，向弹尾方向延伸并按等级缩放 */
+    this.makeTexture('ice_ribbon', 40, 8, (g) => {
+      const steps = 16;
+      for (let i = 0; i < steps; i++) {
+        const t = i / steps;                 // 0=左端(尾) 1=右端(头)
+        const a = Math.pow(t, 1.6) * 0.55;   // 头部最亮 .55，尾部趋 0
+        const w = 1 + t * 3.2;               // 头粗尾细
+        g.fillStyle(0xbfeaff, a);
+        g.fillRect(i * (40 / steps), 4 - w / 2, 40 / steps + 0.6, w);
+      }
+    });
 
     /* ---------- 熔岩弹弹幕贴图（LavaBulletData.js，三级三连图离线裁切） ----------
        data URI 同源干净，file:// 也可上传 WebGL；上面的程序火苗贴图作为
@@ -302,6 +319,62 @@ class BootScene extends Phaser.Scene {
       }));
       artJobs.push(Promise.all(lavaJobs).then((oks) => {
         if (oks.every((v) => v)) window.__lavaBulletArt = true;
+        return true;
+      }));
+    }
+
+    /* ---------- 冰元素塔三级贴图（IceTowerArtData.js，三连图离线裁切） ----------
+       data URI 同源干净，file:// 也可上传 WebGL。三张全部就绪才置
+       window.__iceTowerArt，Tower 据此给 towerB 换冰塔贴图；缺失时 Tower
+       回退到程序化炮头 turret_towerB，绝不黑屏。并入 artJobs 等待链。 */
+    const hasIceTowerData = (typeof ICE_TOWER_ART !== 'undefined') && ICE_TOWER_ART;
+    if (hasIceTowerData) {
+      if (!artJobs) artJobs = [];
+      const iceTowerJobs = [1, 2, 3].map((lv) => new Promise((resolve) => {
+        const durl = ICE_TOWER_ART[lv];
+        if (!durl) { resolve(false); return; }
+        const key = 'ice_tower_lv' + lv;
+        const img = new Image();
+        img.onload = () => {
+          try {
+            if (this.textures.exists(key)) this.textures.remove(key);
+            this.textures.addImage(key, img);
+            resolve(true);
+          } catch (e) { resolve(false); }
+        };
+        img.onerror = () => resolve(false);
+        img.src = durl;
+      }));
+      artJobs.push(Promise.all(iceTowerJobs).then((oks) => {
+        if (oks.every((v) => v)) window.__iceTowerArt = true;
+        return true;
+      }));
+    }
+
+    /* ---------- 冰弹三级贴图（IceBulletData.js，三连图离线裁切） ----------
+       贴图只含雪花本体+近体光晕（烘焙拖尾/冰雾/文字已在离线脚本剔除），
+       拖尾由 Projectile 的冰蓝粒子 + ice_ribbon 光带代码生成。三张全部
+       就绪才置 window.__iceBulletArt；缺失时冰弹回退程序圆弹。并入等待链。 */
+    const hasIceBulletData = (typeof ICE_BULLET_DATA !== 'undefined') && ICE_BULLET_DATA;
+    if (hasIceBulletData) {
+      if (!artJobs) artJobs = [];
+      const iceBulletJobs = [1, 2, 3].map((lv) => new Promise((resolve) => {
+        const durl = ICE_BULLET_DATA[lv];
+        if (!durl) { resolve(false); return; }
+        const key = 'proj_ice_lv' + lv;
+        const img = new Image();
+        img.onload = () => {
+          try {
+            if (this.textures.exists(key)) this.textures.remove(key);
+            this.textures.addImage(key, img);
+            resolve(true);
+          } catch (e) { resolve(false); }
+        };
+        img.onerror = () => resolve(false);
+        img.src = durl;
+      }));
+      artJobs.push(Promise.all(iceBulletJobs).then((oks) => {
+        if (oks.every((v) => v)) window.__iceBulletArt = true;
         return true;
       }));
     }

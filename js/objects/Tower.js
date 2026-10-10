@@ -21,12 +21,22 @@ class Tower extends Phaser.GameObjects.Container {
        攻击时 head 整体平滑转向目标；底座与 Lv 徽标留在外层不转。
        其余塔沿用程序化炮头并直接旋转（炮口朝右贴图，零角朝右）。 */
     this.isFire = (typeKey === 'towerA') && scene.textures.exists('fire_tower_lv1');
+    /* 冰元素塔（towerB）：冰簇美术贴图（ice_tower_lvN，按等级切换）。
+       冰晶为竖立造型，不随目标旋转（静态贴图层），索敌/减速逻辑不变；
+       贴图缺失时回退程序化炮头 turret_towerB。 */
+    this.isIce = (typeKey === 'towerB') &&
+      window.__iceTowerArt === true && scene.textures.exists('ice_tower_lv1');
     if (this.isFire) {
       this.head = scene.add.container(0, -6);
       this.turret = scene.add.image(0, 0, this._fireTexKey());
       this.turret.setDisplaySize(this._fireDisplaySize(), this._fireDisplaySize());
       this.head.add(this.turret);
       this.add(this.head);
+    } else if (this.isIce) {
+      this.head = null;
+      this.turret = scene.add.image(0, -6, this._iceTexKey());
+      this._iceApplyArt();
+      this.add(this.turret);
     } else {
       this.head = null;
       this.turret = scene.add.image(0, 0, 'turret_' + typeKey);
@@ -86,7 +96,30 @@ class Tower extends Phaser.GameObjects.Container {
     this.behavior = new BehaviorClass(this, this.cfg);
     this.aimAngle = -Math.PI / 2;          // 初始朝上
     this.hasTarget = false;                // 火塔：无目标时火焰自然竖立
-    if (!this.isFire) this.turret.rotation = this.aimAngle;  // 其他塔炮口即时指向
+    // 火塔/冰塔贴图不随目标旋转；其他塔炮口即时指向
+    if (!this.isFire && !this.isIce) this.turret.rotation = this.aimAngle;
+  }
+
+  /* 冰塔当前等级的美术贴图 key（缺失时逐级回退，最终回退程序炮头） */
+  _iceTexKey() {
+    for (let lv = Math.min(this.level, 3); lv >= 1; lv--) {
+      const k = 'ice_tower_lv' + lv;
+      if (this.scene.textures.exists(k)) return k;
+    }
+    return 'turret_towerB';
+  }
+
+  /* 冰塔显示定标：显示高 = config towerB.art.baseHeight × scale[等级]
+     （0.9/1.0/1.1 → 43.2/48/52.8px），宽按纹理原始宽高比自适应 */
+  _iceApplyArt() {
+    this.turret.setTexture(this._iceTexKey());
+    const art = (this.cfg && this.cfg.art) || { baseHeight: 48, scale: {} };
+    const lvScale = (art.scale && art.scale[this.level] != null)
+      ? art.scale[this.level] : 1;
+    const h = (art.baseHeight || 48) * lvScale;
+    const fr = this.turret.frame;
+    const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
+    this.turret.setDisplaySize(h * aspect, h);
   }
 
   /* 火塔当前等级的美术贴图 key（缺失时回退到最低可用等级） */
@@ -265,6 +298,9 @@ class Tower extends Phaser.GameObjects.Container {
         FIRE_BURN.whenReady(this._burnLv, (key) => this._showBurn(key));
       }
     }
+    /* 冰塔：升级同步切换冰晶贴图与显示尺寸（冰弹贴图由发射时等级决定，
+       Projectile 读 sourceTower.level 自动对应，无需此处处理） */
+    if (this.isIce) this._iceApplyArt();
     // 升级小动画
     this.scene.tweens.add({ targets: this, scale: 1.18, duration: 110, yoyo: true });
     return cost;
@@ -301,7 +337,7 @@ class Tower extends Phaser.GameObjects.Container {
     } else {
       this.hasTarget = false;
     }
-    if (!this.isFire) this.turret.rotation = this.aimAngle;
+    if (!this.isFire && !this.isIce) this.turret.rotation = this.aimAngle;
   }
 
   update(dt, ctx) {
