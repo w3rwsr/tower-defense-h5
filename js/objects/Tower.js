@@ -143,17 +143,17 @@ class Tower extends Phaser.GameObjects.Container {
     return 'turret_towerC';
   }
 
-  /* 水塔显示定标：显示高 = config towerC.art.baseHeight × scale[等级]
-     （0.88/1.0/1.12 → 42.2/48/53.8px），宽按纹理原始宽高比自适应 */
+  /* 水塔显示定标：显示高 = config towerC.art.displayHeight[等级]
+     （一级 40 < 二级 47 < 三级 54，JSON 驱动）；纹素高为显示高 ×3，
+     显示缩放恰为 1/3，宽按纹理原始宽高比自适应（避免非整数缩放） */
   _waterApplyArt() {
     this.turret.setTexture(this._waterTexKey());
-    const art = (this.cfg && this.cfg.art) || { baseHeight: 48, scale: {} };
-    const lvScale = (art.scale && art.scale[this.level] != null)
-      ? art.scale[this.level] : 1;
-    const h = (art.baseHeight || 48) * lvScale;
+    const art = (this.cfg && this.cfg.art) || {};
+    const dh = (art.displayHeight && art.displayHeight[this.level] != null)
+      ? art.displayHeight[this.level] : 47;
     const fr = this.turret.frame;
     const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
-    this.turret.setDisplaySize(h * aspect, h);
+    this.turret.setDisplaySize(dh * aspect, dh);
   }
 
   /* 火塔当前等级的美术贴图 key（缺失时回退到最低可用等级） */
@@ -362,15 +362,22 @@ class Tower extends Phaser.GameObjects.Container {
       const c = Math.cos(this.head.rotation), s = Math.sin(this.head.rotation);
       return { x: this.x - L * s, y: this.y - 6 + L * c };
     }
-    /* 水塔：炮口在贴图中心右侧 muzzleDist 纹素处（离线烘焙炮口朝右），
-       经 turret.rotation 旋转后换算世界坐标。
-       L = muzzleDist × turret.scaleX（显示缩放），方向 = turret.rotation。 */
+    /* 水塔：炮口偏移 (muzzleX, muzzleY) 由离线烘焙按各等级贴图实测得到
+       （纹素坐标，相对贴图中心，烘焙时炮口朝右）。发射点不能写死：
+         发射点 = 塔位置 + 旋转矩阵 × 显示缩放 × 枪口双轴偏移
+       turret 随目标平滑旋转（见 update），目标移动时每帧取最新 rotation，
+       弹幕始终从【当前】旋转后的真实炮口射出。
+       k = turret.scaleX（显示高/纹理高 = 1/3，等比缩放）。 */
     if (this.isWater) {
-      const mdist = (window.__waterTowerMuzzle &&
-        window.__waterTowerMuzzle[this.level]) || 0;
-      const L = mdist * this.turret.scaleX;
+      const m = (window.__waterTowerMuzzle &&
+        window.__waterTowerMuzzle[this.level]) || { x: 0, y: 0 };
+      const mx = m.x || 0, my = m.y || 0;
+      const k = this.turret.scaleX;
       const c = Math.cos(this.turret.rotation), s = Math.sin(this.turret.rotation);
-      return { x: this.x + L * c, y: this.y + L * s };
+      return {
+        x: this.x + k * (mx * c - my * s),
+        y: this.y + k * (mx * s + my * c)
+      };
     }
     return { x: this.x, y: this.y };
   }

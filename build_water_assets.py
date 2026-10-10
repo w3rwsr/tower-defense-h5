@@ -32,14 +32,13 @@ TOWER_XRANGES = {
     2: (872, 1665),
     3: (1685, 2796),
 }
-TOWER_SS = 6                                   # 超采样（提升清晰度）
-TOWER_BASE = 48.0                              # 显示基准高度（× config.art.scale）
-TOWER_SCALE = {1: 0.88, 2: 1.0, 3: 1.12}       # 等级差异明显但不过大
+TOWER_SS = 3                                   # 超采样 = 显示尺寸整数倍率（3x，显示高 40/47/54 → 纹素 120/141/162，恰为 1/3 整数分缩放）
+TOWER_DISPLAY_H = {1: 40, 2: 47, 3: 54}        # 显示高度 px（与 config.towers.towerC.art.displayHeight 同步；一级<二级<三级）
 COMP_KEEP = 0.0025                             # 连通域保留阈值
-# 各等级炮口相对贴图中心的角度（度，数学坐标系：0=右，90=下，180=左，-90=上）。
-# 由原图目测定标：lv1 炮口左上、lv2 炮口右下、lv3 炮口左。
-# 旋转 -BARREL_ANGLE 度（PIL 逆时针为正）使炮口统一朝右。
-BARREL_ANGLE = {1: 138.0, 2: 52.0, 3: 176.0}
+# 炮口外圈（炮管端面）半径 ≈ 内部深色开口半径的倍数（三款实测 1.55~1.7）
+RING_RATIO = 1.6
+# 炮口端面前方再多保留的源图像素；超过此前沿平面的像素（水花水流）一律裁掉
+FRONT_CLIP = 0
 
 # ---------------- 水弹：程序生成（无原始素材） ----------------
 BULLET_SS = 3
@@ -147,117 +146,180 @@ def alpha_bbox(a):
     return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
 
 
-def find_nozzle(rgba):
-    """检测水枪炮口（炮管末端深色开口）的像素坐标。
-    策略：
-      1. 找到离质心最远的不透明点 → 炮管末端方向（炮管是最长的突出物）。
-      2. 找到所有深色圆形连通域（炮口开口、水箱球体都是深色圆）。
-      3. 选离"最远点"最近的深色圆 → 炮口开口（水箱球体在主体上，离末端远）。
-    """
+def _components(mask, min_pts=1):
+    """4-邻接连通域标记，返回 [(ys 数组, xs 数组), ...]，按面积降序。"""
     from collections import deque
+    h, w = mask.shape
+    seen = np.zeros_like(mask)
+    out = []
+    ys0, xs0 = np.where(mask)
+    for sy, sx in zip(ys0.tolist(), xs0.tolist()):
+        if seen[sy, sx]:
+            continue
+        q = deque([(sy, sx)])
+        seen[sy, sx] = True
+        pys, pxs = [], []
+        while q:
+            y, x = q.popleft()
+            pys.append(y); pxs.append(x)
+            for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                ny, nx = y + dy, x + dx
+                if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    q.append((ny, nx))
+        if len(pys) >= min_pts:
+            out.append((np.array(pys), np.array(pxs)))
+    out.sort(key=lambda c: len(c[0]), reverse=True)
+    return out
+
+
+def detect_bore(rgba, side):
+    """检测炮口【深色开口】：暗（rgb 均值<0.5）、近圆/椭圆（填充率≥0.35、
+    bbox 宽高比 0.45~2）、面积达标（≥总不透明像素 0.12%）的连通域。
+    源图三款水枪的炮口全部朝左 → side='left' 取最左候选（已用调试图确认：
+    其余深色圆为护圈内拨轮/握把铆钉，均在炮口右侧）；旋转后 side='right'
+    取最右候选。返回 (cx, cy, r)，r 为开口半径（bbox 四分之一边长均值）；
+    检测不到返回 None。"""
     alpha = rgba[..., 3]
     opaque = alpha * 255 >= ALPHA_CUT
-    if not opaque.any():
-        return rgba.shape[1] // 2, rgba.shape[0] // 2
-    ys, xs = np.where(opaque)
-    com = np.array([xs.mean(), ys.mean()])
-    pts = np.column_stack([xs, ys]).astype(float)
-    d = np.linalg.norm(pts - com, axis=1)
-    tip_idx = np.argmax(d)
-    tip = pts[tip_idx]   # 炮管末端轮廓点
-
-    # 找深色圆形连通域
-    rgb = rgba[..., :3].mean(axis=2)
-    dark_mask = opaque & (rgb < 0.4)
-    comps = []
-    if dark_mask.any():
-        h, w = dark_mask.shape
-        seen = np.zeros_like(dark_mask)
-        for sy, sx in zip(*np.where(dark_mask)):
-            if seen[sy, sx]:
-                continue
-            q = deque([(sy, sx)]); seen[sy, sx] = True
-            cpts = []
-            while q:
-                y, x = q.popleft(); cpts.append((y, x))
-                for dy, dx in ((1,0),(-1,0),(0,1),(0,-1)):
-                    ny, nx = y+dy, x+dx
-                    if 0<=ny<h and 0<=nx<w and dark_mask[ny,nx] and not seen[ny,nx]:
-                        seen[ny,nx]=True; q.append((ny,nx))
-            if len(cpts) < 15:
-                continue
-            cys = [p[0] for p in cpts]; cxs = [p[1] for p in cpts]
-            cy, cx = sum(cys)/len(cys), sum(cxs)/len(cpts)
-            bw = max(cxs)-min(cxs)+1; bh = max(cys)-min(cys)+1
-            circ = len(cpts) / (bw*bh)
-            comps.append((cx, cy, len(cpts), circ))
-    if comps:
-        # 炮口开口位于细长炮管的末端：选深色圆中【其方向上最靠近轮廓边界】的。
-        # 对每个深色圆，计算从质心到它的方向上的最远不透明点距离；
-        # 若深色圆距该边界 < 30% 半径，则它在末端（炮口）。
-        ys_arr, xs_arr = np.where(opaque)
-        pts_all = np.column_stack([xs_arr, ys_arr]).astype(float)
-        tip_candidates = []
-        for cx, cy, area, circ in comps:
-            dx, dy = cx - com[0], cy - com[1]
-            dlen = math.hypot(dx, dy)
-            if dlen < 1:
-                continue
-            ux, uy = dx / dlen, dy / dlen
-            # 该方向上最远的不透明点
-            proj = pts_all[:, 0] * ux + pts_all[:, 1] * uy
-            max_proj = proj.max()
-            my_proj = cx * ux + cy * uy
-            if (max_proj - my_proj) < max_proj * 0.35:  # 距边界 < 35% 半径
-                tip_candidates.append((cx, cy, dlen))
-        if tip_candidates:
-            best = max(tip_candidates, key=lambda c: c[2])
-            return (best[0], best[1])
-        # 回退：选最远的深色圆
-        best = max(comps, key=lambda c: math.hypot(c[0]-com[0], c[1]-com[1]))
-        return (best[0], best[1])
-    # 无深色圆：直接用末端点作为炮口
-    return (float(tip[0]), float(tip[1]))
+    total = int(opaque.sum())
+    mask = opaque & (rgba[..., :3].mean(axis=2) < 0.5)
+    cands = []
+    for pys, pxs in _components(mask):
+        n = len(pys)
+        if n < max(12, int(total * 0.0012)):
+            continue
+        x0, x1, y0, y1 = int(pxs.min()), int(pxs.max()), int(pys.min()), int(pys.max())
+        bw, bh = x1 - x0 + 1, y1 - y0 + 1
+        ar = bw / max(bh, 1)
+        if ar < 0.45 or ar > 2.0:
+            continue
+        if n / float(bw * bh) < 0.35:
+            continue
+        cands.append((pxs.mean(), pys.mean(), (bw + bh) * 0.25, n))
+    if not cands:
+        return None
+    cands.sort(key=lambda c: c[0], reverse=(side == 'right'))
+    cx, cy, r, _ = cands[0]
+    return float(cx), float(cy), float(r)
 
 
-def rotate_to_barrel_right(rgba, nozzle):
-    """将贴图旋转，使炮口指向正右方（角度 0）。
-    返回旋转后的 RGBA 数组与新的喷嘴坐标。
-    旋转方式：以贴图中心为轴，将 喷嘴→中心 方向转到 朝左（即炮口朝右）。"""
-    h, w = rgba.shape[:2]
-    cx, cy = w / 2.0, h / 2.0
-    nx, ny = nozzle
-    ang = math.atan2(ny - cy, nx - cx)        # 喷嘴相对中心的角度
-    # 要让喷嘴朝右（角度 0），需把整个贴图旋转 -ang
-    deg = -math.degrees(ang)
-    img = Image.fromarray((np.round(rgba * 255)).astype(np.uint8), 'RGBA')
-    rot = img.rotate(deg, resample=Image.BICUBIC, expand=True)
-    ra = np.asarray(rot).astype(np.float32) / 255.0
-    # 计算旋转后喷嘴的新坐标
-    # 旋转矩阵（PIL rotate 逆时针为正，角度 deg）：
-    rad = math.radians(deg)
-    cos_a, sin_a = math.cos(rad), math.sin(rad)
-    # PIL rotate 以图像中心为轴；expand=True 后画布中心偏移
-    nw, nh = rot.size
-    # 旧中心相对旧画布左上角 (cx, cy)，新画布中心 (nw/2, nh/2)
-    # 点 P 旋转后：P' = center + R*(P - center)，其中 R 为逆时针旋转矩阵
-    rx = cx + (nx - cx) * cos_a - (ny - cy) * sin_a
-    ry = cy + (nx - cx) * sin_a + (ny - cy) * cos_a
-    # expand=True 时画布扩展，新画布左上角相对旧画布的偏移
-    # PIL expand 模式下，旋转后的图像被平移到新画布左上角
-    # 偏移量 = (nw/2 - cx, nh/2 - cy) 大致，但需用包围盒精确计算
-    # 更稳妥：直接在旋转后的图上重新检测喷嘴
-    new_nozzle = find_nozzle(ra)
-    return ra, new_nozzle
+def erase_front_splash(rgba, bore):
+    """几何清除炮口环【外侧】的水花（应对水流与炮口环相连、无法按连通域
+    分离的情况，如三级）。炮口朝右，仅处理开口中心前 1.0r 到环前沿区域：
+      · 保留：炮口环椭圆面（长短轴均 1.6r）+ 环后方 1.7r 高的炮管条带；
+      · 椭圆外（环上/下方及 2~5 点钟方向贴边的飞溅水滴）一律透明；
+      · 炮口环前沿（1.6r+FRONT_CLIP）以右整列硬裁。
+    环后 2r 内用炮管条带保护套筒（条带半高 1.55r，套筒最粗约 1.35r）；
+    扳机护圈等枪身部件在 2r 以外，不受影响；对一/二级无副作用。"""
+    alpha = rgba[..., 3]
+    H, W = alpha.shape
+    yy, xx = np.mgrid[0:H, 0:W]
+    cx, cy, r = bore
+    rr = RING_RATIO * r
+    x0 = cx - 2.0 * r
+    x1 = cx + rr + FRONT_CLIP
+    region = (xx >= x0) & (xx < x1)
+    ring_face = (((xx - cx) / rr) ** 2 + ((yy - cy) / rr) ** 2) <= 1.0
+    tube = (xx < cx - 0.9 * r) & (np.abs(yy - cy) <= 1.55 * r)
+    alpha[region & ~(ring_face | tube)] = 0.0
+    front_x = int(round(x1))
+    if 0 < front_x < W:
+        alpha[:, front_x:] = 0.0
+
+
+def repair_nozzle_rim(rgba, bore):
+    """修复与炮口环【重叠】的水花（如三级 3~5 点钟方向贴在白环沿上的
+    水团，几何遮罩无法分离）。仅在确实检测到环外亮色水花时执行，一/二级
+    无此类水花会原样返回：
+      1) 在环口前侧小盒内，以椭圆环外的高亮像素（mean>0.65）为种子，
+         4-邻接泛洪过高亮像素 → 水团掩膜（被炮口深色描边/暗带挡住，
+         不会扩散到枪身；白环沿虽亮但重绘结果仍是白色环沿）；
+      2) 水团在椭圆外的部分透明，椭圆内的部分按炮口环径向结构重绘：
+         深色开口 / 青色环身 / 白色环沿。"""
+    from collections import deque
+    H, W = rgba.shape[:2]
+    cx, cy, r = bore
+    rr = RING_RATIO * r
+    xL, xR = int(cx + 1.25 * r), int(cx + rr + 0.6 * r)
+    yL, yR = int(cy - 0.6 * r), int(cy + 0.6 * r)
+    xL, xR = max(0, xL), min(W, xR)
+    yL, yR = max(0, yL), min(H, yR)
+    if xR <= xL or yR <= yL:
+        return
+    rgbm = rgba[..., :3].mean(axis=2)
+    alpha = rgba[..., 3]
+    op = alpha * 255 >= ALPHA_CUT
+    yy, xx = np.mgrid[0:H, 0:W]
+    ell = (((xx - cx) / rr) ** 2 + ((yy - cy) / rr) ** 2)
+    seeds = op & (rgbm > 0.65) & (ell > 1.0)
+    seeds[:yL, :] = False; seeds[yR:, :] = False
+    seeds[:, :xL] = False; seeds[:, xR:] = False
+    if not seeds.any():
+        return
+    blob = np.zeros_like(op)
+    q = deque([(int(y), int(x)) for y, x in zip(*np.where(seeds))])
+    for y, x in q:
+        blob[y, x] = True
+    while q:
+        y, x = q.popleft()
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            ny, nx = y + dy, x + dx
+            if not (yL <= ny < yR and xL <= nx < xR) or blob[ny, nx] or not op[ny, nx]:
+                continue
+            if rgbm[ny, nx] > 0.65:
+                blob[ny, nx] = True
+                q.append((ny, nx))
+    # 环外透明
+    alpha[blob & (ell > 1.0)] = 0.0
+    # 环口前侧盒内、1.55r~1.6r 贴边环带上的暗/中色残根（水花根部，
+    # 亮度低于泛洪阈值）也清除；白色环沿很亮（>0.72）不会被误删
+    rim_band = (ell > (1.55 / RING_RATIO) ** 2) & (ell <= 1.0) & (rgbm < 0.72)
+    rim_band[:yL, :] = False; rim_band[yR:, :] = False
+    rim_band[:, :xL] = False; rim_band[:, xR:] = False
+    alpha[rim_band] = 0.0
+    # 环内按径向环结构重绘（仅覆盖水团像素）
+    inside = blob & (ell <= 1.0)
+    rgba[inside & (ell <= 0.70 ** 2), 0:3] = (0.06, 0.18, 0.32)
+    rgba[inside & (ell > 0.70 ** 2) & (ell <= 0.92 ** 2), 0:3] = (0.22, 0.62, 0.82)
+    rgba[inside & (ell > 0.92 ** 2), 0:3] = (0.93, 0.99, 1.0)
+    alpha[inside] = 1.0
+
+
+def remove_splash(rgba, bore, where):
+    """删除炮口处的水花（亮色水滴/水流，与枪体断开的小连通域）。
+    where='pre' （源图，炮口朝左）：小分量质心位于炮口平面
+       （x < 开口中心 + 0.3r）即视为前方水花删除；
+    where='post'（炮口已朝右）：面积 < 主体 4% 且贴在炮口前半球
+       （dx > -r，且距开口中心 3.2r × 2.4r 范围内）的分量删除。
+    面积 ≥ 主体 4% 的分量绝不删除（保护水箱/把手等大部件）。"""
+    alpha = rgba[..., 3]
+    opaque = alpha * 255 >= ALPHA_CUT
+    comps = _components(opaque)
+    if not comps:
+        return
+    main_n = len(comps[0][0])
+    bcx, bcy, br = bore
+    for pys, pxs in comps[1:]:
+        if len(pys) >= main_n * 0.04:
+            continue
+        cx, cy = float(pxs.mean()), float(pys.mean())
+        if where == 'pre':
+            kill = cx < bcx + br * 0.3
+        else:
+            kill = (cx - bcx > -br) and (abs(cx - bcx) < 3.2 * br) and (abs(cy - bcy) < 2.4 * br)
+        if kill:
+            alpha[pys, pxs] = 0.0
 
 
 def save_tower_normalized(rgba, nozzle, lv, out_png):
-    """塔：裁 alpha 包围盒 → 按显示高度×SS 归一化（保长宽比）。
-    返回 (size, muzzle_dist)，其中 muzzle_dist 为炮口到贴图中心的水平距离
-    （像素，归一化后的纹素坐标），供游戏内计算旋转后的枪口世界坐标。"""
+    """塔：裁 alpha 包围盒 → 按显示高度×SS 归一化（保长宽比，仅一次 LANCZOS
+    缩放，无二次缩放）。nozzle = 炮口端面中心点（旋转前画布坐标，炮口朝右）。
+    返回 (size, (muzzleDx, muzzleDy))：炮口相对【贴图中心】的纹素偏移，
+    供游戏内 getMuzzlePos 按旋转角换算枪口世界坐标。"""
     x0, y0, x1, y1 = alpha_bbox(rgba[..., 3])
     crop = rgba[y0:y1, x0:x1, :]
-    target_h = int(round(TOWER_BASE * TOWER_SCALE[lv] * TOWER_SS))
+    target_h = TOWER_DISPLAY_H[lv] * TOWER_SS
     s = target_h / crop.shape[0]
     nw = max(1, int(round(crop.shape[1] * s)))
     img = Image.fromarray((np.round(crop * 255)).astype(np.uint8), 'RGBA')
@@ -265,55 +327,12 @@ def save_tower_normalized(rgba, nozzle, lv, out_png):
     # 轻微 alpha 羽化仅 0.4px（去锯齿但不糊边），之前 0.8px 过强导致发虚
     img.putalpha(img.getchannel('A').filter(ImageFilter.GaussianBlur(0.4)))
     img.save(out_png, optimize=True)
-    # 归一化后喷嘴坐标
+    # 归一化后炮口相对贴图中心的双轴偏移（纹素坐标）
     ncx = (nozzle[0] - x0) * s
     ncy = (nozzle[1] - y0) * s
-    # 炮口到贴图中心的水平距离（炮口已朝右，故 y 偏差忽略，取水平分量）
-    muzzle_dist = ncx - nw / 2.0
-    return (nw, target_h), muzzle_dist
-
-
-def find_nozzle_right(rgba):
-    """炮口已朝右后，检测右侧炮口深色开口的 x 坐标（返回 (nx, ny)）。
-    在右半部分找离右边缘最近的深色圆形连通域。"""
-    from collections import deque
-    rgb = rgba[..., :3].mean(axis=2)
-    alpha = rgba[..., 3]
-    mask = (alpha * 255 >= ALPHA_CUT) & (rgb < 0.4)
-    h, w = rgba.shape[:2]
-    if not mask.any():
-        # 回退：右半部分最右的不透明点
-        ys, xs = np.where(alpha * 255 >= ALPHA_CUT)
-        right = xs >= w / 2
-        if right.any():
-            idx = np.argmax(xs[right])
-            return float(xs[right][idx]), float(ys[right][idx])
-        return w / 2, h / 2
-    seen = np.zeros_like(mask)
-    comps = []
-    for sy, sx in zip(*np.where(mask)):
-        if seen[sy, sx]:
-            continue
-        q = deque([(sy, sx)]); seen[sy, sx] = True
-        cpts = []
-        while q:
-            y, x = q.popleft(); cpts.append((y, x))
-            for dy, dx in ((1,0),(-1,0),(0,1),(0,-1)):
-                ny, nx = y+dy, x+dx
-                if 0<=ny<h and 0<=nx<w and mask[ny,nx] and not seen[ny,nx]:
-                    seen[ny,nx]=True; q.append((ny,nx))
-        if len(cpts) < 10:
-            continue
-        cys = [p[0] for p in cpts]; cxs = [p[1] for p in cpts]
-        cy, cx = sum(cys)/len(cys), sum(cxs)/len(cpts)
-        comps.append((cx, cy, len(cpts)))
-    if comps:
-        # 选 x 最大的深色圆（最靠右 = 炮口）
-        best = max(comps, key=lambda c: c[0])
-        return (best[0], best[1])
-    ys, xs = np.where(alpha * 255 >= ALPHA_CUT)
-    idx = np.argmax(xs)
-    return float(xs[idx]), float(ys[idx])
+    muzzle_dx = ncx - nw / 2.0
+    muzzle_dy = ncy - target_h / 2.0
+    return (nw, target_h), (muzzle_dx, muzzle_dy)
 
 
 def rotate_by_angle(rgba, deg):
@@ -321,6 +340,78 @@ def rotate_by_angle(rgba, deg):
     img = Image.fromarray((np.round(rgba * 255)).astype(np.uint8), 'RGBA')
     rot = img.rotate(deg, resample=Image.BICUBIC, expand=True)
     return np.asarray(rot).astype(np.float32) / 255.0
+
+
+def _tube_tilt(ra):
+    """炮口朝右后，检测炮口并最小二乘拟合其后方炮管中线的倾角。
+    取炮口环后 1.2r~4.2r 的水平条带，逐列取不透明像素中点拟合直线。
+    返回 (倾角度数, 炮口(cx,cy,r), 有效列数)；无法判定返回 None。"""
+    H, W = ra.shape[:2]
+    bore = detect_bore(ra, 'right')
+    if not bore or bore[0] < W * 0.55:
+        return None
+    cx, cy, r = bore
+    op = ra[..., 3] * 255 >= ALPHA_CUT
+    xs, mids = [], []
+    xlo, xhi = int(cx - 4.2 * r), int(cx - 1.2 * r)
+    for x in range(max(0, xlo), min(W, xhi)):
+        col = np.where(op[:, x])[0]
+        col = col[(col > cy - 2.3 * r) & (col < cy + 2.3 * r)]
+        if len(col) >= r * 0.6:
+            xs.append(x)
+            mids.append((float(col.min()) + float(col.max())) * 0.5)
+    need = max(6, int((xhi - xlo) * 0.5))
+    if len(xs) < need:
+        return None
+    A = np.vstack([np.asarray(xs), np.ones(len(xs))]).T
+    slope = float(np.linalg.lstsq(A, np.asarray(mids), rcond=None)[0][0])
+    return math.degrees(math.atan(slope)), bore, len(xs)
+
+
+def _far_centroid(rgba, bore):
+    """距炮口 > 2.5r 的不透明像素质心（枪身/水箱/握把总质量），
+    作为炮轴的粗估后方参考点。"""
+    op = rgba[..., 3] * 255 >= ALPHA_CUT
+    ys, xs = np.where(op)
+    d = np.hypot(xs - bore[0], ys - bore[1])
+    sel = d > bore[2] * 2.5
+    if sel.sum() < 100:
+        return xs.mean(), ys.mean()
+    return float(xs[sel].mean()), float(ys[sel].mean())
+
+
+def align_barrel(rgba, bore0):
+    """自动旋转使炮管水平朝右。
+    1) 粗估炮轴角 = 炮口→远身质心方向（PIL 旋转符号两种假设都纳入搜索）；
+    2) 在 ±14° 网格内试转，用炮管中线拟合倾角 |tilt| 择优；
+    3) ±2° 细搜（0.5° 步进）。
+    最终只按总角度旋转【一次】，避免二次 BICUBIC 软化。
+    返回 (总角度, 旋转后 RGBA, 炮口)。"""
+    fx, fy = _far_centroid(rgba, bore0)
+    axis = math.degrees(math.atan2(bore0[1] - fy, bore0[0] - fx))
+
+    def evaluate(total):
+        ra = rotate_by_angle(rgba, total)
+        met = _tube_tilt(ra)
+        return ra, met
+
+    best = None  # (|tilt|, total, ra, bore, cols)
+    for hyp in (axis, -axis):
+        for d in range(-12, 13, 4):
+            ra, met = evaluate(hyp + d)
+            if met and (best is None or abs(met[0]) < abs(best[0])):
+                best = (met[0], hyp + d, ra, met[1], met[2])
+    if best is None:
+        ra = rotate_by_angle(rgba, 180.0)
+        bore = detect_bore(ra, 'right') or (ra.shape[1] / 2, ra.shape[0] / 2, 10)
+        return 180.0, ra, bore
+    coarse = best[1]
+    for d10 in range(-40, 41, 5):
+        total = coarse + d10 / 10.0
+        ra, met = evaluate(total)
+        if met and abs(met[0]) < abs(best[0]):
+            best = (met[0], total, ra, met[1], met[2])
+    return best[1], best[2], best[3]
 
 
 def build_towers():
@@ -335,20 +426,39 @@ def build_towers():
         c = frame[:, max(0, bx0 - pad):min(w, bx1 + pad), :]
         rgba = white_key(c)
         rgba[..., 3] = components_keep(rgba[..., 3])
-        # 按定标角度旋转，使炮口统一朝右（PIL 逆时针为正，故取负角）
-        rgba = rotate_by_angle(rgba, -BARREL_ANGLE[lv])
+        # 1) 源图炮口全部朝左：检测深色开口，先删枪口前方水花，再自动炮轴对齐
+        bore0 = detect_bore(rgba, 'left')
+        if bore0 is None:
+            print('  lv%d 警告：未检测到炮口开口，保持原朝向' % lv)
+            deg = 0.0
+            rgba = rotate_by_angle(rgba, deg)
+            bore = detect_bore(rgba, 'right')
+        else:
+            remove_splash(rgba, bore0, 'pre')
+            # 2) 远身质心粗估 + 炮管中线拟合网格寻优，单次旋转，炮口精确朝右
+            deg, rgba, bore = align_barrel(rgba, bore0)
         rgba[..., 3] = components_keep(rgba[..., 3])   # 旋转后边缘重新清杂
-        # 炮口已在右侧，检测右侧深色开口
-        nozzle = find_nozzle_right(rgba)
+        # 3) 清残余水花：先删断开的小水滴分量，再几何清除环外侧飞溅
+        #    （三级水流与环相连，分量法分离不了）+ 硬裁炮口端面外水流
+        if bore is not None:
+            remove_splash(rgba, bore, 'post')
+            # 先修复与环沿重叠的水花（需借环外亮色像素做种子，必须在几何清除前）
+            repair_nozzle_rim(rgba, bore)
+            erase_front_splash(rgba, bore)
+            # 炮口发射点 = 外圈端面中心（非开口内部），出弹恰在管口
+            nozzle = (bore[0] + RING_RATIO * bore[2], bore[1])
+        else:
+            ys, xs = np.where(rgba[..., 3] * 255 >= ALPHA_CUT)
+            nozzle = (float(xs.max()), float(ys[np.argmax(xs)]))
         p = os.path.join(ASSETS, 'water_tower_lv%d.png' % lv)
-        size, mdist = save_tower_normalized(rgba, nozzle, lv, p)
+        size, (mdx, mdy) = save_tower_normalized(rgba, nozzle, lv, p)
         with open(p, 'rb') as f:
             arts[lv] = base64.b64encode(f.read()).decode('ascii')
-        muzzles[lv] = round(mdist, 2)
-        print('  lv%d -> %s %dx%d  muzzle_dist=%.1fpx' %
-              (lv, os.path.basename(p), size[0], size[1], mdist))
+        muzzles[lv] = (round(mdx, 2), round(mdy, 2))
+        print('  lv%d -> %s %dx%d  muzzle=(%.1f, %.1f)px  rot=%.1f' %
+              (lv, os.path.basename(p), size[0], size[1], mdx, mdy, deg))
     write_tower_js('WaterTowerArtData.js', 'WATER_TOWER_ART', 'water_tower_lv', arts, muzzles,
-                   '水元素塔美术贴图（白幕三连图裁切；炮口统一朝右；含炮口偏移 muzzleDist）')
+                   '水元素塔美术贴图（白幕三连图裁切；炮口自动检测并统一朝右；水花已剔除；muzzleX/Y 为炮口端面相对贴图中心的纹素偏移）')
 
 
 # ---------------- 水弹贴图：程序生成（水滴/水柱/水球本体，无拖尾） ----------------
@@ -494,14 +604,14 @@ def build_bullets():
 
 
 def write_tower_js(fname, var, tex_prefix, arts, muzzles, desc):
-    """水塔数据：{level: {data: dataURI, muzzleDist: 炮口到中心水平像素距离}}。"""
-    lines = ["  %d: { data: 'data:image/png;base64,%s', muzzleDist: %s }" %
-             (lv, b64, muzzles[lv]) for lv, b64 in arts.items()]
+    """水塔数据：{level: {data, muzzleX, muzzleY}}（炮口端面相对贴图中心纹素偏移）。"""
+    lines = ["  %d: { data: 'data:image/png;base64,%s', muzzleX: %s, muzzleY: %s }" %
+             (lv, b64, muzzles[lv][0], muzzles[lv][1]) for lv, b64 in arts.items()]
     hdr = ('/* ============================================================\n'
            ' * %s —— %s\n'
            ' * 由 build_water_assets.py 自动生成，请勿手改。\n'
-           ' * 纹理键 %s1/2/3；炮口统一朝右；muzzleDist 为炮口到贴图中心的水平\n'
-           ' * 纹素距离，游戏内乘以显示缩放后按旋转角换算枪口世界坐标。\n'
+           ' * 纹理键 %s1/2/3；炮口统一朝右；muzzleX/muzzleY 为炮口端面相对\n'
+           ' * 贴图中心的纹素偏移，游戏内乘显示缩放后按旋转角换算枪口世界坐标。\n'
            ' * ============================================================ */\n') % (
         fname, desc, tex_prefix)
     p = os.path.join(JS, fname)

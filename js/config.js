@@ -464,12 +464,12 @@ window.TD_CONFIG = {
       "darkColor": 0x1a9e8e,
       "targeting": "furthest",
       /* 水元素塔美术贴图（assets/water_towers.png 离线裁切，见 build_water_assets.py；
-         纹理键 water_tower_lv1/2/3）。贴图按高度归一化烘焙（纹素高 =
-         baseHeight×superSample=192px），运行时按高度定标：
-         显示高 = baseHeight × scale[等级]（42.2 / 48 / 53.8px），宽按纹理原比例自适应。 */
+         纹理键 water_tower_lv1/2/3）。贴图按显示尺寸 3 倍整数倍率烘焙
+         （纹素高 = 40/47/54 × 3 = 120/141/162px，显示恰为纹理的 1/3，
+         无非整数缩放、无二次缩放）。三级显示高度直接按等级配置（JSON 驱动，
+         便于调整），一级最小 < 二级中等 < 三级最大；宽按纹理原比例自适应。 */
       "art": {
-        "baseHeight": 48,
-        "scale": { "1": 0.88, "2": 1.0, "3": 1.12 }
+        "displayHeight": { "1": 40, "2": 47, "3": 54 }
       },
       "stats": {
         "damage": 7,
