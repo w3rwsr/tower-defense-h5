@@ -379,6 +379,81 @@ class BootScene extends Phaser.Scene {
       }));
     }
 
+    /* ---------- 水元素塔三级贴图（WaterTowerArtData.js，三连图离线裁切） ----------
+       data URI 同源干净，file:// 也可上传 WebGL。三张全部就绪才置
+       window.__waterTowerArt，Tower 据此给 towerC 换水塔贴图；缺失时 Tower
+       回退到程序化炮头 turret_towerC，绝不黑屏。并入 artJobs 等待链。 */
+    const hasWaterTowerData = (typeof WATER_TOWER_ART !== 'undefined') && WATER_TOWER_ART;
+    if (hasWaterTowerData) {
+      if (!artJobs) artJobs = [];
+      const waterTowerJobs = [1, 2, 3].map((lv) => new Promise((resolve) => {
+        const durl = WATER_TOWER_ART[lv];
+        if (!durl) { resolve(false); return; }
+        const key = 'water_tower_lv' + lv;
+        const img = new Image();
+        img.onload = () => {
+          try {
+            if (this.textures.exists(key)) this.textures.remove(key);
+            this.textures.addImage(key, img);
+            resolve(true);
+          } catch (e) { resolve(false); }
+        };
+        img.onerror = () => resolve(false);
+        img.src = durl;
+      }));
+      artJobs.push(Promise.all(waterTowerJobs).then((oks) => {
+        if (oks.every((v) => v)) window.__waterTowerArt = true;
+        return true;
+      }));
+    }
+
+    /* ---------- 水弹三级贴图（WaterBulletData.js，程序生成水珠/水柱/水球本体） ----------
+       贴图只含本体（拖尾/水雾已剔除），拖尾由 Projectile 的水蓝粒子 +
+       water_ribbon 光带代码生成。三张全部就绪才置 window.__waterBulletArt；
+       缺失时水弹回退程序圆弹。并入等待链。 */
+    const hasWaterBulletData = (typeof WATER_BULLET_DATA !== 'undefined') && WATER_BULLET_DATA;
+    if (hasWaterBulletData) {
+      if (!artJobs) artJobs = [];
+      const waterBulletJobs = [1, 2, 3].map((lv) => new Promise((resolve) => {
+        const durl = WATER_BULLET_DATA[lv];
+        if (!durl) { resolve(false); return; }
+        const key = 'proj_water_lv' + lv;
+        const img = new Image();
+        img.onload = () => {
+          try {
+            if (this.textures.exists(key)) this.textures.remove(key);
+            this.textures.addImage(key, img);
+            resolve(true);
+          } catch (e) { resolve(false); }
+        };
+        img.onerror = () => resolve(false);
+        img.src = durl;
+      }));
+      artJobs.push(Promise.all(waterBulletJobs).then((oks) => {
+        if (oks.every((v) => v)) window.__waterBulletArt = true;
+        return true;
+      }));
+    }
+
+    /* ---------- 水弹粒子与渐变光带（代码生成拖尾用） ----------
+       water_dot：圆形水蓝粒子（外水蓝 0x7fc8ff、内白），运行时可再 tint；
+       water_ribbon：横向 40×8 渐变光带（右侧亮、向左渐隐），origin(1,0.5)
+       钉在弹体中心向弹尾延伸。 */
+    this.makeTexture('water_dot', 8, 8, (g) => {
+      g.fillStyle(0x7fc8ff, 1); g.fillCircle(4, 4, 3.4);
+      g.fillStyle(0xffffff, 1); g.fillCircle(4, 4, 1.8);
+    });
+    this.makeTexture('water_ribbon', 40, 8, (g) => {
+      const steps = 16;
+      for (let i = 0; i < steps; i++) {
+        const t = i / steps;
+        const a = Math.pow(t, 1.6) * 0.5;
+        const w = 1 + t * 3.0;
+        g.fillStyle(0xbfeaff, a);
+        g.fillRect(i * (40 / steps), 4 - w / 2, 40 / steps + 0.6, w);
+      }
+    });
+
     /* 内嵌贴图就绪后再进选关（小图解码通常几十 ms；超时兜底绝不阻断启动） */
     if (artJobs) {
       let started = false;

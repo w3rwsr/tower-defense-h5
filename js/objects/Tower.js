@@ -26,6 +26,11 @@ class Tower extends Phaser.GameObjects.Container {
        贴图缺失时回退程序化炮头 turret_towerB。 */
     this.isIce = (typeKey === 'towerB') &&
       window.__iceTowerArt === true && scene.textures.exists('ice_tower_lv1');
+    /* 水元素塔（towerC）：水枪塔美术贴图（water_tower_lvN，按等级切换）。
+       水枪为竖立造型，不随目标旋转（静态贴图层），索敌/攻击逻辑不变；
+       贴图缺失时回退程序化炮头 turret_towerC。 */
+    this.isWater = (typeKey === 'towerC') &&
+      window.__waterTowerArt === true && scene.textures.exists('water_tower_lv1');
     if (this.isFire) {
       this.head = scene.add.container(0, -6);
       this.turret = scene.add.image(0, 0, this._fireTexKey());
@@ -36,6 +41,11 @@ class Tower extends Phaser.GameObjects.Container {
       this.head = null;
       this.turret = scene.add.image(0, -6, this._iceTexKey());
       this._iceApplyArt();
+      this.add(this.turret);
+    } else if (this.isWater) {
+      this.head = null;
+      this.turret = scene.add.image(0, -6, this._waterTexKey());
+      this._waterApplyArt();
       this.add(this.turret);
     } else {
       this.head = null;
@@ -96,8 +106,8 @@ class Tower extends Phaser.GameObjects.Container {
     this.behavior = new BehaviorClass(this, this.cfg);
     this.aimAngle = -Math.PI / 2;          // 初始朝上
     this.hasTarget = false;                // 火塔：无目标时火焰自然竖立
-    // 火塔/冰塔贴图不随目标旋转；其他塔炮口即时指向
-    if (!this.isFire && !this.isIce) this.turret.rotation = this.aimAngle;
+    // 火塔/冰塔/水塔贴图不随目标旋转；其他塔炮口即时指向
+    if (!this.isFire && !this.isIce && !this.isWater) this.turret.rotation = this.aimAngle;
   }
 
   /* 冰塔当前等级的美术贴图 key（缺失时逐级回退，最终回退程序炮头） */
@@ -113,6 +123,28 @@ class Tower extends Phaser.GameObjects.Container {
      （0.9/1.0/1.1 → 43.2/48/52.8px），宽按纹理原始宽高比自适应 */
   _iceApplyArt() {
     this.turret.setTexture(this._iceTexKey());
+    const art = (this.cfg && this.cfg.art) || { baseHeight: 48, scale: {} };
+    const lvScale = (art.scale && art.scale[this.level] != null)
+      ? art.scale[this.level] : 1;
+    const h = (art.baseHeight || 48) * lvScale;
+    const fr = this.turret.frame;
+    const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
+    this.turret.setDisplaySize(h * aspect, h);
+  }
+
+  /* 水塔当前等级的美术贴图 key（缺失时逐级回退，最终回退程序炮头） */
+  _waterTexKey() {
+    for (let lv = Math.min(this.level, 3); lv >= 1; lv--) {
+      const k = 'water_tower_lv' + lv;
+      if (this.scene.textures.exists(k)) return k;
+    }
+    return 'turret_towerC';
+  }
+
+  /* 水塔显示定标：显示高 = config towerC.art.baseHeight × scale[等级]
+     （0.88/1.0/1.12 → 42.2/48/53.8px），宽按纹理原始宽高比自适应 */
+  _waterApplyArt() {
+    this.turret.setTexture(this._waterTexKey());
     const art = (this.cfg && this.cfg.art) || { baseHeight: 48, scale: {} };
     const lvScale = (art.scale && art.scale[this.level] != null)
       ? art.scale[this.level] : 1;
@@ -301,6 +333,9 @@ class Tower extends Phaser.GameObjects.Container {
     /* 冰塔：升级同步切换冰晶贴图与显示尺寸（冰弹贴图由发射时等级决定，
        Projectile 读 sourceTower.level 自动对应，无需此处处理） */
     if (this.isIce) this._iceApplyArt();
+    /* 水塔：升级同步切换水枪贴图与显示尺寸（水弹贴图由发射时等级决定，
+       Projectile 读 sourceTower.level 自动对应，无需此处处理） */
+    if (this.isWater) this._waterApplyArt();
     // 升级小动画
     this.scene.tweens.add({ targets: this, scale: 1.18, duration: 110, yoyo: true });
     return cost;
@@ -337,7 +372,7 @@ class Tower extends Phaser.GameObjects.Container {
     } else {
       this.hasTarget = false;
     }
-    if (!this.isFire && !this.isIce) this.turret.rotation = this.aimAngle;
+    if (!this.isFire && !this.isIce && !this.isWater) this.turret.rotation = this.aimAngle;
   }
 
   update(dt, ctx) {

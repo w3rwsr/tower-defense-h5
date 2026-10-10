@@ -132,6 +132,59 @@ class Projectile extends Phaser.GameObjects.Image {
       }
     }
 
+    /* 水元素塔（towerC）：按塔等级换水弹贴图（proj_water_lvN）。
+       离线贴图只含水珠/水柱/水球本体，拖尾完全由代码生成——水蓝粒子
+       向后飘散 + 一条青蓝渐变光带，强度随等级递增，参数全部读 config
+       towerC.projectile.waterBullet（JSON 驱动）。水弹近似径向对称，
+       不朝向目标，改为持续轻微自转增加动感。 */
+    this.isWater = false;
+    this.waterSpin = 0;
+    const waterSrcLv = sourceTower && sourceTower.isWater ? sourceTower.level : 0;
+    if (waterSrcLv >= 1) {
+      const lv = Math.min(waterSrcLv, 3);
+      const texKey = 'proj_water_lv' + lv;
+      if (window.__waterBulletArt === true && scene.textures.exists(texKey)) {
+        const wb = pCfg.waterBullet ||
+          (((typeof TD_CONFIG !== 'undefined') && TD_CONFIG.towers.towerC.projectile.waterBullet) || null);
+        if (wb) {
+          this.isWater = true;
+          this.setTexture(texKey);
+          /* 最大边等比烘焙（纹素 = bodyDisplay×superSample=54px）：
+             setScale = 等级系数 / superSample → 显示 ~16.6/18/19.4px */
+          const lvScale = (wb.scale && wb.scale[lv] != null) ? wb.scale[lv] : 1;
+          this.setScale(lvScale / (wb.superSample || 3));
+          this.waterSpin = (wb.spin && wb.spin[lv] != null) ? wb.spin[lv] : 0;
+
+          const headDeg = target
+            ? Phaser.Math.RadToDeg(Math.atan2(target.y - y, target.x - x)) : 0;
+          /* 水蓝粒子：follow 本弹发射，speed 沿飞行反方向飘散 */
+          const t = (wb.trail && wb.trail[lv]) || null;
+          if (t) {
+            const spread = t.angleSpread || 0;
+            this._trail = scene.add.particles(0, 0, 'water_dot', {
+              speed: { min: (t.speed || 0) * 0.6, max: t.speed || 0 },
+              angle: { min: headDeg + 180 - spread / 2, max: headDeg + 180 + spread / 2 },
+              scale: { start: t.scale, end: 0 },
+              alpha: { start: t.alpha, end: 0 },
+              tint: t.tint, lifespan: t.lifespan,
+              frequency: t.frequency, quantity: t.quantity || 1,
+              blendMode: 'ADD', follow: this
+            }).setDepth(39);
+          }
+          /* 渐变光带：右端钉在弹心、沿弹尾延伸，随飞行方向偏转 */
+          const rb = (wb.ribbon && wb.ribbon[lv]) || null;
+          if (rb) {
+            this._ribbon = scene.add.image(x, y, 'water_ribbon')
+              .setOrigin(1, 0.5)
+              .setScale((rb.length || 16) / 40, (rb.thickness || 3) / 8)
+              .setAlpha(rb.alpha != null ? rb.alpha : 0.3)
+              .setBlendMode(Phaser.BlendModes.ADD)
+              .setDepth(39);
+          }
+        }
+      }
+    }
+
     // 落点（目标活着则每帧刷新）
     this.tx = target.x;
     this.ty = target.y;
@@ -162,9 +215,9 @@ class Projectile extends Phaser.GameObjects.Image {
 
     this.setPosition(this.x + (dx / dist) * step, this.y + (dy / dist) * step);
     /* 风刃（spin>0）持续旋转出旋风效果；火焰弹幕沿飞行方向朝向目标（贴图尖端朝右）；
-       冰雪花不朝向目标，持续轻微自转，并同步光带朝向与粒子飘散方向 */
-    if (this.isIce) {
-      this.rotation += this.iceSpin * dt;
+       冰雪花 / 水弹不朝向目标，持续轻微自转，并同步光带朝向与粒子飘散方向 */
+    if (this.isIce || this.isWater) {
+      this.rotation += (this.isIce ? this.iceSpin : this.waterSpin) * dt;
       const head = Math.atan2(dy, dx);
       if (this._ribbon) {
         this._ribbon.setPosition(this.x, this.y);
@@ -174,7 +227,7 @@ class Projectile extends Phaser.GameObjects.Image {
          setAngle 的 step 参数按 value±step/2 随机，失败不影响主流程 */
       if (this._trail && typeof this._trail.setAngle === 'function') {
         try {
-          const tc = this.pCfg.iceBullet;
+          const tc = this.isIce ? this.pCfg.iceBullet : this.pCfg.waterBullet;
           const lvt = tc && tc.trail && tc.trail[Math.min((this.sourceTower && this.sourceTower.level) || 1, 3)];
           const spread = lvt ? (lvt.angleSpread || 0) : 0;
           this._trail.setAngle(Phaser.Math.RadToDeg(head) + 180, spread);

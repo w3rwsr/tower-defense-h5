@@ -460,9 +460,17 @@ window.TD_CONFIG = {
       "name": "塔C",
       "desc": "攻速快·伤害低",
       "cost": 80,
-      "color": 0xffb43b,
-      "darkColor": 0xd98a1c,
+      "color": 0x2fd6c4,
+      "darkColor": 0x1a9e8e,
       "targeting": "furthest",
+      /* 水元素塔美术贴图（assets/water_towers.png 离线裁切，见 build_water_assets.py；
+         纹理键 water_tower_lv1/2/3）。贴图按高度归一化烘焙（纹素高 =
+         baseHeight×superSample=192px），运行时按高度定标：
+         显示高 = baseHeight × scale[等级]（42.2 / 48 / 53.8px），宽按纹理原比例自适应。 */
+      "art": {
+        "baseHeight": 48,
+        "scale": { "1": 0.88, "2": 1.0, "3": 1.12 }
+      },
       "stats": {
         "damage": 7,
         "range": 125,
@@ -471,10 +479,51 @@ window.TD_CONFIG = {
       "projectile": {
         "speed": 560,
         "radius": 6,
-        "color": 0xffe2a3,
+        "color": 0x4a90e2,
         "element": "water",       // 水元素印记（纯视觉标记，伤害不变；供风元素塔扩散）
         "elementDuration": 4,
-        "effect": { "type": "damage", "value": 7 }
+        "effect": { "type": "damage", "value": 7 },
+        /* 水弹贴图（程序生成，见 build_water_assets.py；data URI 模块
+           WaterBulletData.js，纹理键 proj_water_lv1/2/3）。
+           贴图只含水珠/水柱/水球本体，拖尾与水雾由代码粒子生成；
+           三颗按最大边等比烘焙（纹素 = bodyDisplay×superSample=54px），
+           运行时 setScale = 等级系数 / superSample，显示 ~16.6/18/19.4px。 */
+        "waterBullet": {
+          "bodyDisplay": 18,
+          "superSample": 3,
+          "scale": { "1": 0.92, "2": 1.0, "3": 1.08 },
+          /* 水弹轻微自转（弧度/秒），增加动感；水珠/水柱/水球均近似径向对称 */
+          "spin": { "1": 1.5, "2": 2.0, "3": 2.6 },
+          /* 代码生成的水蓝粒子拖尾（贴图仅本体）。水弹速度 560px/s，
+             拖尾长度 ≈ 弹速 × lifespan：lv1≈34px（很短）、lv2≈56px（中等）、
+             lv3≈84px（稍长，仍远小于射程，不遮挡画面）。
+             每个粒子沿飞行反方向飘散（speed/angleSpread 控制力度与张角），
+             frequency 越小粒子越密；所有参数按等级 JSON 驱动。 */
+          "trail": {
+            "1": {
+              "frequency": 100, "lifespan": 60, "quantity": 1,
+              "speed": 10, "angleSpread": 60,
+              "scale": 0.38, "alpha": 0.45, "tint": [0xffffff, 0x9fdcff]
+            },
+            "2": {
+              "frequency": 70, "lifespan": 100, "quantity": 1,
+              "speed": 14, "angleSpread": 55,
+              "scale": 0.52, "alpha": 0.55, "tint": [0xffffff, 0xbfeaff]
+            },
+            "3": {
+              "frequency": 45, "lifespan": 150, "quantity": 2,
+              "speed": 18, "angleSpread": 50,
+              "scale": 0.68, "alpha": 0.65, "tint": [0xffffff, 0x8fd0ff]
+            }
+          },
+          /* 叠加一条青蓝→透明的渐变光带（water_ribbon 程序纹理），
+             位于弹体后方；长度/粗细/透明度随等级 JSON 递增 */
+          "ribbon": {
+            "1": { "length": 12, "thickness": 2.4, "alpha": 0.25 },
+            "2": { "length": 19, "thickness": 3.0, "alpha": 0.32 },
+            "3": { "length": 27, "thickness": 3.8, "alpha": 0.38 }
+          }
+        }
       },
       "upgrade": {
         "maxLevel": 3,
