@@ -443,20 +443,49 @@ class BootScene extends Phaser.Scene {
     const hasThunderTowerData = (typeof THUNDER_TOWER_ART !== 'undefined') && THUNDER_TOWER_ART;
     if (hasThunderTowerData) {
       if (!artJobs) artJobs = [];
+      /* 每级两张纹理：thunder_tower_lvN=静态本体；thunder_deco_lvN=装饰
+         atlas（辉光描边 rim + 外侧闪电分叉 sparks，帧元数据挂全局）。
+         两张都就绪才算该级成功；三级全部成功置 __thunderTowerArt，
+         装饰帧缺失仅禁用闪烁（本体仍可用），绝不黑屏。 */
       const thunderTowerJobs = [1, 2, 3].map((lv) => new Promise((resolve) => {
-        const durl = THUNDER_TOWER_ART[lv];
+        const entry = THUNDER_TOWER_ART[lv];
+        const durl = entry && (typeof entry === 'string' ? entry : entry.body);
         if (!durl) { resolve(false); return; }
-        const key = 'thunder_tower_lv' + lv;
-        const img = new Image();
-        img.onload = () => {
-          try {
-            if (this.textures.exists(key)) this.textures.remove(key);
-            this.textures.addImage(key, img);
-            resolve(true);
-          } catch (e) { resolve(false); }
+        const bodyKey = 'thunder_tower_lv' + lv;
+        const decoKey = 'thunder_deco_lv' + lv;
+        const addTex = (key, url, done) => {
+          const img = new Image();
+          img.onload = () => {
+            try {
+              if (this.textures.exists(key)) this.textures.remove(key);
+              this.textures.addImage(key, img);
+            } catch (e) { /* 单张失败按缺失处理 */ }
+            done();
+          };
+          img.onerror = () => done();
+          img.src = url;
         };
-        img.onerror = () => resolve(false);
-        img.src = durl;
+        const bodyImg = new Image();
+        bodyImg.onload = () => {
+          try {
+            if (this.textures.exists(bodyKey)) this.textures.remove(bodyKey);
+            this.textures.addImage(bodyKey, bodyImg);
+          } catch (e) { resolve(false); return; }
+          // 装饰层：data URI 新版为对象；旧版字符串无装饰，静默跳过
+          if (entry && typeof entry === 'object' && entry.deco) {
+            addTex(decoKey, entry.deco, () => {
+              if (entry.frames && this.textures.exists(decoKey)) {
+                window.__thunderDecoFrames = window.__thunderDecoFrames || {};
+                window.__thunderDecoFrames[lv] = entry.frames;
+              }
+              resolve(true);  // 装饰失败不阻塞本体
+            });
+          } else {
+            resolve(true);
+          }
+        };
+        bodyImg.onerror = () => resolve(false);
+        bodyImg.src = durl;
       }));
       artJobs.push(Promise.all(thunderTowerJobs).then((oks) => {
         if (oks.every((v) => v)) window.__thunderTowerArt = true;

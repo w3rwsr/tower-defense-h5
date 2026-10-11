@@ -56,14 +56,18 @@ class Tower extends Phaser.GameObjects.Container {
       this.add(this.turret);
     } else if (this.isThunder) {
       this.head = null;
-      // 闪电主体完全静止，不旋转；电弧作为子对象挂载
-      this.turret = scene.add.image(0, 0, this._thunderTexKey());
+      /* 炮塔是 container：内含【本体静态 image】+ 装饰层帧（ThunderArc
+         注入）。本体不做任何自身动画；container 仅做黄色端索敌整体转向。
+         坐标系统一为纹素系，container.setScale(4x→显示 ≈0.25) 后本体与
+         装饰严格对齐（装饰帧 ox/oy 也是纹素偏移）。 */
+      this.turret = scene.add.container(0, 0);
+      this._thunderBody = scene.add.image(0, 0, this._thunderTexKey());
+      this.turret.add(this._thunderBody);
       this._thunderApplyArt();
       this.add(this.turret);
-      /* 外围电弧特效：JSON 驱动，等级递增 */
+      /* 装饰层闪现特效（形状来自贴图分层帧，参数 JSON 驱动，等级递增） */
       if (typeof ThunderArc !== 'undefined') {
         this._thunderArc = new ThunderArc(this);
-        this.add(this._thunderArc.gfx);
       }
     } else {
       this.head = null;
@@ -154,30 +158,32 @@ class Tower extends Phaser.GameObjects.Container {
 
   /* 雷塔显示定标：显示高 = config towerE.art.baseHeight × scale[等级]
      （1.0/1.12/1.24 → 54/60.5/67px），纹素高为显示高 ×4（离线 LANCZOS
-     烘焙，DPR2 下仍 2 倍超采，与冰塔清晰度约定一致），宽按纹理宽高比
-     自适应。
-     注意：本体除“黄色端平滑索敌转向”外不做任何动画（无抖动/缩放/位移
-     Tween）；该转向是瞄准行为而非装饰动画（见 setTarget/update）。 */
+     烘焙，DPR2 下仍 2 倍超采，与冰塔清晰度约定一致）。
+     本体 image 保持纹素原尺寸，由炮塔 container 统一 setScale(纹素→世界
+     ≈0.25)；装饰帧以纹素偏移 add 在同一 container 内，天然与本体对齐。
+     注意：本体除“黄色端平滑索敌整体转向”外不做任何动画（无抖动/缩放/
+     位移 Tween）；该转向是瞄准行为而非装饰动画（见 setTarget/update）。 */
   _thunderApplyArt() {
-    this.turret.setTexture(this._thunderTexKey());
+    this._thunderBody.setTexture(this._thunderTexKey());
     const art = (this.cfg && this.cfg.art) || { baseHeight: 54, scale: {} };
     const lvScale = (art.scale && art.scale[this.level] != null)
       ? art.scale[this.level] : 1;
     const h = (art.baseHeight || 54) * lvScale;
-    const fr = this.turret.frame;
-    const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
-    this.turret.setDisplaySize(h * aspect, h);
+    const fr = this._thunderBody.frame;
+    const k = (fr && fr.height) ? h / fr.height : 0.25;
+    this.turret.setScale(k);
+    this._thunderK = k;
   }
 
   /* 黄色尖端在【纹素坐标】中相对贴图中心的偏移（config towerE.art.tip，
-     离线按各等级贴图实测，非游戏内写死像素）；配置缺失时退化为贴图
-     顶部中点。换级后随当前贴图返回，保证尖端位置始终与贴图一致。 */
+     分层后按本体几何尖端离线实测，非游戏内写死像素）；配置缺失时退化
+     为本体贴图顶部中点。换级后随当前贴图返回，尖端位置始终与贴图一致。 */
   _thunderTipOffset() {
     const art = (this.cfg && this.cfg.art) || {};
     const tip = art.tip && art.tip[this.level];
     if (tip && tip.length === 2) return { x: tip[0], y: tip[1] };
-    const fr = this.turret.frame;
-    return fr ? { x: 0, y: -fr.height * 0.45 } : { x: 0, y: -24 };
+    const fr = this._thunderBody && this._thunderBody.frame;
+    return fr ? { x: 0, y: -fr.height * 0.4 } : { x: 0, y: -24 };
   }
 
   /* 雷塔炮塔目标转角：贴图黄色端在 rotation=0 时固有指向 θ0=atan2(tip)，
@@ -407,7 +413,7 @@ class Tower extends Phaser.GameObjects.Container {
     /* 水塔：升级同步切换水枪贴图与显示尺寸（水弹贴图由发射时等级决定，
        Projectile 读 sourceTower.level 自动对应，无需此处处理） */
     if (this.isWater) this._waterApplyArt();
-    /* 雷塔：升级同步切换闪电贴图与显示尺寸，并更新电弧参数 */
+    /* 雷塔：升级同步切换本体贴图/缩放，并按新等级重建装饰层帧 */
     if (this.isThunder) {
       this._thunderApplyArt();
       if (this._thunderArc) this._thunderArc.setLevel(this.level);
