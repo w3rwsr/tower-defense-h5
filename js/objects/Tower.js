@@ -262,7 +262,8 @@ class Tower extends Phaser.GameObjects.Container {
       // 火星：向上飘散的小火点（无方向性贴图 fire_dot），挂 head 跟随朝向
       this._sparks = sc.add.particles(0, 0, 'fire_dot', {
         speed: { min: 12, max: 32 }, angle: { min: 240, max: 300 },
-        scale: { start: lv === 2 ? 0.5 : 0.8, end: 0 }, alpha: { start: 0.9, end: 0 },
+        /* fire_dot 已 2x 超采样（16px），start scale 减半保持屏显不变 */
+        scale: { start: lv === 2 ? 0.25 : 0.4, end: 0 }, alpha: { start: 0.9, end: 0 },
         lifespan: lv === 2 ? 600 : 850, frequency: lv === 2 ? 200 : 110,
         quantity: 1, blendMode: 'ADD'
       });

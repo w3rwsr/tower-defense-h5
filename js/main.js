@@ -217,6 +217,39 @@
 
   const world = TD_CONFIG.world;
 
+  /* ============================================================
+   * 高清屏渲染倍率（DPR / Retina 适配）——水塔等贴图模糊的根因修复
+   *
+   * 背景：Phaser 3.80 已移除渲染器级 resolution 配置。Scale.FIT 下
+   * canvas 的【物理缓冲】恒等于 gameSize（960x540），CSS 再把该缓冲
+   * 拉伸到容器显示尺寸；在 devicePixelRatio=2/3 的手机、或系统缩放
+   * 125%+ 的桌面屏上，等于把 960x540 位图放大 2~3 倍显示 → 发糊。
+   *
+   * 做法（Phaser ScaleManager 机制下的标准 DPR 适配，即 P1 方案）：
+   *   1) gameSize 放大为「设计分辨率 × dpr」：canvas 物理缓冲随之
+   *      变为 960dpr × 540dpr；宽高比不变，FIT 算出的 CSS 显示尺寸
+   *      与之前完全一致，画面大小/留边/居中不受任何影响；
+   *   2) 每个场景主相机 setZoom(dpr) 后再 centerOn(480,270)：
+ *      Phaser 相机 zoom 以视野中心为锚点，不校正 scroll 世界会
+ *      偏到画面左上外侧；centerOn 后视野精确为 960x540，全部
+ *      游戏代码与固定坐标继续按 960x540 世界坐标工作，零改动；
+   *   3) 输入链路由 Phaser 自动换算——
+   *      transformX/Y 先把客户区坐标映射到 gameSize 空间，命中测试
+   *      再经相机矩阵（÷zoom）还原成 960x540 世界坐标；视觉横屏的
+   *      自定义逆变换也以 scale.gameSize 为分子动态计算，两端自洽。
+   *
+   * 上限 2：3x 机型缓冲会达 2880×1620，fill-rate/显存压力大易掉帧；
+   * 封顶 1920×1080 在 3x 屏上仅轻微下压，肉眼几乎无差。桌面 1.25/
+   * 1.5/1.75 等非整数倍率如实保留；读取异常一律回退 1（=旧行为）。
+   * ============================================================ */
+  const TD_DPR = (function () {
+    try {
+      const d = window.devicePixelRatio || 1;
+      return Math.max(1, Math.min(d, 2));
+    } catch (e) { return 1; }
+  })();
+  window.__TD_DPR = TD_DPR;
+
   const gameCfg = {
     type: Phaser.AUTO,
     parent: 'game-container',
@@ -227,8 +260,10 @@
          margin 居中——CSS 旋转容器中 canvasBounds 是旋转后的轴对齐框，
          Phaser 会算出错误的 margin 造成画面偏移 */
       autoCenter: Phaser.Scale.NONE,
-      width: world.width,
-      height: world.height,
+      /* 物理缓冲 = 设计分辨率 × DPR（配合各场景相机 zoom=DPR）；
+         FIT 仍按 16:9 等比决定 CSS 显示尺寸，逻辑世界恒为 960x540 */
+      width: world.width * TD_DPR,
+      height: world.height * TD_DPR,
       /* 立即响应窗口变化，不等待默认 500ms 轮询间隔，
          确保横竖屏切换时画布立刻重算尺寸 */
       resizeInterval: 0

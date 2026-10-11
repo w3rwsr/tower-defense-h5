@@ -15,6 +15,16 @@ class LevelSelectScene extends Phaser.Scene {
   constructor() { super('LevelSelectScene'); }
 
   create() {
+    /* DPR 适配：gameSize=960dpr×540dpr，相机 zoom=dpr 后布局世界
+       仍为 960x540（详见 main.js TD_DPR）；场景重启会重跑 create，
+       故 zoom 在每次进入选关页时都会重新生效。
+       zoom 以视野中心为锚点，必须再 centerOn(世界中心) 把左上角
+       对回 (0,0)，否则整张 960x540 布局会偏到画面左上外侧；
+       dpr=1 时 centerOn 得到 scroll=0，与旧行为完全一致 */
+    const dpr0 = window.__TD_DPR || 1;
+    this.cameras.main.setZoom(dpr0);
+    this.cameras.main.centerOn(TD_CONFIG.world.width / 2, TD_CONFIG.world.height / 2);
+
     this.W = TD_CONFIG.world.width;
     this.H = TD_CONFIG.world.height;
 

@@ -7,6 +7,17 @@ class GameScene extends Phaser.Scene {
   constructor() { super('GameScene'); }
 
   create(data) {
+    /* DPR 适配：gameSize=960dpr×540dpr，相机 zoom=dpr 后地图/塔/敌人/
+       弹道/热区/触摸命中全部沿用 960x540 世界坐标，逻辑零改动
+       （详见 main.js TD_DPR）。场景 restart/再来一局会重跑 create，
+       zoom 随之重新生效。
+       zoom 以视野中心为锚点，必须再 centerOn(世界中心) 抵消 zoom
+       产生的 scroll 偏移（dpr=1 时 scroll=0，等价旧行为），否则
+       地图会整体偏到画面左上外侧、点击坐标也整体错位 */
+    const dpr0 = window.__TD_DPR || 1;
+    this.cameras.main.setZoom(dpr0);
+    this.cameras.main.centerOn(TD_CONFIG.world.width / 2, TD_CONFIG.world.height / 2);
+
     this.W = TD_CONFIG.world.width;
     this.H = TD_CONFIG.world.height;
 
@@ -1163,18 +1174,30 @@ class GameScene extends Phaser.Scene {
    * ============================================================ */
   onPointerMove(pointer) {
     if (this.selectedType) {
-      this.drawGhost(pointer.x, pointer.y);
+      /* DPR 高清渲染后 pointer.x/y 是物理缓冲坐标（0..960×dpr），
+         而画幽灵/吸附/落塔全部按 960×540 逻辑世界坐标设计，
+         必须经相机逆变换（含 zoom=dpr）换回世界坐标再使用；
+         dpr=1 时 getWorldPoint 结果与 pointer.x/y 完全一致（旧行为）。 */
+      const wp = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      const x = wp.x, y = wp.y;
+      this.drawGhost(x, y);
       /* 左键按住拖动：连续放置（仅在放置模式 + 鼠标左键按下时触发，
          拖过的每个合法空格都立即放置，体验类似"画笔刷塔"）。
          拖到障碍物上不落塔（障碍物区域不可建造）。 */
-      if (pointer.isDown && !pointer.rightButtonDown() && !this.getObstacleAt(pointer.x, pointer.y)) {
-        this.tryPlaceAt(pointer.x, pointer.y);
+      if (pointer.isDown && !pointer.rightButtonDown() && !this.getObstacleAt(x, y)) {
+        this.tryPlaceAt(x, y);
       }
     }
   }
 
   onPointerDown(pointer) {
-    const x = pointer.x, y = pointer.y;
+    /* 同 onPointerMove：pointer.x/y 已是物理缓冲坐标（×dpr），
+       下方 getTowerAt/getObstacleAt/snapHotspot/distToPath 等全部
+       消费世界坐标，先经相机逆变换统一换算（dpr=1 时无差别）。
+       注意浮框/面板命中（manager.hitTest）内部自带相机逆变换，
+       必须继续传原始 pointer，不做替换。 */
+    const wp = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const x = wp.x, y = wp.y;
 
     /* 右键：仅用于取消放置模式 / 关闭选塔浮框。
        右键直接出售已放置塔的功能已移除——出售塔请使用左键点塔
@@ -1786,7 +1809,11 @@ class GameScene extends Phaser.Scene {
   /** 浮框整体缩放：画布被 FIT 缩小时同步放大，保证屏上可读可点；
    *  同时受画面宽高上限钳制（宽≤屏宽60%、高≤屏高15%），避免遮大半屏幕 */
   pickerScale(w, h) {
-    const k = Math.min(this.scale.displayScale.x, this.scale.displayScale.y) || 1;
+    /* displayScale = gameSize/canvasBounds；DPR 后 gameSize=960×dpr，
+       分子多出 dpr 倍，除回后得到与旧版一致的"逻辑显示压缩比"，
+       保证选塔浮框缩放决策在 dpr=1/2 下完全相同 */
+    const dpr = window.__TD_DPR || 1;
+    const k = Math.min(this.scale.displayScale.x / dpr, this.scale.displayScale.y / dpr) || 1;
     const readScale = 1 / Math.min(k, 1);
     const fitW = (this.W * 0.60) / w;
     const fitH = (this.H * 0.15) / h;
@@ -3258,8 +3285,10 @@ class GameScene extends Phaser.Scene {
 
   /** 教程卡片的整体缩放系数：画布被缩小时放大卡片，同时不超出画布 */
   tutScale() {
+    /* 同 pickerScale：displayScale 除回 dpr，保持教程卡片缩放与旧版一致 */
     const s = this.scale.displayScale;
-    const k = Math.min(s.x, s.y) || 1;
+    const dpr = window.__TD_DPR || 1;
+    const k = Math.min(s.x / dpr, s.y / dpr) || 1;
     const fitScale = 1 / Math.min(k, 1);       // 保证屏上可读
     const cardW = 440, cardH = 200;
     const wLimit = (this.W * 0.92) / cardW;     // 不超出宽度

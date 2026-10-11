@@ -42,7 +42,8 @@ class Projectile extends Phaser.GameObjects.Image {
         const t = (lb.trail && lb.trail[lv]) || null;
         if (t) {
           this._trail = scene.add.particles(0, 0, 'fire_dot', {
-            speed: 0, scale: { start: t.scale, end: 0 },
+            /* fire_dot 已 2x 超采样（16px），start scale 减半保持屏显不变 */
+            speed: 0, scale: { start: t.scale / 2, end: 0 },
             alpha: { start: t.alpha, end: 0 }, lifespan: t.lifespan,
             frequency: t.frequency, blendMode: 'ADD', follow: this
           }).setDepth(39);
@@ -51,7 +52,7 @@ class Projectile extends Phaser.GameObjects.Image {
             const sp = t.sparks;
             this._sparks = scene.add.particles(0, 0, 'fire_dot', {
               speed: { min: 8, max: sp.speedMax || 30 },
-              scale: { start: sp.scale || 0.45, end: 0 },
+              scale: { start: (sp.scale || 0.45) / 2, end: 0 },
               alpha: { start: 0.9, end: 0 },
               lifespan: sp.lifespan || 140, frequency: sp.frequency || 70,
               blendMode: 'ADD', follow: this
@@ -59,17 +60,19 @@ class Projectile extends Phaser.GameObjects.Image {
           }
         }
       } else {
-        this.setScale(srcLv === 1 ? 1 : srcLv === 2 ? 1.05 : 1.15); // 等级越高弹幕越大
+        /* 程序火苗贴图已 2x 超采样烘焙（52/68/88px），scale 减半保持
+           屏显尺寸与旧版一致（26/35.7/50.6px），纹理清晰度翻倍 */
+        this.setScale(srcLv === 1 ? 0.5 : srcLv === 2 ? 0.525 : 0.575);
         if (srcLv >= 2) {
           this._trail = scene.add.particles(0, 0, 'fire_dot', {
-            speed: 0, scale: { start: srcLv === 2 ? 0.9 : 1.3, end: 0 },
+            speed: 0, scale: { start: srcLv === 2 ? 0.45 : 0.65, end: 0 },
             alpha: { start: 0.55, end: 0 }, lifespan: srcLv === 2 ? 160 : 260,
             frequency: srcLv === 2 ? 30 : 18, blendMode: 'ADD', follow: this
           }).setDepth(39);
           if (srcLv >= 3) {
             // 3级额外火星：四散的小亮点
             this._sparks = scene.add.particles(0, 0, 'fire_dot', {
-              speed: { min: 10, max: 40 }, scale: { start: 0.5, end: 0 },
+              speed: { min: 10, max: 40 }, scale: { start: 0.25, end: 0 },
               alpha: { start: 0.9, end: 0 }, lifespan: 300, frequency: 40,
               blendMode: 'ADD', follow: this
             }).setDepth(39);
@@ -111,7 +114,8 @@ class Projectile extends Phaser.GameObjects.Image {
             this._trail = scene.add.particles(0, 0, 'ice_dot', {
               speed: { min: (t.speed || 0) * 0.6, max: t.speed || 0 },
               angle: { min: headDeg + 180 - spread / 2, max: headDeg + 180 + spread / 2 },
-              scale: { start: t.scale, end: 0 },
+              /* ice_dot 已 2x 超采样（16px），start scale 减半保持屏显不变 */
+              scale: { start: t.scale / 2, end: 0 },
               alpha: { start: t.alpha, end: 0 },
               tint: t.tint, lifespan: t.lifespan,
               frequency: t.frequency, quantity: t.quantity || 1,

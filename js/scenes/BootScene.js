@@ -18,6 +18,18 @@ class BootScene extends Phaser.Scene {
   }
 
   create() {
+    /* DPR 适配：主相机按设备像素比缩放（gameSize 已为 960*dpr，
+       缩放后相机视野保持 960x540 逻辑世界；详见 main.js TD_DPR）。
+       Phaser 相机 zoom 以【视野中心】为锚点：zoom 后 scroll=(0,0)
+       会让 960x540 世界偏移到画面左上外侧，必须用 centerOn 把视野
+       中心重新对回世界中心 (480,270)。centerOn 按相机像素宽高求
+       scroll，dpr=1 时 scroll 恰为 0（=旧行为）。
+       必须放在 create 第一行：本场景生成的纹理虽不按坐标定位，
+       但保证任意时刻相机矩阵都已就绪，不出现半帧错位。 */
+    const dpr0 = window.__TD_DPR || 1;
+    this.cameras.main.setZoom(dpr0);
+    this.cameras.main.centerOn(TD_CONFIG.world.width / 2, TD_CONFIG.world.height / 2);
+
     /* Phaser 就绪：移除 index.html 的启动加载提示层（仅启动时执行一次，
        本场景不会重进，无重复移除问题） */
     try {
@@ -268,18 +280,22 @@ class BootScene extends Phaser.Scene {
       g.fillEllipse(w * 0.50, cy, w * 0.26, h * 0.3);
       g.fillCircle(hx + hr * 0.1, cy, hr * 0.42);
     };
-    this.makeTexture('proj_fire_lv1', 26, 18, (g) => drawFireProj(g, 26, 18));
-    this.makeTexture('proj_fire_lv2', 34, 22, (g) => drawFireProj(g, 34, 22));
-    this.makeTexture('proj_fire_lv3', 44, 28, (g) => drawFireProj(g, 44, 28));
+    /* DPR 高清：按 DPR 上限 2x 超采样烘焙（矢量绘制天然无损），
+       显示端 setScale 同步除 2，屏显尺寸与旧版完全一致、清晰度翻倍。
+       生产路径熔岩弹 ArtData(68px) 会以同名 key 覆盖本纹理，不受影响 */
+    this.makeTexture('proj_fire_lv1', 52, 36, (g) => drawFireProj(g, 52, 36));
+    this.makeTexture('proj_fire_lv2', 68, 44, (g) => drawFireProj(g, 68, 44));
+    this.makeTexture('proj_fire_lv3', 88, 56, (g) => drawFireProj(g, 88, 56));
     /* 圆形小火点：火焰粒子（塔身火星 / 弹幕拖尾）专用，无方向性 */
-    this.makeTexture('fire_dot', 8, 8, (g) => {
-      g.fillStyle(0xffa93b, 1); g.fillCircle(4, 4, 3.4);
-      g.fillStyle(0xffe76b, 1); g.fillCircle(4, 4, 1.7);
+    this.makeTexture('fire_dot', 16, 16, (g) => {
+      g.fillStyle(0xffa93b, 1); g.fillCircle(8, 8, 6.8);
+      g.fillStyle(0xffe76b, 1); g.fillCircle(8, 8, 3.4);
     });
-    /* 圆形冰点：冰弹粒子拖尾专用，外冰蓝 0x9fdcff、内白，运行时可再 tint */
-    this.makeTexture('ice_dot', 8, 8, (g) => {
-      g.fillStyle(0x9fdcff, 1); g.fillCircle(4, 4, 3.4);
-      g.fillStyle(0xffffff, 1); g.fillCircle(4, 4, 1.8);
+    /* 圆形冰点：冰弹粒子拖尾专用，外冰蓝 0x9fdcff、内白，运行时可再 tint。
+       同 fire_dot：16px 2x 超采样，消费端粒子 scale 已同步减半 */
+    this.makeTexture('ice_dot', 16, 16, (g) => {
+      g.fillStyle(0x9fdcff, 1); g.fillCircle(8, 8, 6.8);
+      g.fillStyle(0xffffff, 1); g.fillCircle(8, 8, 3.6);
     });
     /* 冰弹渐变光带：横向 40×8，右侧（起点 x=40）亮、向左渐隐为透明；
        使用时 origin(1,0.5) 钉在弹体中心，向弹尾方向延伸并按等级缩放 */
