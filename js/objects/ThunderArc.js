@@ -29,6 +29,9 @@ class ThunderArc {
     };
     this.level = Math.max(1, Math.min(3, tower.level || 1));
     this.gfx = this.scene.add.graphics();
+    /* ADD 叠加：电弧只会“增亮”画面，物理上不可能盖住/压暗闪电主体；
+       Canvas 渲染器自动等价 globalCompositeOperation='lighter' */
+    try { this.gfx.setBlendMode(Phaser.BlendModes.ADD); } catch (e) { /* 忽略 */ }
     this.arcs = [];        // 活跃电弧列表
     this._spawnT = 0;      // 下次重生倒计时
     this._alive = true;
@@ -58,19 +61,26 @@ class ThunderArc {
     for (let i = 0; i < this._maxArc(); i++) this._spawnArc();
   }
 
-  /* 生成一条新电弧：随机方向 + 随机长度 + 随机分叉 */
+  /* 生成一条新电弧：随机方向 + 随机长度 + 随机分叉。
+     电弧出现在“本体外侧环带”：内缘 ≈ 闪电贴图显示半高×0.85（避开主体
+     轮廓），再向外 0.25~0.8 倍配置长度；折线沿切向/径向延展 0.55~1.05
+     倍配置长度——保证不盖主体、又紧贴闪电外围。 */
   _spawnArc() {
     const maxArc = this._maxArc();
     if (this.arcs.length >= maxArc) return;
     const angle = Math.random() * Math.PI * 2;
-    const dist = this._length() * (0.6 + Math.random() * 0.4); // 离主体 0.6~1.0 倍
+    const len = this._length();
+    const dispH = (this.tower.turret && this.tower.turret.displayHeight) || 40;
+    const baseR = Math.max(8, dispH * 0.5 * 0.85);
+    const centerR = baseR + len * (0.25 + Math.random() * 0.55);
+    const ext = len * (0.55 + Math.random() * 0.5);
     const life = this._life() * (0.7 + Math.random() * 0.6);   // 0.7~1.3 倍
     const color = this._colors()[Math.floor(Math.random() * this._colors().length)];
     const branches = this._branches();
     const segs = 5 + Math.floor(Math.random() * 4); // 5~8 段折线
     const pts = [{ x: 0, y: 0 }];
     let px = 0, py = 0;
-    const step = dist / segs;
+    const step = ext / segs;
     for (let i = 0; i < segs; i++) {
       px += step * (0.7 + Math.random() * 0.6);
       py += (Math.random() - 0.5) * step * 0.8;
@@ -78,8 +88,8 @@ class ThunderArc {
     }
     const arc = {
       angle, pts, life, maxLife: life, color, branches,
-      x: Math.cos(angle) * dist,
-      y: Math.sin(angle) * dist,
+      x: Math.cos(angle) * centerR,
+      y: Math.sin(angle) * centerR,
       alpha: 0,
       fadeIn: Math.min(0.04, life * 0.25),   // 快速出现
       fadeOut: life * 0.6                      // 缓慢消失
@@ -87,34 +97,43 @@ class ThunderArc {
     this.arcs.push(arc);
   }
 
-  /* 生成单条电弧的折线路径（含分叉） */
+  /* 生成单条电弧的折线路径（亮芯 + 宽幅低透明外发光，含分叉） */
   _drawArc(arc) {
     const { pts, color, alpha, branches } = arc;
-    const lw = 1.2 + (this.level - 1) * 0.4;
-    // 主路径
-    this.gfx.lineStyle(lw, color, alpha);
-    this.gfx.beginPath();
-    this.gfx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length; i++) {
-      this.gfx.lineTo(pts[i].x, pts[i].y);
-    }
-    this.gfx.strokePath();
-    // 分叉：从中间点随机引出
+    const lw = 1.4 + (this.level - 1) * 0.4;
+    const strokePts = (width, a) => {
+      this.gfx.lineStyle(width, color, a);
+      this.gfx.beginPath();
+      this.gfx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) {
+        this.gfx.lineTo(pts[i].x, pts[i].y);
+      }
+      this.gfx.strokePath();
+    };
+    strokePts(lw * 2.6, alpha * 0.22);   // 外发光（粗、淡）
+    strokePts(lw, Math.min(1, alpha * 1.1)); // 亮芯
+    // 分叉：从中间点随机引出（同样发光+亮芯两遍描边）
     for (let b = 0; b < branches; b++) {
       const mid = 1 + Math.floor(Math.random() * (pts.length - 2));
       const sx = pts[mid].x, sy = pts[mid].y;
       let bx = sx, by = sy;
-      this.gfx.beginPath();
-      this.gfx.moveTo(sx, sy);
       const bSegs = 2 + Math.floor(Math.random() * 2); // 2~3 段
       const bLen = this._length() * 0.35;
+      const bPts = [];
       for (let i = 0; i < bSegs; i++) {
         bx += (Math.random() - 0.5) * bLen;
         by += (Math.random() - 0.5) * bLen;
-        this.gfx.lineTo(bx, by);
+        bPts.push({ x: bx, y: by });
       }
-      this.gfx.lineStyle(lw * 0.65, color, alpha * 0.75);
-      this.gfx.strokePath();
+      const strokeBranch = (width, a) => {
+        this.gfx.lineStyle(width, color, a);
+        this.gfx.beginPath();
+        this.gfx.moveTo(sx, sy);
+        for (const p of bPts) this.gfx.lineTo(p.x, p.y);
+        this.gfx.strokePath();
+      };
+      strokeBranch(lw * 2.2, alpha * 0.18);
+      strokeBranch(lw * 0.65, alpha * 0.75);
     }
   }
 

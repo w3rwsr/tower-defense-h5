@@ -340,8 +340,13 @@
 
       /* 本次电链已击中的敌人集合（绝不重复弹同一只怪） */
       const hit = new Set();
-      /* 电链路径点：起点 = 塔头，后续 = 每个被击中怪的位置 */
-      const chainPoints = [{ x: this.tower.x, y: this.tower.y - 4 }];
+      /* 电链路径点：起点 = 雷塔当前黄色尖端（炮塔每帧跟踪目标，发射点随
+         旋转动态计算，见 Tower.getMuzzlePos）；非美术雷塔（贴图回退）沿用
+         旧的塔心上方点 */
+      const startPoint = this.tower.isThunder
+        ? this.tower.getMuzzlePos()
+        : { x: this.tower.x, y: this.tower.y - 4 };
+      const chainPoints = [startPoint];
       let current = target;
       let dmg = baseDmg;
 

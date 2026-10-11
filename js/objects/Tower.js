@@ -124,8 +124,14 @@ class Tower extends Phaser.GameObjects.Container {
     this.behavior = new BehaviorClass(this, this.cfg);
     this.aimAngle = -Math.PI / 2;          // 初始朝上
     this.hasTarget = false;                // 火塔：无目标时火焰自然竖立
-    // 火塔/冰塔贴图不随目标旋转；水塔与其他塔炮口即时/平滑指向
-    if (!this.isFire && !this.isIce) this.turret.rotation = this.aimAngle;
+    // 火塔/冰塔贴图不随目标旋转；雷塔/水塔平滑转向在 update 中做（雷塔需先
+    // 按本等级贴图的黄色端固有角 θ0 设好静止初始姿态：黄端自然朝上）；
+    // 其余程序化炮头零角朝右，初始 rotation=aimAngle 即朝上
+    if (this.isThunder) {
+      this.turret.rotation = this._thunderAimRotation(this.aimAngle);
+    } else if (!this.isFire && !this.isIce) {
+      this.turret.rotation = this.aimAngle;
+    }
   }
 
   /* 冰塔当前等级的美术贴图 key（缺失时逐级回退，最终回退程序炮头） */
@@ -147,8 +153,11 @@ class Tower extends Phaser.GameObjects.Container {
   }
 
   /* 雷塔显示定标：显示高 = config towerE.art.baseHeight × scale[等级]
-     （1.0/1.12/1.24 → 54/60.5/67px），宽按纹理原始宽高比自适应。
-     主体完全静止，不随目标旋转（闪电主体不动，电弧在周围生成） */
+     （1.0/1.12/1.24 → 54/60.5/67px），纹素高为显示高 ×4（离线 LANCZOS
+     烘焙，DPR2 下仍 2 倍超采，与冰塔清晰度约定一致），宽按纹理宽高比
+     自适应。
+     注意：本体除“黄色端平滑索敌转向”外不做任何动画（无抖动/缩放/位移
+     Tween）；该转向是瞄准行为而非装饰动画（见 setTarget/update）。 */
   _thunderApplyArt() {
     this.turret.setTexture(this._thunderTexKey());
     const art = (this.cfg && this.cfg.art) || { baseHeight: 54, scale: {} };
@@ -158,6 +167,26 @@ class Tower extends Phaser.GameObjects.Container {
     const fr = this.turret.frame;
     const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
     this.turret.setDisplaySize(h * aspect, h);
+  }
+
+  /* 黄色尖端在【纹素坐标】中相对贴图中心的偏移（config towerE.art.tip，
+     离线按各等级贴图实测，非游戏内写死像素）；配置缺失时退化为贴图
+     顶部中点。换级后随当前贴图返回，保证尖端位置始终与贴图一致。 */
+  _thunderTipOffset() {
+    const art = (this.cfg && this.cfg.art) || {};
+    const tip = art.tip && art.tip[this.level];
+    if (tip && tip.length === 2) return { x: tip[0], y: tip[1] };
+    const fr = this.turret.frame;
+    return fr ? { x: 0, y: -fr.height * 0.45 } : { x: 0, y: -24 };
+  }
+
+  /* 雷塔炮塔目标转角：贴图黄色端在 rotation=0 时固有指向 θ0=atan2(tip)，
+     旋转 φ 后尖端世界角 = θ0+φ，故 φ = aimAngle − θ0。无目标（aim 朝上）
+     时 φ = −π/2 − θ0，黄色端自然竖立朝上。 */
+  _thunderAimRotation(aim) {
+    const tip = this._thunderTipOffset();
+    const theta0 = Math.atan2(tip.y, tip.x);
+    return aim - theta0;
   }
 
   /* 冰塔显示定标：显示高 = config towerB.art.baseHeight × scale[等级]
@@ -424,6 +453,20 @@ class Tower extends Phaser.GameObjects.Container {
         y: this.y + k * (mx * s + my * c)
       };
     }
+    /* 雷塔：发射点 = 旋转后贴图的黄色尖端（纹素偏移见 config art.tip，
+       按各等级贴图实测，非写死）。turret 每帧平滑跟踪目标，取当前 rotation
+       即时换算——目标移动时电链永远从【此刻】黄色端位置发出；
+       k = turret.scaleX（等比缩放，x/y 相同）。 */
+    if (this.isThunder) {
+      const m = this._thunderTipOffset();
+      const mx = m.x, my = m.y;
+      const k = this.turret.scaleX;
+      const c = Math.cos(this.turret.rotation), s = Math.sin(this.turret.rotation);
+      return {
+        x: this.x + k * (mx * c - my * s),
+        y: this.y + k * (mx * s + my * c)
+      };
+    }
     return { x: this.x, y: this.y };
   }
 
@@ -436,8 +479,11 @@ class Tower extends Phaser.GameObjects.Container {
     } else {
       this.hasTarget = false;
     }
-    // 火塔/冰塔贴图不随目标旋转；水塔平滑旋转在 update 中做；其他塔即时指向
-    if (!this.isFire && !this.isIce && !this.isWater) this.turret.rotation = this.aimAngle;
+    // 火塔/冰塔贴图不随目标旋转；水塔/雷塔平滑旋转在 update 中做；
+    // 其他程序化炮头即时指向
+    if (!this.isFire && !this.isIce && !this.isWater && !this.isThunder) {
+      this.turret.rotation = this.aimAngle;
+    }
   }
 
   update(dt, ctx) {
@@ -449,6 +495,17 @@ class Tower extends Phaser.GameObjects.Container {
       this.turret.rotation =
         Phaser.Math.Angle.RotateTo(this.turret.rotation, this.aimAngle, 12 * dt);
     }
+    if (this.isThunder) {
+      /* 雷塔黄色端平滑跟踪目标：贴图尖端固有角 θ0，目标转角 = aimAngle−θ0；
+         无目标时回到 (−π/2−θ0) 使黄端自然朝上。12 rad/s 限速（同水塔）。
+         本体无任何抖动/缩放/位移动画，旋转轴即贴图中心。 */
+      const targetRot = this._thunderAimRotation(
+        this.hasTarget ? this.aimAngle : -Math.PI / 2);
+      this.turret.rotation =
+        Phaser.Math.Angle.RotateTo(this.turret.rotation, targetRot, 12 * dt);
+      /* 外围电弧每帧更新（与炮塔旋转无关，固定环绕塔心） */
+      if (this._thunderArc) this._thunderArc.update(dt);
+    }
     if (this.isFire && this.head) {
       /* 旋转约定：贴图根部（钝端）朝本地 +Y（角度 π/2）。要让根部指向
          目标方向 aimAngle，需 π/2 + θ = aimAngle，即 θ = aimAngle − π/2。
@@ -457,10 +514,6 @@ class Tower extends Phaser.GameObjects.Container {
       const targetRot = this.hasTarget ? (this.aimAngle - Math.PI / 2) : 0;
       this.head.rotation =
         Phaser.Math.Angle.RotateTo(this.head.rotation, targetRot, 10 * dt);
-    }
-    if (this.isThunder && this._thunderArc) {
-      /* 雷塔：外围电弧每帧更新（闪电主体保持静止） */
-      this._thunderArc.update(dt);
     }
   }
 
