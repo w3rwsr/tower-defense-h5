@@ -32,6 +32,11 @@ class Tower extends Phaser.GameObjects.Container {
        贴图缺失时回退程序化炮头 turret_towerC。 */
     this.isWater = (typeKey === 'towerC') &&
       window.__waterTowerArt === true && scene.textures.exists('water_tower_lv1');
+    /* 雷元素塔（towerE）：闪电塔美术贴图（thunder_tower_lvN，按等级切换）。
+       闪电主体完全静止，不随目标旋转；外围电弧由 ThunderArc.js 代码生成；
+       贴图缺失时回退程序化炮头 turret_towerE。 */
+    this.isThunder = (typeKey === 'towerE') &&
+      window.__thunderTowerArt === true && scene.textures.exists('thunder_tower_lv1');
     if (this.isFire) {
       this.head = scene.add.container(0, -6);
       this.turret = scene.add.image(0, 0, this._fireTexKey());
@@ -49,6 +54,17 @@ class Tower extends Phaser.GameObjects.Container {
       this.turret = scene.add.image(0, 0, this._waterTexKey());
       this._waterApplyArt();
       this.add(this.turret);
+    } else if (this.isThunder) {
+      this.head = null;
+      // 闪电主体完全静止，不旋转；电弧作为子对象挂载
+      this.turret = scene.add.image(0, 0, this._thunderTexKey());
+      this._thunderApplyArt();
+      this.add(this.turret);
+      /* 外围电弧特效：JSON 驱动，等级递增 */
+      if (typeof ThunderArc !== 'undefined') {
+        this._thunderArc = new ThunderArc(this);
+        this.add(this._thunderArc.gfx);
+      }
     } else {
       this.head = null;
       this.turret = scene.add.image(0, 0, 'turret_' + typeKey);
@@ -119,6 +135,29 @@ class Tower extends Phaser.GameObjects.Container {
       if (this.scene.textures.exists(k)) return k;
     }
     return 'turret_towerB';
+  }
+
+  /* 雷塔当前等级的美术贴图 key（缺失时逐级回退，最终回退程序炮头） */
+  _thunderTexKey() {
+    for (let lv = Math.min(this.level, 3); lv >= 1; lv--) {
+      const k = 'thunder_tower_lv' + lv;
+      if (this.scene.textures.exists(k)) return k;
+    }
+    return 'turret_towerE';
+  }
+
+  /* 雷塔显示定标：显示高 = config towerE.art.baseHeight × scale[等级]
+     （1.0/1.12/1.24 → 54/60.5/67px），宽按纹理原始宽高比自适应。
+     主体完全静止，不随目标旋转（闪电主体不动，电弧在周围生成） */
+  _thunderApplyArt() {
+    this.turret.setTexture(this._thunderTexKey());
+    const art = (this.cfg && this.cfg.art) || { baseHeight: 54, scale: {} };
+    const lvScale = (art.scale && art.scale[this.level] != null)
+      ? art.scale[this.level] : 1;
+    const h = (art.baseHeight || 54) * lvScale;
+    const fr = this.turret.frame;
+    const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
+    this.turret.setDisplaySize(h * aspect, h);
   }
 
   /* 冰塔显示定标：显示高 = config towerB.art.baseHeight × scale[等级]
@@ -339,6 +378,11 @@ class Tower extends Phaser.GameObjects.Container {
     /* 水塔：升级同步切换水枪贴图与显示尺寸（水弹贴图由发射时等级决定，
        Projectile 读 sourceTower.level 自动对应，无需此处处理） */
     if (this.isWater) this._waterApplyArt();
+    /* 雷塔：升级同步切换闪电贴图与显示尺寸，并更新电弧参数 */
+    if (this.isThunder) {
+      this._thunderApplyArt();
+      if (this._thunderArc) this._thunderArc.setLevel(this.level);
+    }
     // 升级小动画
     this.scene.tweens.add({ targets: this, scale: 1.18, duration: 110, yoyo: true });
     return cost;
@@ -414,14 +458,23 @@ class Tower extends Phaser.GameObjects.Container {
       this.head.rotation =
         Phaser.Math.Angle.RotateTo(this.head.rotation, targetRot, 10 * dt);
     }
+    if (this.isThunder && this._thunderArc) {
+      /* 雷塔：外围电弧每帧更新（闪电主体保持静止） */
+      this._thunderArc.update(dt);
+    }
   }
 
   /* 出售 / 场景关闭：先注销燃烧视频播放引用并停掉兜底 Tween（引用计数归零
-     会暂停解码省电），再走容器销毁（级联销毁 head/burnImg 等全部子对象） */
+     会暂停解码省电），销毁电弧特效，再走容器销毁（级联销毁 head/burnImg
+     等全部子对象） */
   destroy(fromScene) {
     this._clearFireFx();
     if (this._burnOk) {
       FIRE_BURN.release(this._burnLv);
+    }
+    if (this._thunderArc) {
+      this._thunderArc.destroy();
+      this._thunderArc = null;
     }
     super.destroy(fromScene);
   }

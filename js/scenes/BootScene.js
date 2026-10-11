@@ -436,6 +436,34 @@ class BootScene extends Phaser.Scene {
       }));
     }
 
+    /* ---------- 雷元素塔三级贴图（ThunderTowerArtData.js，三连图离线裁切） ----------
+       data URI 同源干净，file:// 也可上传 WebGL。三张全部就绪才置
+       window.__thunderTowerArt，Tower 据此给 towerE 换雷塔贴图；缺失时 Tower
+       回退到程序化炮头 turret_towerE，绝不黑屏。并入 artJobs 等待链。 */
+    const hasThunderTowerData = (typeof THUNDER_TOWER_ART !== 'undefined') && THUNDER_TOWER_ART;
+    if (hasThunderTowerData) {
+      if (!artJobs) artJobs = [];
+      const thunderTowerJobs = [1, 2, 3].map((lv) => new Promise((resolve) => {
+        const durl = THUNDER_TOWER_ART[lv];
+        if (!durl) { resolve(false); return; }
+        const key = 'thunder_tower_lv' + lv;
+        const img = new Image();
+        img.onload = () => {
+          try {
+            if (this.textures.exists(key)) this.textures.remove(key);
+            this.textures.addImage(key, img);
+            resolve(true);
+          } catch (e) { resolve(false); }
+        };
+        img.onerror = () => resolve(false);
+        img.src = durl;
+      }));
+      artJobs.push(Promise.all(thunderTowerJobs).then((oks) => {
+        if (oks.every((v) => v)) window.__thunderTowerArt = true;
+        return true;
+      }));
+    }
+
     /* ---------- 水弹三级贴图（WaterBulletData.js，程序生成水珠/水柱/水球本体） ----------
        贴图只含本体（拖尾/水雾已剔除），拖尾由 Projectile 的水蓝粒子 +
        water_ribbon 光带代码生成。三张全部就绪才置 window.__waterBulletArt；
