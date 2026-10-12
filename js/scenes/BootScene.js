@@ -650,6 +650,8 @@ class BootScene extends Phaser.Scene {
     const art = TD_CONFIG.towers.towerE.art;
     const baseH = (art && art.baseHeight) || 54;
     const lvScales = (art && art.scale) || {};
+    /* 装饰层分段：与主体共用同一分段（装饰图碎片多，按主体段范围裁切）。
+       装饰图在主体段 x 范围内有内容，直接按主体段范围 + 装饰图内容包围盒裁切。 */
     for (let lv = 1; lv <= 3; lv++) {
       const bSeg = bodySegs[lv - 1];
       if (!bSeg) continue;
@@ -672,28 +674,32 @@ class BootScene extends Phaser.Scene {
       const tip = this._thunderDetectYellowTip(bodyData,
         body.w, body.h, bodyBg, bBox);
       window.__thunderTipOffset[lv] = { x: tip.x * s, y: tip.y * s };
-      /* 装饰层（可选；缺失仅禁用闪现，本体仍可用） */
-      if (decoData && decoSegs && decoSegs[lv - 1]) {
-        const dSeg = decoSegs[lv - 1];
+      /* 装饰层（可选；缺失仅禁用闪现，本体仍可用）。
+         装饰图碎片多，不按装饰图自己的分段，而是按主体段 x 范围裁切，
+         保证与主体严格对齐。 */
+      if (decoData) {
+        /* 在主体段 x 范围内找装饰内容包围盒 */
         const dBox = this._thunderContentBox(decoData, deco.w, deco.h, decoBg,
-          dSeg.x0, dSeg.x1);
-        if (!dBox) continue;
-        const decoKey = 'thunder_deco_lv' + lv;
-        /* 装饰用同一 s 缩放，保证与本体对齐 */
-        const decoTargetH = Math.round(dBox.h * s);
-        /* 透明背景检测：跳过色度键 */
-        const decoCanvas = (decoBg.type === 'transparent')
-          ? this._thunderCropOnly(decoData, deco.w, deco.h, dBox, decoKey, decoTargetH)
-          : this._thunderCropAndKey(decoData, deco.w, deco.h, decoBg, dBox, decoKey, decoTargetH);
-        if (!decoCanvas) continue;
-        texEntries.push({ key: decoKey, canvas: decoCanvas });
-        /* 装饰中心相对本体中心的纹素偏移（按 s 换算到输出纹理尺寸） */
-        let ox = 0, oy = 0;
-        if (shared) {
-          ox = (dBox.x0 + dBox.w / 2) - (bBox.x0 + bBox.w / 2);
-          oy = (dBox.y0 + dBox.h / 2) - (bBox.y0 + bBox.h / 2);
+          bSeg.x0, bSeg.x1);
+        if (dBox) {
+          const decoKey = 'thunder_deco_lv' + lv;
+          /* 装饰用同一 s 缩放，保证与本体对齐 */
+          const decoTargetH = Math.round(dBox.h * s);
+          /* 透明背景检测：跳过色度键 */
+          const decoCanvas = (decoBg.type === 'transparent')
+            ? this._thunderCropOnly(decoData, deco.w, deco.h, dBox, decoKey, decoTargetH)
+            : this._thunderCropAndKey(decoData, deco.w, deco.h, decoBg, dBox, decoKey, decoTargetH);
+          if (decoCanvas) {
+            texEntries.push({ key: decoKey, canvas: decoCanvas });
+            /* 装饰中心相对本体中心的纹素偏移（按 s 换算到输出纹理尺寸） */
+            let ox = 0, oy = 0;
+            if (shared) {
+              ox = (dBox.x0 + dBox.w / 2) - (bBox.x0 + bBox.w / 2);
+              oy = (dBox.y0 + dBox.h / 2) - (bBox.y0 + bBox.h / 2);
+            }
+            window.__thunderDecoOffset[lv] = { x: ox * s, y: oy * s };
+          }
         }
-        window.__thunderDecoOffset[lv] = { x: ox * s, y: oy * s };
       }
     }
     /* 异步：所有 Canvas → dataURL → Image → addImage（与火/冰/水塔完全一致：
