@@ -21,6 +21,9 @@
  * per-tower canvas：每座雷塔独有一张与源装饰贴图等大的 canvas 纹理，
  * 每帧只复制当前已显现的底部行（drawImage 同位置同尺寸，无拉伸），
  * 未显现区域保持透明。形状 = 源贴图逐像素一致，代码不重绘。
+ * 注意：CanvasTexture 存在预乘 alpha 二次预乘问题，每次 _updateDisplay
+ * 将 canvas 转 dataURL → Image → addImage，走 PNG 直通 alpha 路径，
+ * 与本体层完全一致，消除边缘发虚。
  *
  * 特效参数（JSON 驱动，config.towers.towerE.thunderDeco）：
  *   interval  闪现后的平均等待秒（1/2/3 级递减 → 频率递增）；
@@ -114,12 +117,21 @@ class ThunderArc {
     this._img.setAlpha(0);
     head.add(this._img);
 
+    /* CanvasTexture 预乘 alpha 修复：创建 Image 纹理替代 CanvasTexture。
+       Canvas 2D 内部已做预乘 alpha，WebGL texImage2D 默认再预乘一次，
+       导致边缘像素被二次压暗发虚。将 canvas 转 dataURL → Image → addImage，
+       走 HTMLImageElement 的 PNG 直通 alpha 路径，与本体层完全一致。
+       初始空纹理，首次 _updateDisplay 时替换。 */
+    this._pendingTexUpdate = false;
+    this._useImageTex = true;
+
     this._state = 'wait';
     this._t = 0;
     this._wait = Math.random() * this._pick('interval');
   }
 
-  /* 从源 canvas 复制底部 revealH 行到 per-tower canvas（同位置同尺寸，无拉伸） */
+  /* 从源 canvas 复制底部 revealH 行到 per-tower canvas（同位置同尺寸，无拉伸），
+     然后转 Image 纹理消除预乘 alpha 问题。 */
   _updateDisplay(revealH) {
     if (!this._dispCtx || !this._srcCanvas) return;
     const ctx = this._dispCtx;
@@ -132,7 +144,25 @@ class ThunderArc {
         0, this._texH - rh, this._texW, rh        // 目标区域（同位置同尺寸）
       );
     }
-    this._dispTex.refresh();
+    /* Canvas → dataURL → Image → addImage：消除预乘 alpha，与本体层一致。
+       异步解码完成后替换纹理，避免每帧创建大量 Image 对象。 */
+    if (this._useImageTex && !this._pendingTexUpdate) {
+      this._pendingTexUpdate = true;
+      const dataURL = ctx.canvas.toDataURL('image/png');
+      const img = new Image();
+      img.onload = () => {
+        try {
+          if (this.scene.textures.exists(this._dispKey)) this.scene.textures.remove(this._dispKey);
+          this.scene.textures.addImage(this._dispKey, img);
+          this._img.setTexture(this._dispKey);
+        } catch (e) {}
+        this._pendingTexUpdate = false;
+      };
+      img.onerror = () => { this._pendingTexUpdate = false; };
+      img.src = dataURL;
+    } else {
+      this._dispTex.refresh();
+    }
   }
 
   /* 升级：销毁旧级 image + canvas，按新等级重建 */
