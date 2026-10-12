@@ -823,6 +823,10 @@ class BootScene extends Phaser.Scene {
     const od = out.data, sd = imgData.data;
     const solid = bg.type === 'solid';
     const isGreen = solid && bg.g > 120 && bg.g - Math.max(bg.r, bg.b) > 60;
+    /* 收紧过渡带：excess 50→20。源图闪电边缘反走样像素 excess 多在 0~20，
+       50 过渡带会把这些边缘像素做成半透明，导致整体发虚。20 过渡带更硬边，
+       与火塔离线抠图效果一致。 */
+    const KEY_SOFT = 20;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const si = ((y0 + y) * srcW + (x0 + x)) * 4;
@@ -833,11 +837,11 @@ class BootScene extends Phaser.Scene {
           const r = sd[si], g = sd[si + 1], b = sd[si + 2];
           if (isGreen) {
             const excess = g - Math.max(r, b);
-            if (excess > 50) { od[oi + 3] = 0; continue; }
+            if (excess > KEY_SOFT) { od[oi + 3] = 0; continue; }
             if (excess <= 0) {
               od[oi] = r; od[oi + 1] = g; od[oi + 2] = b; od[oi + 3] = a;
             } else {
-              const key = excess / 50;
+              const key = excess / KEY_SOFT;
               od[oi] = r;
               od[oi + 1] = Phaser.Math.Clamp((g - 255 * key) / (1 - key), 0, 255);
               od[oi + 2] = b;
