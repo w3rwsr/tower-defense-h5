@@ -837,18 +837,20 @@ class BootScene extends Phaser.Scene {
       }
     }
     tctx.putImageData(out, 0, 0);
-    /* Step 2: 高质量放大到目标尺寸（4 倍超采样） + LINEAR filter */
+    /* Step 2: 高质量放大到目标尺寸（4 倍超采样）。
+       用 addImage（ImageTextureSource）而非 createCanvas（CanvasTextureSource），
+       与火/冰/水塔完全一致 → 默认 LINEAR filter + 非预乘 alpha，边缘干净不虚。 */
     const outH = (targetH && targetH > h) ? targetH : h;
     const scale = outH / h;
     const outW = Math.round(w * scale);
-    const ct = this.textures.createCanvas(outKey, outW, Math.round(outH));
-    if (!ct) return false;
-    const cctx = ct.getContext();
-    cctx.imageSmoothingEnabled = true;
-    cctx.imageSmoothingQuality = 'high';
-    cctx.drawImage(tmp, 0, 0, w, h, 0, 0, outW, Math.round(outH));
-    ct.refresh();
-    try { ct.setFilter(Phaser.Textures.FilterMode.LINEAR); } catch (e) {}
+    const fc = document.createElement('canvas');
+    fc.width = outW;
+    fc.height = Math.round(outH);
+    const fctx = fc.getContext('2d');
+    fctx.imageSmoothingEnabled = true;
+    fctx.imageSmoothingQuality = 'high';
+    fctx.drawImage(tmp, 0, 0, w, h, 0, 0, outW, Math.round(outH));
+    this.textures.addImage(outKey, fc);
     return true;
   }
 

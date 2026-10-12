@@ -75,7 +75,7 @@ class ThunderArc {
     this._off = (window.__thunderDecoOffset &&
       window.__thunderDecoOffset[this.level]) || { x: 0, y: 0 };
 
-    /* 获取源装饰贴图 canvas（BootScene createCanvas 的产物） */
+    /* 获取源装饰贴图 canvas（BootScene addImage 的产物，getSourceImage 返回 Canvas） */
     const srcTex = this.scene.textures.get(decoKey);
     try { this._srcCanvas = srcTex.getSourceImage(); }
     catch (e) { this._srcCanvas = null; }
@@ -102,8 +102,14 @@ class ThunderArc {
     }
     this._dispCtx = this._dispTex.getContext();
     this._dispCtx.clearRect(0, 0, this._texW, this._texH);
-    /* LINEAR filter：与本体层一致，避免遮罩 canvas 缩放后发虚 */
-    try { this._dispTex.setFilter(Phaser.Textures.FilterMode.LINEAR); } catch (e) {}
+    /* LINEAR filter + 非预乘 alpha：与本体层（addImage）一致，避免半透明边缘
+       被预乘变暗变虚。CanvasTextureSource 默认 premultiplyAlpha=true，需显式关闭 */
+    try {
+      this._dispTex.setFilter(Phaser.Textures.FilterMode.LINEAR);
+      if (this._dispTex.source && this._dispTex.source[0]) {
+        this._dispTex.source[0].premultiplyAlpha = false;
+      }
+    } catch (e) {}
 
     /* 装饰 image 使用 per-tower canvas 纹理 */
     this._img = this.scene.add.image(this._off.x, this._off.y, this._dispKey);
