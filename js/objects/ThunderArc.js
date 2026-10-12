@@ -13,10 +13,10 @@
  * 本体层（thunder_tower_lvN）是独立静态 image，本类完全不触碰它——本体始终
  * 清晰、稳定、静止，装饰闪现不影响本体。
  *
- * 挂载：装饰 image 以【纹素坐标】add 进雷塔炮塔 container（与本体同坐标系、
- * 同旋转中心），位置 = window.__thunderDecoOffset[等级]（装饰中心相对本体
- * 中心的纹素偏移，由裁切时按共享坐标系实测，叠加后与原图严格对齐）。
- * container 统一 setScale(纹素→世界 ≈0.25)，装饰与本体永远严格对齐，不错位。
+ * 挂载：装饰 image add 进雷塔炮塔 container（与本体同坐标系、同旋转中心），
+ * 位置 = window.__thunderDecoOffset[等级] × k（世界坐标偏移），自身
+ * setScale(k) 与本体显示缩放一致，叠加后与原图严格对齐。
+ * 装饰 image 自身 setScale(k) 与本体一致，container 不缩放只做转向。
  *
  * per-tower canvas：每座雷塔独有一张与源装饰贴图等大的 canvas 纹理，
  * 每帧只复制当前已显现的底部行（drawImage 同位置同尺寸，无拉伸），
@@ -93,7 +93,9 @@ class ThunderArc {
 
     if (!this._dispTex) {
       /* canvas 创建失败：回退直接用源贴图（整体 alpha 闪现，无遮罩） */
-      this._img = this.scene.add.image(this._off.x, this._off.y, decoKey);
+      const k = this.tower._thunderK || 0.25;
+      this._img = this.scene.add.image(this._off.x * k, this._off.y * k, decoKey);
+      this._img.setScale(k);
       this._img.setAlpha(0);
       head.add(this._img);
       this._state = 'wait';
@@ -106,7 +108,9 @@ class ThunderArc {
     try { this._dispTex.setFilter(Phaser.Textures.FilterMode.LINEAR); } catch (e) {}
 
     /* 装饰 image 使用 per-tower canvas 纹理 */
-    this._img = this.scene.add.image(this._off.x, this._off.y, this._dispKey);
+    const k = this.tower._thunderK || 0.25;
+    this._img = this.scene.add.image(this._off.x * k, this._off.y * k, this._dispKey);
+    this._img.setScale(k);
     this._img.setAlpha(0);
     head.add(this._img);
 

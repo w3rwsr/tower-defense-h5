@@ -58,8 +58,8 @@ class Tower extends Phaser.GameObjects.Container {
       this.head = null;
       /* 炮塔是 container：内含【本体静态 image】+ 装饰层帧（ThunderArc
          注入）。本体不做任何自身动画；container 仅做黄色端索敌整体转向。
-         坐标系统一为纹素系，container.setScale(4x→显示 ≈0.25) 后本体与
-         装饰严格对齐（装饰帧 ox/oy 也是纹素偏移）。 */
+         本体 image 用 setDisplaySize 直接设显示尺寸（与火塔一致），
+         container 不缩放；装饰帧以世界偏移 add，自身 setScale(k)。 */
       this.turret = scene.add.container(0, 0);
       this._thunderBody = scene.add.image(0, 0, this._thunderTexKey());
       this.turret.add(this._thunderBody);
@@ -171,7 +171,9 @@ class Tower extends Phaser.GameObjects.Container {
     const h = (art.baseHeight || 54) * lvScale;
     const fr = this._thunderBody.frame;
     const k = (fr && fr.height) ? h / fr.height : 0.25;
-    this.turret.setScale(k);
+    // 缩放设在 image 上（与火塔 setDisplaySize 完全一致），container 不缩放
+    const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
+    this._thunderBody.setDisplaySize(h * aspect, h);
     this._thunderK = k;
   }
 
@@ -467,11 +469,11 @@ class Tower extends Phaser.GameObjects.Container {
     /* 雷塔：发射点 = 旋转后贴图的黄色尖端（纹素偏移见 config art.tip，
        按各等级贴图实测，非写死）。turret 每帧平滑跟踪目标，取当前 rotation
        即时换算——目标移动时电链永远从【此刻】黄色端位置发出；
-       k = turret.scaleX（等比缩放，x/y 相同）。 */
+       k = _thunderK（等比缩放，x/y 相同）。 */
     if (this.isThunder) {
       const m = this._thunderTipOffset();
       const mx = m.x, my = m.y;
-      const k = this.turret.scaleX;
+      const k = this._thunderK;
       const c = Math.cos(this.turret.rotation), s = Math.sin(this.turret.rotation);
       return {
         x: this.x + k * (mx * c - my * s),
