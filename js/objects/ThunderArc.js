@@ -102,14 +102,8 @@ class ThunderArc {
     }
     this._dispCtx = this._dispTex.getContext();
     this._dispCtx.clearRect(0, 0, this._texW, this._texH);
-    /* LINEAR filter + 非预乘 alpha：与本体层（addImage）一致，避免半透明边缘
-       被预乘变暗变虚。CanvasTextureSource 默认 premultiplyAlpha=true，需显式关闭 */
-    try {
-      this._dispTex.setFilter(Phaser.Textures.FilterMode.LINEAR);
-      if (this._dispTex.source && this._dispTex.source[0]) {
-        this._dispTex.source[0].premultiplyAlpha = false;
-      }
-    } catch (e) {}
+    /* LINEAR filter：与本体层一致 */
+    try { this._dispTex.setFilter(Phaser.Textures.FilterMode.LINEAR); } catch (e) {}
 
     /* 装饰 image 使用 per-tower canvas 纹理 */
     this._img = this.scene.add.image(this._off.x, this._off.y, this._dispKey);

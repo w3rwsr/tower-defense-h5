@@ -458,9 +458,12 @@ class BootScene extends Phaser.Scene {
         let pending = 2;
         const done = () => {
           if (--pending > 0) return;
-          try { this._processThunderSheets(imgs.body, imgs.deco); }
-          catch (e) { /* 全量失败：Tower 回退程序炮头 */ }
-          resolve(true);
+          try {
+            const p = this._processThunderSheets(imgs.body, imgs.deco);
+            if (p && typeof p.then === 'function') {
+              p.then(() => resolve(true)).catch(() => resolve(true));
+            } else { resolve(true); }
+          } catch (e) { resolve(true); }
         };
         const load = (url, slot) => {
           if (!url) { done(); return; }
@@ -637,6 +640,10 @@ class BootScene extends Phaser.Scene {
     window.__thunderTipOffset = window.__thunderTipOffset || {};
     window.__thunderDecoOffset = window.__thunderDecoOffset || {};
     let anyBody = false;
+    /* 收集所有裁切后的 Canvas，稍后统一转 Image 再 addImage（与火/冰/水塔
+       完全一致：HTMLImageElement 直通 alpha，避免 Canvas 内部预乘 alpha 被
+       WebGL texImage2D 二次预乘导致边缘发虚）。 */
+    const texEntries = [];
     /* 4 倍超采样：本体/装饰输出纹素高 = 显示高 ×4，与其他塔清晰度一致
        （火塔 4x、冰塔 4x、水塔 3x）。body 和 deco 用同一缩放因子 s，
        保证两层叠加严格对齐。 */
@@ -654,9 +661,10 @@ class BootScene extends Phaser.Scene {
       const targetH = Math.round(4 * dispH);
       const s = targetH / bBox.h;
       const bodyKey = 'thunder_tower_lv' + lv;
-      const ok = this._thunderCropAndKey(bodyData, body.w, body.h, bodyBg,
+      const bodyCanvas = this._thunderCropAndKey(bodyData, body.w, body.h, bodyBg,
         bBox, bodyKey, targetH);
-      if (!ok) continue;
+      if (!bodyCanvas) continue;
+      texEntries.push({ key: bodyKey, canvas: bodyCanvas });
       anyBody = true;
       /* 黄色尖端（相对本体纹理中心，纹素坐标；按缩放 s 换算到输出纹理尺寸） */
       const tip = this._thunderDetectYellowTip(bodyData,
@@ -671,9 +679,10 @@ class BootScene extends Phaser.Scene {
         const decoKey = 'thunder_deco_lv' + lv;
         /* 装饰用同一 s 缩放，保证与本体对齐 */
         const decoTargetH = Math.round(dBox.h * s);
-        const ok2 = this._thunderCropAndKey(decoData, deco.w, deco.h, decoBg,
+        const decoCanvas = this._thunderCropAndKey(decoData, deco.w, deco.h, decoBg,
           dBox, decoKey, decoTargetH);
-        if (!ok2) continue;
+        if (!decoCanvas) continue;
+        texEntries.push({ key: decoKey, canvas: decoCanvas });
         /* 装饰中心相对本体中心的纹素偏移（按 s 换算到输出纹理尺寸） */
         let ox = 0, oy = 0;
         if (shared) {
@@ -683,8 +692,24 @@ class BootScene extends Phaser.Scene {
         window.__thunderDecoOffset[lv] = { x: ox * s, y: oy * s };
       }
     }
-    /* 至少一级本体就绪即启用美术路径；高级缺失由 _thunderTexKey 逐级回退 */
-    if (anyBody) window.__thunderTowerArt = true;
+    /* 异步：所有 Canvas → dataURL → Image → addImage（与火/冰/水塔完全一致：
+       HTMLImageElement 直通 alpha，避免 Canvas 内部预乘 alpha 被 WebGL
+       texImage2D 二次预乘导致边缘发虚）。返回 Promise 供调用方等待。 */
+    return Promise.all(texEntries.map((entry) => new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          if (this.textures.exists(entry.key)) this.textures.remove(entry.key);
+          this.textures.addImage(entry.key, img);
+        } catch (e) {}
+        resolve();
+      };
+      img.onerror = () => resolve();
+      img.src = entry.canvas.toDataURL('image/png');
+    }))).then(() => {
+      /* 至少一级本体就绪即启用美术路径；高级缺失由 _thunderTexKey 逐级回退 */
+      if (anyBody) window.__thunderTowerArt = true;
+    });
   }
 
   /* Image → canvas（带 willReadFrequently 优化），返回 {ctx, w, h} */
@@ -837,9 +862,10 @@ class BootScene extends Phaser.Scene {
       }
     }
     tctx.putImageData(out, 0, 0);
-    /* Step 2: 高质量放大到目标尺寸（4 倍超采样）。
-       用 addImage（ImageTextureSource）而非 createCanvas（CanvasTextureSource），
-       与火/冰/水塔完全一致 → 默认 LINEAR filter + 非预乘 alpha，边缘干净不虚。 */
+    /* Step 2: 高质量放大到目标尺寸（4 倍超采样），返回 Canvas。
+       调用方负责 Canvas → dataURL → Image → addImage（与火/冰/水塔完全一致：
+       HTMLImageElement 的 PNG 直通 alpha，避免 Canvas 内部预乘 alpha 被
+       WebGL texImage2D 二次预乘导致边缘发虚）。 */
     const outH = (targetH && targetH > h) ? targetH : h;
     const scale = outH / h;
     const outW = Math.round(w * scale);
@@ -850,8 +876,7 @@ class BootScene extends Phaser.Scene {
     fctx.imageSmoothingEnabled = true;
     fctx.imageSmoothingQuality = 'high';
     fctx.drawImage(tmp, 0, 0, w, h, 0, 0, outW, Math.round(outH));
-    this.textures.addImage(outKey, fc);
-    return true;
+    return fc;
   }
 
   /* 探测本体"实心黄色尖端"相对本体纹理中心的纹素偏移。黄色判据：
