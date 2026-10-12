@@ -1,12 +1,13 @@
 /**
  * ThunderArc.js —— 雷元素塔【外围装饰层】遮罩显现特效
  *
- * 新版（遮罩驱动）：装饰形状 100% 来自 BootScene 从 thunder_deco_all.png
- * 按内容边界裁出的整张装饰贴图（thunder_deco_lvN）。代码不绘制任何自由形状，
- * 只用一张与源贴图等大的 per-tower canvas 做"从下往上遮罩显现"：
+ * 新版（静态 Image 纹理 + setCrop 遮罩）：
+ * 装饰形状 100% 来自 BootScene 从 thunder_deco_all.png 按内容边界裁出的
+ * 整张装饰贴图（thunder_deco_lvN）。代码不绘制任何自由形状，也不创建
+ * per-tower canvas——直接用源贴图的静态 Image 纹理，通过 setCrop 控制
+ * 可见区域实现"从下往上遮罩显现"：
  *   1. wait   随机等待 interval 秒（1/2/3 级递减 → 频率递增）；
- *   2. reveal 从底部 0 行逐渐复制到顶部全高（0.2~0.3 秒），装饰从下往上逐渐
- *              显现；alpha = maxAlpha；
+ *   2. reveal setCrop 从底部 0 高逐渐扩展到全高，装饰从下往上逐渐显现；
  *   3. fade   完整装饰可见，alpha 从 maxAlpha 线性淡出到 0；
  *   4. 回到 wait，循环。
  *
@@ -16,14 +17,9 @@
  * 挂载：装饰 image add 进雷塔炮塔 container（与本体同坐标系、同旋转中心），
  * 位置 = window.__thunderDecoOffset[等级] × k（世界坐标偏移），自身
  * setScale(k) 与本体显示缩放一致，叠加后与原图严格对齐。
- * 装饰 image 自身 setScale(k) 与本体一致，container 不缩放只做转向。
  *
- * per-tower canvas：每座雷塔独有一张与源装饰贴图等大的 canvas 纹理，
- * 每帧只复制当前已显现的底部行（drawImage 同位置同尺寸，无拉伸），
- * 未显现区域保持透明。形状 = 源贴图逐像素一致，代码不重绘。
- * 注意：CanvasTexture 存在预乘 alpha 二次预乘问题，每次 _updateDisplay
- * 将 canvas 转 dataURL → Image → addImage，走 PNG 直通 alpha 路径，
- * 与本体层完全一致，消除边缘发虚。
+ * 关键优势：无 CanvasTexture、无预乘 alpha、无每帧纹理重建，
+ * 与火/冰/水塔的 addImage(Image) 渲染路径完全一致，边缘锐利。
  *
  * 特效参数（JSON 驱动，config.towers.towerE.thunderDeco）：
  *   interval  闪现后的平均等待秒（1/2/3 级递减 → 频率递增）；
@@ -47,10 +43,6 @@ class ThunderArc {
     this.level = Math.max(1, Math.min(3, tower.level || 1));
     this._alive = true;
     this._img = null;          // 装饰层 image
-    this._dispKey = null;      // per-tower canvas 纹理 key
-    this._dispTex = null;      // per-tower CanvasTexture
-    this._dispCtx = null;      // per-tower canvas 2D context
-    this._srcCanvas = null;    // 源装饰贴图 canvas（从中复制像素）
     this._texW = 0;
     this._texH = 0;
     this._off = { x: 0, y: 0 };
@@ -69,8 +61,8 @@ class ThunderArc {
   }
   _maxAlpha() { return this.cfg.maxAlpha != null ? this.cfg.maxAlpha : 0.85; }
 
-  /* 按当前等级构建装饰 image + per-tower canvas 纹理。
-     canvas 创建失败时回退直接用源贴图（整体 alpha 闪现，无遮罩）。 */
+  /* 按当前等级构建装饰 image：直接用源贴图静态 Image 纹理，setCrop 做遮罩。
+     无 CanvasTexture、无预乘 alpha、无每帧纹理重建，与本体层完全一致。 */
   _build() {
     const decoKey = 'thunder_deco_lv' + this.level;
     if (!this.scene.textures.exists(decoKey)) return;
@@ -78,99 +70,36 @@ class ThunderArc {
     this._off = (window.__thunderDecoOffset &&
       window.__thunderDecoOffset[this.level]) || { x: 0, y: 0 };
 
-    /* 获取源装饰贴图 canvas（BootScene addImage 的产物，getSourceImage 返回 Canvas） */
+    /* 获取源贴图尺寸（用于 setCrop 计算） */
     const srcTex = this.scene.textures.get(decoKey);
-    try { this._srcCanvas = srcTex.getSourceImage(); }
-    catch (e) { this._srcCanvas = null; }
-    if (!this._srcCanvas) return;
-    this._texW = this._srcCanvas.width;
-    this._texH = this._srcCanvas.height;
+    const srcImg = srcTex.getSourceImage();
+    this._texW = srcImg.width;
+    this._texH = srcImg.height;
     if (this._texW <= 0 || this._texH <= 0) return;
 
-    /* 创建 per-tower canvas 纹理（与源贴图等大，仅复制显现区域，无拉伸） */
-    this._dispKey = 'thunder_deco_disp_' + this._uid;
-    try {
-      this._dispTex = this.scene.textures.createCanvas(
-        this._dispKey, this._texW, this._texH);
-    } catch (e) { this._dispTex = null; }
-
-    if (!this._dispTex) {
-      /* canvas 创建失败：回退直接用源贴图（整体 alpha 闪现，无遮罩） */
-      const k = this.tower._thunderK || 0.25;
-      this._img = this.scene.add.image(this._off.x * k, this._off.y * k, decoKey);
-      this._img.setScale(k);
-      this._img.setAlpha(0);
-      head.add(this._img);
-      this._state = 'wait';
-      this._wait = Math.random() * this._pick('interval');
-      return;
-    }
-    this._dispCtx = this._dispTex.getContext();
-    this._dispCtx.clearRect(0, 0, this._texW, this._texH);
-    /* LINEAR filter：与本体层一致 */
-    try { this._dispTex.setFilter(Phaser.Textures.FilterMode.LINEAR); } catch (e) {}
-
-    /* 装饰 image 使用 per-tower canvas 纹理 */
+    /* 装饰 image：直接用源贴图静态 Image 纹理 */
     const k = this.tower._thunderK || 0.25;
-    this._img = this.scene.add.image(this._off.x * k, this._off.y * k, this._dispKey);
+    this._img = this.scene.add.image(this._off.x * k, this._off.y * k, decoKey);
     this._img.setScale(k);
     this._img.setAlpha(0);
+    /* setCrop 初始状态：完全不可见（高度 0，从底部开始） */
+    this._img.setCrop(0, this._texH, this._texW, 0);
     head.add(this._img);
-
-    /* CanvasTexture 预乘 alpha 修复：只在 reveal 完成（progress=1）时
-       将最终完整 canvas 转一次 Image 纹理，避免每帧重建纹理导致卡死。
-       过程中用 CanvasTexture 显示（可接受轻微预乘差异），完成后替换。 */
-    this._pendingTexUpdate = false;
-    this._useImageTex = true;
-    this._finalized = false;   // reveal 完成后是否已替换为 Image 纹理
 
     this._state = 'wait';
     this._t = 0;
     this._wait = Math.random() * this._pick('interval');
   }
 
-  /* 从源 canvas 复制底部 revealH 行到 per-tower canvas（同位置同尺寸，无拉伸）。
-     只在 reveal 完成（revealH >= texH）时做一次 Image 纹理替换，
-     过程中仍用 CanvasTexture.refresh()，避免每帧重建纹理导致卡死。 */
-  _updateDisplay(revealH) {
-    if (!this._dispCtx || !this._srcCanvas) return;
-    const ctx = this._dispCtx;
-    ctx.clearRect(0, 0, this._texW, this._texH);
-    const isComplete = revealH >= this._texH;
-    if (revealH > 0) {
-      const rh = Math.min(revealH, this._texH);
-      ctx.drawImage(
-        this._srcCanvas,
-        0, this._texH - rh, this._texW, rh,       // 源区域
-        0, this._texH - rh, this._texW, rh        // 目标区域（同位置同尺寸）
-      );
-    }
-    /* 只在 reveal 完成时替换一次 Image 纹理（消除预乘 alpha），
-       且只在未替换过时执行；过程中用 CanvasTexture.refresh()。
-       注意：_finalized 后 _dispTex 已被移除，refresh 前需判空。 */
-    if (this._useImageTex && isComplete && !this._finalized && !this._pendingTexUpdate) {
-      this._pendingTexUpdate = true;
-      const dataURL = ctx.canvas.toDataURL('image/png');
-      const img = new Image();
-      img.onload = () => {
-        try {
-          if (this.scene.textures.exists(this._dispKey)) this.scene.textures.remove(this._dispKey);
-          this.scene.textures.addImage(this._dispKey, img);
-          this._img.setTexture(this._dispKey);
-          this._finalized = true;
-          this._dispTex = null;   // Image 纹理已接管，释放 CanvasTexture 引用
-          this._dispCtx = null;   // canvas 已无用，释放 context 引用
-        } catch (e) {}
-        this._pendingTexUpdate = false;
-      };
-      img.onerror = () => { this._pendingTexUpdate = false; };
-      img.src = dataURL;
-    } else if (this._dispTex) {
-      this._dispTex.refresh();
-    }
+  /* 更新遮罩：从底部往上逐渐显现。revealH 为已显现高度（纹素）。 */
+  _updateCrop(revealH) {
+    if (!this._img) return;
+    const rh = Math.max(0, Math.min(revealH, this._texH));
+    /* setCrop(x, y, w, h)：y 从底部开始，高度 rh */
+    this._img.setCrop(0, this._texH - rh, this._texW, rh);
   }
 
-  /* 升级：销毁旧级 image + canvas，按新等级重建 */
+  /* 升级：销毁旧级 image，按新等级重建 */
   setLevel(level) {
     const lv = Math.max(1, Math.min(3, level));
     if (lv === this.level) return;
@@ -186,33 +115,18 @@ class ThunderArc {
       this._img.destroy();
       this._img = null;
     }
-    /* 清理 per-tower canvas 纹理 */
-    if (this._dispKey) {
-      try {
-        if (this.scene.textures.exists(this._dispKey))
-          this.scene.textures.remove(this._dispKey);
-      } catch (e) {}
-    }
-    this._dispKey = null;
-    this._dispTex = null;
-    this._dispCtx = null;
-    this._srcCanvas = null;
-    this._finalized = false;
-    this._pendingTexUpdate = false;
   }
 
   /* 每帧由 Tower.update 调用；dt 秒。
-     reveal：从底部往上复制，0.2~0.3 秒完成，alpha = maxAlpha；
+     reveal：setCrop 从底部 0 高逐渐扩展到全高，alpha = maxAlpha；
      fade：完整显现后 alpha 线性淡出到 0；
-     wait：随机等待 interval 秒后进入下一次 reveal。
-     频率随等级递增（interval 数组 1<2<3 级递减）。 */
+     wait：随机等待 interval 秒后进入下一次 reveal。 */
   update(dt) {
     if (!this._alive || !this._img) return;
     if (this._state === 'reveal') {
       this._t += dt;
       const progress = Math.min(1, this._t / this._revealTime);
-      const revealH = progress * this._texH;
-      if (this._dispCtx) this._updateDisplay(revealH);
+      this._updateCrop(progress * this._texH);
       this._img.setAlpha(this._maxAlpha());
       if (progress >= 1) {
         this._state = 'fade';
@@ -226,7 +140,7 @@ class ThunderArc {
         this._state = 'wait';
         this._t = 0;
         this._img.setAlpha(0);
-        if (this._dispCtx) this._updateDisplay(0);
+        this._updateCrop(0);
         this._wait = this._pick('interval') * (0.7 + Math.random() * 0.8);
       }
     } else {
@@ -237,13 +151,12 @@ class ThunderArc {
         /* 显现持续 0.2~0.3 秒，加随机相位避免节奏机械 */
         this._revealTime = this._pick('reveal') * (0.85 + Math.random() * 0.4);
         this._fadeTime = this._pick('fadeOut') * (0.85 + Math.random() * 0.4);
-        if (this._dispCtx) this._updateDisplay(0);
+        this._updateCrop(0);
       }
     }
   }
 
-  /* 仅关停闪烁（塔销毁/场景关闭）；image + canvas 随炮塔 container 一并销毁，
-     这里只兜底移除引用，避免场景重启后悬挂 */
+  /* 仅关停闪烁（塔销毁/场景关闭）；image 随炮塔 container 一并销毁 */
   destroy() {
     this._alive = false;
     this._destroyImage();
