@@ -644,12 +644,14 @@ class BootScene extends Phaser.Scene {
        完全一致：HTMLImageElement 直通 alpha，避免 Canvas 内部预乘 alpha 被
        WebGL texImage2D 二次预乘导致边缘发虚）。 */
     const texEntries = [];
-    /* 4 倍超采样：本体/装饰输出纹素高 = 显示高 ×4，与其他塔清晰度一致
-       （火塔 4x、冰塔 4x、水塔 3x）。body 和 deco 用同一缩放因子 s，
-       保证两层叠加严格对齐。 */
+    /* 超采样倍数 JSON 驱动（config towerE.art.superSample，默认 4）：
+       雷塔源图内容盒 965~1213px，4×（216~268px）会 4.5× 降采样把闪电
+       细线压虚；8×（432~536px）降采样约 2.2×，与火/冰塔清晰度对齐。
+       body 和 deco 用同一缩放因子 s，保证两层叠加严格对齐。 */
     const art = TD_CONFIG.towers.towerE.art;
     const baseH = (art && art.baseHeight) || 54;
     const lvScales = (art && art.scale) || {};
+    const superSample = (art && art.superSample) || 4;
     /* 装饰层分段：与主体共用同一分段（装饰图碎片多，按主体段范围裁切）。
        装饰图在主体段 x 范围内有内容，直接按主体段范围 + 装饰图内容包围盒裁切。 */
     for (let lv = 1; lv <= 3; lv++) {
@@ -658,9 +660,9 @@ class BootScene extends Phaser.Scene {
       const bBox = this._thunderContentBox(bodyData, body.w, body.h, bodyBg,
         bSeg.x0, bSeg.x1);
       if (!bBox) continue;
-      /* 目标纹素高 = 4 × 显示高；s = 输出/原始，body 和 deco 共用 */
+      /* 目标纹素高 = superSample × 显示高；s = 输出/原始，body 和 deco 共用 */
       const dispH = baseH * (lvScales[lv] || 1);
-      const targetH = Math.round(4 * dispH);
+      const targetH = Math.round(superSample * dispH);
       const s = targetH / bBox.h;
       const bodyKey = 'thunder_tower_lv' + lv;
       /* 透明背景检测：bg.type === 'transparent' 时跳过色度键，直接裁切 */
