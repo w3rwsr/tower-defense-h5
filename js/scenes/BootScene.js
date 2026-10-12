@@ -436,60 +436,41 @@ class BootScene extends Phaser.Scene {
       }));
     }
 
-    /* ---------- 雷元素塔三级贴图（ThunderTowerArtData.js，三连图离线裁切） ----------
-       data URI 同源干净，file:// 也可上传 WebGL。三张全部就绪才置
-       window.__thunderTowerArt，Tower 据此给 towerE 换雷塔贴图；缺失时 Tower
-       回退到程序化炮头 turret_towerE，绝不黑屏。并入 artJobs 等待链。 */
-    const hasThunderTowerData = (typeof THUNDER_TOWER_ART !== 'undefined') && THUNDER_TOWER_ART;
-    if (hasThunderTowerData) {
+    /* ---------- 雷元素塔三级贴图（ThunderSheetData.js 全图 data URI，运行时按元素边界裁切） ----------
+       数据源：assets/thunder_body_all.png / thunder_deco_all.png 横向三连图，
+       离线编码为 data URI 挂 window.THUNDER_SHEET_DATA。运行时用 canvas 读像素，
+       按【内容列】扫描三段闪电边界（非简单三等分），自动检测背景（透明 / 纯色）
+       做色度键抠图，按内容包围盒裁出每级两张独立贴图：
+         thunder_tower_lvN  = 闪电主体静态层（造型 / 颜色 / 大小保持原图，不重绘）
+         thunder_deco_lvN   = 外围装饰层（形状与原图逐像素一致，仅做闪现 alpha 循环）
+       本体层扫描"实心黄色尖端"像素，相对本体纹理中心写入 window.__thunderTipOffset[lv]，
+       发射点据此 + 旋转矩阵动态计算（不再写死 config.tip）。
+       装饰层相对本体中心的纹素偏移写入 window.__thunderDecoOffset[lv]，叠加时严格对齐原图。
+       data URI 同源干净，file:// 下 getImageData 也可用；任一步异常回退程序炮头，
+       绝不黑屏。并入 artJobs 等待链。 */
+    const hasThunderSheet = (typeof THUNDER_SHEET_DATA !== 'undefined') && THUNDER_SHEET_DATA;
+    if (hasThunderSheet) {
       if (!artJobs) artJobs = [];
-      /* 每级两张纹理：thunder_tower_lvN=静态本体；thunder_deco_lvN=装饰
-         atlas（辉光描边 rim + 外侧闪电分叉 sparks，帧元数据挂全局）。
-         两张都就绪才算该级成功；三级全部成功置 __thunderTowerArt，
-         装饰帧缺失仅禁用闪烁（本体仍可用），绝不黑屏。 */
-      const thunderTowerJobs = [1, 2, 3].map((lv) => new Promise((resolve) => {
-        const entry = THUNDER_TOWER_ART[lv];
-        const durl = entry && (typeof entry === 'string' ? entry : entry.body);
-        if (!durl) { resolve(false); return; }
-        const bodyKey = 'thunder_tower_lv' + lv;
-        const decoKey = 'thunder_deco_lv' + lv;
-        const addTex = (key, url, done) => {
+      artJobs.push(new Promise((resolve) => {
+        /* 异步解码两张全图 data URI → Image；两图就绪后进入裁切流程。
+           任一张 onerror 也继续（缺失图按 null 处理，本体缺失即整体回退）。 */
+        const imgs = { body: null, deco: null };
+        let pending = 2;
+        const done = () => {
+          if (--pending > 0) return;
+          try { this._processThunderSheets(imgs.body, imgs.deco); }
+          catch (e) { /* 全量失败：Tower 回退程序炮头 */ }
+          resolve(true);
+        };
+        const load = (url, slot) => {
+          if (!url) { done(); return; }
           const img = new Image();
-          img.onload = () => {
-            try {
-              if (this.textures.exists(key)) this.textures.remove(key);
-              this.textures.addImage(key, img);
-            } catch (e) { /* 单张失败按缺失处理 */ }
-            done();
-          };
+          img.onload = () => { imgs[slot] = img; done(); };
           img.onerror = () => done();
           img.src = url;
         };
-        const bodyImg = new Image();
-        bodyImg.onload = () => {
-          try {
-            if (this.textures.exists(bodyKey)) this.textures.remove(bodyKey);
-            this.textures.addImage(bodyKey, bodyImg);
-          } catch (e) { resolve(false); return; }
-          // 装饰层：data URI 新版为对象；旧版字符串无装饰，静默跳过
-          if (entry && typeof entry === 'object' && entry.deco) {
-            addTex(decoKey, entry.deco, () => {
-              if (entry.frames && this.textures.exists(decoKey)) {
-                window.__thunderDecoFrames = window.__thunderDecoFrames || {};
-                window.__thunderDecoFrames[lv] = entry.frames;
-              }
-              resolve(true);  // 装饰失败不阻塞本体
-            });
-          } else {
-            resolve(true);
-          }
-        };
-        bodyImg.onerror = () => resolve(false);
-        bodyImg.src = durl;
-      }));
-      artJobs.push(Promise.all(thunderTowerJobs).then((oks) => {
-        if (oks.every((v) => v)) window.__thunderTowerArt = true;
-        return true;
+        load(THUNDER_SHEET_DATA.body, 'body');
+        load(THUNDER_SHEET_DATA.deco, 'deco');
       }));
     }
 
@@ -626,6 +607,227 @@ class BootScene extends Phaser.Scene {
     cctx.drawImage(off, minX, minY, cw, ch,
       Math.round((OUT - drawW) / 2), Math.round((OUT - drawH) / 2), drawW, drawH);
     ct.refresh();
+  }
+
+  /* ============================================================
+   * 雷塔全图裁切（运行时）：把 body/deco 两张横向三连图按内容边界切成
+   * 3 级本体 + 装饰纹理，并探测黄色尖端 / 装饰对齐偏移。像素读写在 canvas
+   * 上完成，data URI 同源干净，file:// 也可用。任一异常静默退出 → Tower
+   * 回退程序炮头 turret_towerE，绝不黑屏。
+   * ============================================================ */
+  _processThunderSheets(bodyImg, decoImg) {
+    if (!bodyImg) return;  // 本体全图缺失 → 整体回退
+    const body = this._thunderDrawToCanvas(bodyImg);
+    if (!body) return;
+    const bodyData = body.ctx.getImageData(0, 0, body.w, body.h);
+    const bodyBg = this._thunderDetectBg(bodyData, body.w, body.h);
+    const bodySegs = this._thunderFindSegments(bodyData, body.w, body.h, bodyBg);
+    if (bodySegs.length < 3) return;  // 无法识别三段 → 回退
+    let deco = null, decoData = null, decoBg = null, decoSegs = null;
+    if (decoImg) {
+      deco = this._thunderDrawToCanvas(decoImg);
+      if (deco) {
+        decoData = deco.ctx.getImageData(0, 0, deco.w, deco.h);
+        decoBg = this._thunderDetectBg(decoData, deco.w, deco.h);
+        decoSegs = this._thunderFindSegments(decoData, deco.w, deco.h, decoBg);
+      }
+    }
+    /* 两图尺寸一致时按共享坐标系对齐装饰；否则按段中心兜底（deco 居中于 body） */
+    const shared = deco && deco.w === body.w && deco.h === body.h;
+    window.__thunderTipOffset = window.__thunderTipOffset || {};
+    window.__thunderDecoOffset = window.__thunderDecoOffset || {};
+    let anyBody = false;
+    for (let lv = 1; lv <= 3; lv++) {
+      const bSeg = bodySegs[lv - 1];
+      if (!bSeg) continue;
+      const bBox = this._thunderContentBox(bodyData, body.w, body.h, bodyBg,
+        bSeg.x0, bSeg.x1);
+      if (!bBox) continue;
+      const bodyKey = 'thunder_tower_lv' + lv;
+      const ok = this._thunderCropAndKey(bodyData, body.w, body.h, bodyBg,
+        bBox, bodyKey);
+      if (!ok) continue;
+      anyBody = true;
+      /* 黄色尖端（相对本体纹理中心，纹素坐标；config.tip 不再写死） */
+      window.__thunderTipOffset[lv] = this._thunderDetectYellowTip(bodyData,
+        body.w, body.h, bodyBg, bBox);
+      /* 装饰层（可选；缺失仅禁用闪现，本体仍可用） */
+      if (decoData && decoSegs && decoSegs[lv - 1]) {
+        const dSeg = decoSegs[lv - 1];
+        const dBox = this._thunderContentBox(decoData, deco.w, deco.h, decoBg,
+          dSeg.x0, dSeg.x1);
+        if (!dBox) continue;
+        const decoKey = 'thunder_deco_lv' + lv;
+        const ok2 = this._thunderCropAndKey(decoData, deco.w, deco.h, decoBg,
+          dBox, decoKey);
+        if (!ok2) continue;
+        /* 装饰中心相对本体中心的纹素偏移（共享坐标系下严格对齐原图） */
+        let ox = 0, oy = 0;
+        if (shared) {
+          ox = (dBox.x0 + dBox.w / 2) - (bBox.x0 + bBox.w / 2);
+          oy = (dBox.y0 + dBox.h / 2) - (bBox.y0 + bBox.h / 2);
+        }
+        window.__thunderDecoOffset[lv] = { x: ox, y: oy };
+      }
+    }
+    /* 至少一级本体就绪即启用美术路径；高级缺失由 _thunderTexKey 逐级回退 */
+    if (anyBody) window.__thunderTowerArt = true;
+  }
+
+  /* Image → canvas（带 willReadFrequently 优化），返回 {ctx, w, h} */
+  _thunderDrawToCanvas(img) {
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    if (!w || !h) return null;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    return { ctx, w, h };
+  }
+
+  /* 背景检测：采样四角，多数透明→已透明；角颜色近纯色→纯色背景→色度键；
+     角颜色差异大→当透明处理（保留原样，不抠图） */
+  _thunderDetectBg(imgData, w, h) {
+    const d = imgData.data;
+    const corners = [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]];
+    let transparent = 0, samples = [];
+    for (const [cx, cy] of corners) {
+      const i = (cy * w + cx) * 4;
+      if (d[i + 3] < 16) transparent++;
+      else samples.push([d[i], d[i + 1], d[i + 2]]);
+    }
+    if (transparent >= 3 || samples.length === 0) return { type: 'transparent' };
+    let r = 0, g = 0, b = 0;
+    for (const s of samples) { r += s[0]; g += s[1]; b += s[2]; }
+    r = r / samples.length; g = g / samples.length; b = b / samples.length;
+    let dev = 0;
+    for (const s of samples) {
+      dev = Math.max(dev, Math.abs(s[0] - r), Math.abs(s[1] - g), Math.abs(s[2] - b));
+    }
+    if (dev <= 24) return { type: 'solid', r: Math.round(r), g: Math.round(g), b: Math.round(b) };
+    return { type: 'transparent' };
+  }
+
+  /* 像素是否为"内容"（非背景）。透明背景：alpha>16；纯色背景：与背景差异大 */
+  _thunderIsContent(d, i, bg) {
+    if (d[i + 3] < 16) return false;
+    if (bg.type === 'transparent') return true;
+    const dev = Math.abs(d[i] - bg.r) + Math.abs(d[i + 1] - bg.g) + Math.abs(d[i + 2] - bg.b);
+    return dev > 60;
+  }
+
+  /* 找 3 段内容列（横向三连图，段间有透明列间隙）。返回 [{x0,x1}×3]；
+     无法识别三段（粘连 / 全空）时返回 [] */
+  _thunderFindSegments(imgData, w, h, bg) {
+    const d = imgData.data;
+    const cols = new Array(w).fill(false);
+    for (let x = 0; x < w; x++) {
+      for (let y = 0; y < h; y += 2) {
+        if (this._thunderIsContent(d, (y * w + x) * 4, bg)) { cols[x] = true; break; }
+      }
+    }
+    const segs = [];
+    let start = -1;
+    for (let x = 0; x <= w; x++) {
+      if (x < w && cols[x]) { if (start < 0) start = x; }
+      else if (start >= 0) { segs.push({ x0: start, x1: x - 1 }); start = -1; }
+    }
+    if (segs.length === 3) return segs;
+    /* 兜底：内容列总宽三等分（仅当段间无间隙、三连图粘连时） */
+    let cmin = w, cmax = -1;
+    for (let x = 0; x < w; x++) if (cols[x]) { if (x < cmin) cmin = x; if (x > cmax) cmax = x; }
+    if (cmax < 0) return [];
+    const step = (cmax - cmin + 1) / 3;
+    return [
+      { x0: cmin, x1: Math.round(cmin + step) - 1 },
+      { x0: Math.round(cmin + step), x1: Math.round(cmin + 2 * step) - 1 },
+      { x0: Math.round(cmin + 2 * step), x1: cmax }
+    ];
+  }
+
+  /* 段内内容包围盒（纹素）。隔行隔列扫描后向外扩 1px 补偿边缘。
+     返回 {x0,y0,w,h}；段内无内容返回 null */
+  _thunderContentBox(imgData, w, h, bg, x0, x1) {
+    const d = imgData.data;
+    let minX = x1 + 1, maxX = x0 - 1, minY = h, maxY = -1;
+    for (let y = 0; y < h; y += 2) {
+      for (let x = x0; x <= x1; x += 2) {
+        if (this._thunderIsContent(d, (y * w + x) * 4, bg)) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxY < 0) return null;
+    minX = Math.max(x0, minX - 1); maxX = Math.min(x1, maxX + 1);
+    minY = Math.max(0, minY - 1); maxY = Math.min(h - 1, maxY + 1);
+    return { x0: minX, y0: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+  }
+
+  /* 按包围盒裁切 + 色度键抠图，创建纹理。透明背景原样拷贝；纯色背景按差异
+     软边抠图（差异<32 全透明、32~80 半透明、>80 全保留）。返回是否成功 */
+  _thunderCropAndKey(imgData, srcW, srcH, bg, box, outKey) {
+    const { x0, y0, w, h } = box;
+    if (w <= 0 || h <= 0) return false;
+    if (this.textures.exists(outKey)) this.textures.remove(outKey);
+    const ct = this.textures.createCanvas(outKey, w, h);
+    if (!ct) return false;
+    const cctx = ct.getContext();
+    const out = cctx.createImageData(w, h);
+    const od = out.data, sd = imgData.data;
+    const solid = bg.type === 'solid';
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const si = ((y0 + y) * srcW + (x0 + x)) * 4;
+        const oi = (y * w + x) * 4;
+        const a = sd[si + 3];
+        if (a < 16) { od[oi + 3] = 0; continue; }
+        if (solid) {
+          const r = sd[si], g = sd[si + 1], b = sd[si + 2];
+          const dev = Math.abs(r - bg.r) + Math.abs(g - bg.g) + Math.abs(b - bg.b);
+          if (dev < 32) { od[oi + 3] = 0; continue; }            // 纯背景 → 全透明
+          od[oi] = r; od[oi + 1] = g; od[oi + 2] = b;
+          if (dev < 80) {                                       // 边缘半透明软过渡
+            const k = (dev - 32) / 48;
+            od[oi + 3] = Math.round(a * k);
+            if (od[oi + 3] < 40) od[oi + 3] = 0;
+          } else {
+            od[oi + 3] = a;
+          }
+        } else {
+          od[oi] = sd[si]; od[oi + 1] = sd[si + 1]; od[oi + 2] = sd[si + 2]; od[oi + 3] = a;
+        }
+      }
+    }
+    cctx.putImageData(out, 0, 0);
+    ct.refresh();
+    return true;
+  }
+
+  /* 探测本体"实心黄色尖端"相对本体纹理中心的纹素偏移。黄色判据：
+     R>200, G>180, B<130, R>=G。取距中心最远的黄像素作尖端（黄色端为
+     闪电顶端，天然在远离中心处）。未检出黄 → 退化为顶部中点偏移 */
+  _thunderDetectYellowTip(imgData, srcW, srcH, bg, box) {
+    const { x0, y0, w, h } = box;
+    const cx = w / 2, cy = h / 2;
+    const sd = imgData.data;
+    let bestX = 0, bestY = -h * 0.4, bestDist = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const si = ((y0 + y) * srcW + (x0 + x)) * 4;
+        const r = sd[si], g = sd[si + 1], b = sd[si + 2], a = sd[si + 3];
+        if (a < 128) continue;
+        if (r > 200 && g > 180 && b < 130 && r >= g) {
+          const dx = x - cx, dy = y - cy;
+          const dist = dx * dx + dy * dy;
+          if (dist > bestDist) { bestDist = dist; bestX = dx; bestY = dy; }
+        }
+      }
+    }
+    return { x: bestX, y: bestY };
   }
 
   /* 小工具：在一张临时 Graphics 上绘制并生成纹理 */

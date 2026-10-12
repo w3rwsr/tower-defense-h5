@@ -175,10 +175,15 @@ class Tower extends Phaser.GameObjects.Container {
     this._thunderK = k;
   }
 
-  /* 黄色尖端在【纹素坐标】中相对贴图中心的偏移（config towerE.art.tip，
-     分层后按本体几何尖端离线实测，非游戏内写死像素）；配置缺失时退化
-     为本体贴图顶部中点。换级后随当前贴图返回，尖端位置始终与贴图一致。 */
+  /* 黄色尖端在【纹素坐标】中相对本体贴图中心的偏移。
+     优先用 BootScene 裁切时从本体贴图实扫黄色像素得到的 __thunderTipOffset
+     （动态、随实际贴图，绝不写死）；该检测缺失时回退 config.art.tip 旧值；
+     两处都缺则退化为本体贴图顶部中点。换级后随当前贴图返回，尖端位置
+     始终与贴图一致——发射点 = 塔心 + 旋转矩阵 × 显示缩放 × tip。 */
   _thunderTipOffset() {
+    const det = window.__thunderTipOffset &&
+      window.__thunderTipOffset[this.level];
+    if (det && typeof det.x === 'number') return { x: det.x, y: det.y };
     const art = (this.cfg && this.cfg.art) || {};
     const tip = art.tip && art.tip[this.level];
     if (tip && tip.length === 2) return { x: tip[0], y: tip[1] };
