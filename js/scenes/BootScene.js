@@ -637,20 +637,31 @@ class BootScene extends Phaser.Scene {
     window.__thunderTipOffset = window.__thunderTipOffset || {};
     window.__thunderDecoOffset = window.__thunderDecoOffset || {};
     let anyBody = false;
+    /* 4 倍超采样：本体/装饰输出纹素高 = 显示高 ×4，与其他塔清晰度一致
+       （火塔 4x、冰塔 4x、水塔 3x）。body 和 deco 用同一缩放因子 s，
+       保证两层叠加严格对齐。 */
+    const art = TD_CONFIG.towers.towerE.art;
+    const baseH = (art && art.baseHeight) || 54;
+    const lvScales = (art && art.scale) || {};
     for (let lv = 1; lv <= 3; lv++) {
       const bSeg = bodySegs[lv - 1];
       if (!bSeg) continue;
       const bBox = this._thunderContentBox(bodyData, body.w, body.h, bodyBg,
         bSeg.x0, bSeg.x1);
       if (!bBox) continue;
+      /* 目标纹素高 = 4 × 显示高；s = 输出/原始，body 和 deco 共用 */
+      const dispH = baseH * (lvScales[lv] || 1);
+      const targetH = Math.round(4 * dispH);
+      const s = targetH / bBox.h;
       const bodyKey = 'thunder_tower_lv' + lv;
       const ok = this._thunderCropAndKey(bodyData, body.w, body.h, bodyBg,
-        bBox, bodyKey);
+        bBox, bodyKey, targetH);
       if (!ok) continue;
       anyBody = true;
-      /* 黄色尖端（相对本体纹理中心，纹素坐标；config.tip 不再写死） */
-      window.__thunderTipOffset[lv] = this._thunderDetectYellowTip(bodyData,
+      /* 黄色尖端（相对本体纹理中心，纹素坐标；按缩放 s 换算到输出纹理尺寸） */
+      const tip = this._thunderDetectYellowTip(bodyData,
         body.w, body.h, bodyBg, bBox);
+      window.__thunderTipOffset[lv] = { x: tip.x * s, y: tip.y * s };
       /* 装饰层（可选；缺失仅禁用闪现，本体仍可用） */
       if (decoData && decoSegs && decoSegs[lv - 1]) {
         const dSeg = decoSegs[lv - 1];
@@ -658,16 +669,18 @@ class BootScene extends Phaser.Scene {
           dSeg.x0, dSeg.x1);
         if (!dBox) continue;
         const decoKey = 'thunder_deco_lv' + lv;
+        /* 装饰用同一 s 缩放，保证与本体对齐 */
+        const decoTargetH = Math.round(dBox.h * s);
         const ok2 = this._thunderCropAndKey(decoData, deco.w, deco.h, decoBg,
-          dBox, decoKey);
+          dBox, decoKey, decoTargetH);
         if (!ok2) continue;
-        /* 装饰中心相对本体中心的纹素偏移（共享坐标系下严格对齐原图） */
+        /* 装饰中心相对本体中心的纹素偏移（按 s 换算到输出纹理尺寸） */
         let ox = 0, oy = 0;
         if (shared) {
           ox = (dBox.x0 + dBox.w / 2) - (bBox.x0 + bBox.w / 2);
           oy = (dBox.y0 + dBox.h / 2) - (bBox.y0 + bBox.h / 2);
         }
-        window.__thunderDecoOffset[lv] = { x: ox, y: oy };
+        window.__thunderDecoOffset[lv] = { x: ox * s, y: oy * s };
       }
     }
     /* 至少一级本体就绪即启用美术路径；高级缺失由 _thunderTexKey 逐级回退 */
@@ -771,18 +784,19 @@ class BootScene extends Phaser.Scene {
      绿幕背景：excess-green 抠图（g−max(r,b)>50 全透明、≤0 全保留、
      之间软过渡），并做去绿边（un-premultiply 反算去除背景色溢出），
      无绿边、无残留。其他纯色背景：差异度抠图（<32 全透明、32~80 半透明、
-     >80 全保留）。返回是否成功 */
-  _thunderCropAndKey(imgData, srcW, srcH, bg, box, outKey) {
+     >80 全保留）。targetH > h 时用高质量 Lanczos/bicubic 放大到目标尺寸
+     （4 倍超采样），并设 LINEAR filter 保证缩放后清晰。返回是否成功 */
+  _thunderCropAndKey(imgData, srcW, srcH, bg, box, outKey, targetH) {
     const { x0, y0, w, h } = box;
     if (w <= 0 || h <= 0) return false;
     if (this.textures.exists(outKey)) this.textures.remove(outKey);
-    const ct = this.textures.createCanvas(outKey, w, h);
-    if (!ct) return false;
-    const cctx = ct.getContext();
-    const out = cctx.createImageData(w, h);
+    /* Step 1: 色度键抠图到临时 canvas（原始分辨率，像素级精确） */
+    const tmp = document.createElement('canvas');
+    tmp.width = w; tmp.height = h;
+    const tctx = tmp.getContext('2d');
+    const out = tctx.createImageData(w, h);
     const od = out.data, sd = imgData.data;
     const solid = bg.type === 'solid';
-    /* 绿幕检测：G 分量远高于 R/B（四角采样到的纯绿幕背景） */
     const isGreen = solid && bg.g > 120 && bg.g - Math.max(bg.r, bg.b) > 60;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
@@ -793,25 +807,23 @@ class BootScene extends Phaser.Scene {
         if (solid) {
           const r = sd[si], g = sd[si + 1], b = sd[si + 2];
           if (isGreen) {
-            /* 绿幕：excess-green 色度键 + 去绿边 */
             const excess = g - Math.max(r, b);
-            if (excess > 50) { od[oi + 3] = 0; continue; }          // 纯绿幕 → 全透明
-            if (excess <= 0) {                                      // 无绿分量 → 全保留
+            if (excess > 50) { od[oi + 3] = 0; continue; }
+            if (excess <= 0) {
               od[oi] = r; od[oi + 1] = g; od[oi + 2] = b; od[oi + 3] = a;
-            } else {                                                // 边缘软过渡
+            } else {
               const key = excess / 50;
               od[oi] = r;
               od[oi + 1] = Phaser.Math.Clamp((g - 255 * key) / (1 - key), 0, 255);
               od[oi + 2] = b;
               od[oi + 3] = Math.round(a * (1 - key));
-              if (od[oi + 3] < 40) od[oi + 3] = 0;                 // 残边清除
+              if (od[oi + 3] < 40) od[oi + 3] = 0;
             }
           } else {
-            /* 通用纯色：差异度抠图 */
             const dev = Math.abs(r - bg.r) + Math.abs(g - bg.g) + Math.abs(b - bg.b);
-            if (dev < 32) { od[oi + 3] = 0; continue; }            // 纯背景 → 全透明
+            if (dev < 32) { od[oi + 3] = 0; continue; }
             od[oi] = r; od[oi + 1] = g; od[oi + 2] = b;
-            if (dev < 80) {                                       // 边缘半透明软过渡
+            if (dev < 80) {
               const k = (dev - 32) / 48;
               od[oi + 3] = Math.round(a * k);
               if (od[oi + 3] < 40) od[oi + 3] = 0;
@@ -824,8 +836,19 @@ class BootScene extends Phaser.Scene {
         }
       }
     }
-    cctx.putImageData(out, 0, 0);
+    tctx.putImageData(out, 0, 0);
+    /* Step 2: 高质量放大到目标尺寸（4 倍超采样） + LINEAR filter */
+    const outH = (targetH && targetH > h) ? targetH : h;
+    const scale = outH / h;
+    const outW = Math.round(w * scale);
+    const ct = this.textures.createCanvas(outKey, outW, Math.round(outH));
+    if (!ct) return false;
+    const cctx = ct.getContext();
+    cctx.imageSmoothingEnabled = true;
+    cctx.imageSmoothingQuality = 'high';
+    cctx.drawImage(tmp, 0, 0, w, h, 0, 0, outW, Math.round(outH));
     ct.refresh();
+    try { ct.setFilter(Phaser.Textures.FilterMode.LINEAR); } catch (e) {}
     return true;
   }
 

@@ -102,6 +102,8 @@ class ThunderArc {
     }
     this._dispCtx = this._dispTex.getContext();
     this._dispCtx.clearRect(0, 0, this._texW, this._texH);
+    /* LINEAR filter：与本体层一致，避免遮罩 canvas 缩放后发虚 */
+    try { this._dispTex.setFilter(Phaser.Textures.FilterMode.LINEAR); } catch (e) {}
 
     /* 装饰 image 使用 per-tower canvas 纹理 */
     this._img = this.scene.add.image(this._off.x, this._off.y, this._dispKey);
