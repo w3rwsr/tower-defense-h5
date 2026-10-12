@@ -117,25 +117,26 @@ class ThunderArc {
     this._img.setAlpha(0);
     head.add(this._img);
 
-    /* CanvasTexture 预乘 alpha 修复：创建 Image 纹理替代 CanvasTexture。
-       Canvas 2D 内部已做预乘 alpha，WebGL texImage2D 默认再预乘一次，
-       导致边缘像素被二次压暗发虚。将 canvas 转 dataURL → Image → addImage，
-       走 HTMLImageElement 的 PNG 直通 alpha 路径，与本体层完全一致。
-       初始空纹理，首次 _updateDisplay 时替换。 */
+    /* CanvasTexture 预乘 alpha 修复：只在 reveal 完成（progress=1）时
+       将最终完整 canvas 转一次 Image 纹理，避免每帧重建纹理导致卡死。
+       过程中用 CanvasTexture 显示（可接受轻微预乘差异），完成后替换。 */
     this._pendingTexUpdate = false;
     this._useImageTex = true;
+    this._finalized = false;   // reveal 完成后是否已替换为 Image 纹理
 
     this._state = 'wait';
     this._t = 0;
     this._wait = Math.random() * this._pick('interval');
   }
 
-  /* 从源 canvas 复制底部 revealH 行到 per-tower canvas（同位置同尺寸，无拉伸），
-     然后转 Image 纹理消除预乘 alpha 问题。 */
+  /* 从源 canvas 复制底部 revealH 行到 per-tower canvas（同位置同尺寸，无拉伸）。
+     只在 reveal 完成（revealH >= texH）时做一次 Image 纹理替换，
+     过程中仍用 CanvasTexture.refresh()，避免每帧重建纹理导致卡死。 */
   _updateDisplay(revealH) {
     if (!this._dispCtx || !this._srcCanvas) return;
     const ctx = this._dispCtx;
     ctx.clearRect(0, 0, this._texW, this._texH);
+    const isComplete = revealH >= this._texH;
     if (revealH > 0) {
       const rh = Math.min(revealH, this._texH);
       ctx.drawImage(
@@ -144,9 +145,10 @@ class ThunderArc {
         0, this._texH - rh, this._texW, rh        // 目标区域（同位置同尺寸）
       );
     }
-    /* Canvas → dataURL → Image → addImage：消除预乘 alpha，与本体层一致。
-       异步解码完成后替换纹理，避免每帧创建大量 Image 对象。 */
-    if (this._useImageTex && !this._pendingTexUpdate) {
+    /* 只在 reveal 完成时替换一次 Image 纹理（消除预乘 alpha），
+       且只在未替换过时执行；过程中用 CanvasTexture.refresh()。
+       注意：_finalized 后 _dispTex 已被移除，refresh 前需判空。 */
+    if (this._useImageTex && isComplete && !this._finalized && !this._pendingTexUpdate) {
       this._pendingTexUpdate = true;
       const dataURL = ctx.canvas.toDataURL('image/png');
       const img = new Image();
@@ -155,12 +157,15 @@ class ThunderArc {
           if (this.scene.textures.exists(this._dispKey)) this.scene.textures.remove(this._dispKey);
           this.scene.textures.addImage(this._dispKey, img);
           this._img.setTexture(this._dispKey);
+          this._finalized = true;
+          this._dispTex = null;   // Image 纹理已接管，释放 CanvasTexture 引用
+          this._dispCtx = null;   // canvas 已无用，释放 context 引用
         } catch (e) {}
         this._pendingTexUpdate = false;
       };
       img.onerror = () => { this._pendingTexUpdate = false; };
       img.src = dataURL;
-    } else {
+    } else if (this._dispTex) {
       this._dispTex.refresh();
     }
   }
@@ -192,6 +197,8 @@ class ThunderArc {
     this._dispTex = null;
     this._dispCtx = null;
     this._srcCanvas = null;
+    this._finalized = false;
+    this._pendingTexUpdate = false;
   }
 
   /* 每帧由 Tower.update 调用；dt 秒。
