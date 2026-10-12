@@ -661,8 +661,10 @@ class BootScene extends Phaser.Scene {
       const targetH = Math.round(4 * dispH);
       const s = targetH / bBox.h;
       const bodyKey = 'thunder_tower_lv' + lv;
-      const bodyCanvas = this._thunderCropAndKey(bodyData, body.w, body.h, bodyBg,
-        bBox, bodyKey, targetH);
+      /* 透明背景检测：bg.type === 'transparent' 时跳过色度键，直接裁切 */
+      const bodyCanvas = (bodyBg.type === 'transparent')
+        ? this._thunderCropOnly(bodyData, body.w, body.h, bBox, bodyKey, targetH)
+        : this._thunderCropAndKey(bodyData, body.w, body.h, bodyBg, bBox, bodyKey, targetH);
       if (!bodyCanvas) continue;
       texEntries.push({ key: bodyKey, canvas: bodyCanvas });
       anyBody = true;
@@ -679,8 +681,10 @@ class BootScene extends Phaser.Scene {
         const decoKey = 'thunder_deco_lv' + lv;
         /* 装饰用同一 s 缩放，保证与本体对齐 */
         const decoTargetH = Math.round(dBox.h * s);
-        const decoCanvas = this._thunderCropAndKey(decoData, deco.w, deco.h, decoBg,
-          dBox, decoKey, decoTargetH);
+        /* 透明背景检测：跳过色度键 */
+        const decoCanvas = (decoBg.type === 'transparent')
+          ? this._thunderCropOnly(decoData, deco.w, deco.h, dBox, decoKey, decoTargetH)
+          : this._thunderCropAndKey(decoData, deco.w, deco.h, decoBg, dBox, decoKey, decoTargetH);
         if (!decoCanvas) continue;
         texEntries.push({ key: decoKey, canvas: decoCanvas });
         /* 装饰中心相对本体中心的纹素偏移（按 s 换算到输出纹理尺寸） */
@@ -870,6 +874,39 @@ class BootScene extends Phaser.Scene {
        调用方负责 Canvas → dataURL → Image → addImage（与火/冰/水塔完全一致：
        HTMLImageElement 的 PNG 直通 alpha，避免 Canvas 内部预乘 alpha 被
        WebGL texImage2D 二次预乘导致边缘发虚）。 */
+    const outH = (targetH && targetH > h) ? targetH : h;
+    const scale = outH / h;
+    const outW = Math.round(w * scale);
+    const fc = document.createElement('canvas');
+    fc.width = outW;
+    fc.height = Math.round(outH);
+    const fctx = fc.getContext('2d');
+    fctx.imageSmoothingEnabled = true;
+    fctx.imageSmoothingQuality = 'high';
+    fctx.drawImage(tmp, 0, 0, w, h, 0, 0, outW, Math.round(outH));
+    return fc;
+  }
+
+  /* 透明背景直接裁切（不做色度键抠图）：从源 ImageData 按包围盒裁出，
+     高质量放大到目标尺寸，返回 Canvas。用于 thunder_*_transparent.png。 */
+  _thunderCropOnly(imgData, srcW, srcH, box, outKey, targetH) {
+    const { x0, y0, w, h } = box;
+    if (w <= 0 || h <= 0) return null;
+    if (this.textures.exists(outKey)) this.textures.remove(outKey);
+    const tmp = document.createElement('canvas');
+    tmp.width = w; tmp.height = h;
+    const tctx = tmp.getContext('2d');
+    const out = tctx.createImageData(w, h);
+    const od = out.data, sd = imgData.data;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const si = ((y0 + y) * srcW + (x0 + x)) * 4;
+        const oi = (y * w + x) * 4;
+        od[oi] = sd[si]; od[oi + 1] = sd[si + 1];
+        od[oi + 2] = sd[si + 2]; od[oi + 3] = sd[si + 3];
+      }
+    }
+    tctx.putImageData(out, 0, 0);
     const outH = (targetH && targetH > h) ? targetH : h;
     const scale = outH / h;
     const outW = Math.round(w * scale);
