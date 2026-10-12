@@ -767,8 +767,11 @@ class BootScene extends Phaser.Scene {
     return { x0: minX, y0: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
   }
 
-  /* 按包围盒裁切 + 色度键抠图，创建纹理。透明背景原样拷贝；纯色背景按差异
-     软边抠图（差异<32 全透明、32~80 半透明、>80 全保留）。返回是否成功 */
+  /* 按包围盒裁切 + 色度键抠图，创建纹理。透明背景原样拷贝。
+     绿幕背景：excess-green 抠图（g−max(r,b)>50 全透明、≤0 全保留、
+     之间软过渡），并做去绿边（un-premultiply 反算去除背景色溢出），
+     无绿边、无残留。其他纯色背景：差异度抠图（<32 全透明、32~80 半透明、
+     >80 全保留）。返回是否成功 */
   _thunderCropAndKey(imgData, srcW, srcH, bg, box, outKey) {
     const { x0, y0, w, h } = box;
     if (w <= 0 || h <= 0) return false;
@@ -779,6 +782,8 @@ class BootScene extends Phaser.Scene {
     const out = cctx.createImageData(w, h);
     const od = out.data, sd = imgData.data;
     const solid = bg.type === 'solid';
+    /* 绿幕检测：G 分量远高于 R/B（四角采样到的纯绿幕背景） */
+    const isGreen = solid && bg.g > 120 && bg.g - Math.max(bg.r, bg.b) > 60;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const si = ((y0 + y) * srcW + (x0 + x)) * 4;
@@ -787,15 +792,32 @@ class BootScene extends Phaser.Scene {
         if (a < 16) { od[oi + 3] = 0; continue; }
         if (solid) {
           const r = sd[si], g = sd[si + 1], b = sd[si + 2];
-          const dev = Math.abs(r - bg.r) + Math.abs(g - bg.g) + Math.abs(b - bg.b);
-          if (dev < 32) { od[oi + 3] = 0; continue; }            // 纯背景 → 全透明
-          od[oi] = r; od[oi + 1] = g; od[oi + 2] = b;
-          if (dev < 80) {                                       // 边缘半透明软过渡
-            const k = (dev - 32) / 48;
-            od[oi + 3] = Math.round(a * k);
-            if (od[oi + 3] < 40) od[oi + 3] = 0;
+          if (isGreen) {
+            /* 绿幕：excess-green 色度键 + 去绿边 */
+            const excess = g - Math.max(r, b);
+            if (excess > 50) { od[oi + 3] = 0; continue; }          // 纯绿幕 → 全透明
+            if (excess <= 0) {                                      // 无绿分量 → 全保留
+              od[oi] = r; od[oi + 1] = g; od[oi + 2] = b; od[oi + 3] = a;
+            } else {                                                // 边缘软过渡
+              const key = excess / 50;
+              od[oi] = r;
+              od[oi + 1] = Phaser.Math.Clamp((g - 255 * key) / (1 - key), 0, 255);
+              od[oi + 2] = b;
+              od[oi + 3] = Math.round(a * (1 - key));
+              if (od[oi + 3] < 40) od[oi + 3] = 0;                 // 残边清除
+            }
           } else {
-            od[oi + 3] = a;
+            /* 通用纯色：差异度抠图 */
+            const dev = Math.abs(r - bg.r) + Math.abs(g - bg.g) + Math.abs(b - bg.b);
+            if (dev < 32) { od[oi + 3] = 0; continue; }            // 纯背景 → 全透明
+            od[oi] = r; od[oi + 1] = g; od[oi + 2] = b;
+            if (dev < 80) {                                       // 边缘半透明软过渡
+              const k = (dev - 32) / 48;
+              od[oi + 3] = Math.round(a * k);
+              if (od[oi + 3] < 40) od[oi + 3] = 0;
+            } else {
+              od[oi + 3] = a;
+            }
           }
         } else {
           od[oi] = sd[si]; od[oi + 1] = sd[si + 1]; od[oi + 2] = sd[si + 2]; od[oi + 3] = a;
