@@ -553,6 +553,15 @@ window.TD_CONFIG = {
       "darkColor": 0x7a4fb0,
       "unlock": { "unlockLevel": 2 },
       "targeting": "area",
+      /* 引力塔美术贴图（assets/gravity_towers.png 横向三连图，离线编码 data URI
+         挂 GRAVITY_TOWERS_DATA；运行时由 BootScene 按内容边界裁切三段 + 白幕
+         色度键抦图 + 超采样缩放，纹理性 gravity_tower_lv1/2/3）。
+         贴图保持原图造型/颜色/大小，不重绘不变形；缺失时回退程序化炮头。 */
+      "art": {
+        "baseHeight": 50,      // 一级显示高度（世界单位）
+        "scale": { "1": 1.0, "2": 1.12, "3": 1.24 },  // 逐级递增，与火/雷塔一致
+        "superSample": 4      // 纹素高 = 显示高 ×4（DPR2 下仍 2 倍超采，清晰度与其他塔一致）
+      },
       "stats": {
         "damage": 0,
         "range": 200,
@@ -666,6 +675,17 @@ window.TD_CONFIG = {
       "darkColor": 0x3fae72,
       "unlock": { "unlockLevel": 4 },
       "targeting": "furthest",
+      /* 风塔龙卷风美术贴图（assets/wind_towers.png 横向三连图，离线编码
+         data URI 挂 WIND_TOWERS_DATA；运行时由 BootScene 按内容边界裁切
+         三段 + 绿幕色度键抦图 + 超采样缩放，纹理键 wind_tower_lv1/2/3）。
+         龙卷风整体位置不变，每帧绕中心持续旋转，速度 JSON 驱动：
+         一级慢 / 二级中等 / 三级最快。缺失时回退程序化炮头。 */
+      "art": {
+        "baseHeight": 54,      // 一级显示高度（世界单位）
+        "scale": { "1": 1.0, "2": 1.12, "3": 1.24 },  // 逐级递增，与火/雷塔一致
+        "superSample": 4,     // 纹素高 = 显示高 ×4（DPR2 下仍 2 倍超采，清晰度与其他塔一致）
+        "spin": { "1": 1.8, "2": 3.0, "3": 4.5 }  // 龙卷风自转速度（弧度/秒），逐级递增
+      },
       "stats": {
         "damage": 4,
         "range": 150,

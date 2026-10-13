@@ -505,6 +505,54 @@ class BootScene extends Phaser.Scene {
       }));
     }
 
+    /* ---------- 风元素塔三级贴图（WindTowersArtData.js，横向三连图运行时裁切） ----------
+       数据源：assets/wind_towers.png（绿幕背景 2352x1008）离线编码为 data URI
+       挂 WIND_TOWERS_DATA。运行时用 canvas 读像素，按【内容列】扫描三段龙卷风
+       边界（非简单三等分），自动检测绿幕背景做色度键抦图，按内容包围盒裁出
+       每级独立贴图 wind_tower_lvN。data URI 同源干净，file:// 下也可用。
+       任一步异常回退程序炮头，绝不黑屏。并入 artJobs 等待链。 */
+    const hasWindData = (typeof WIND_TOWERS_DATA !== 'undefined') && WIND_TOWERS_DATA;
+    if (hasWindData) {
+      if (!artJobs) artJobs = [];
+      artJobs.push(new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const p = this._processTowerSheet(img, 'wind', 'wind_tower_lv', TD_CONFIG.towers.towerF.art);
+            if (p && typeof p.then === 'function') {
+              p.then(() => resolve(true)).catch(() => resolve(true));
+            } else { resolve(true); }
+          } catch (e) { resolve(true); }
+        };
+        img.onerror = () => resolve(true);
+        img.src = WIND_TOWERS_DATA;
+      }));
+    }
+
+    /* ---------- 引力塔三级贴图（GravityTowersArtData.js，横向三连图运行时裁切） ----------
+       数据源：assets/gravity_towers.png（白幕背景 2912x1456）离线编码为 data URI
+       挂 GRAVITY_TOWERS_DATA。运行时按内容列扫描三段磁铁边界（非简单三等分），
+       自动检测白幕背景做色度键抦图，按内容包围盒裁出每级独立贴图
+       gravity_tower_lvN。贴图保持原图造型/颜色/大小，不重绘不变形。
+       data URI 同源干净，file:// 下也可用。任一步异常回退程序炮头。 */
+    const hasGravityData = (typeof GRAVITY_TOWERS_DATA !== 'undefined') && GRAVITY_TOWERS_DATA;
+    if (hasGravityData) {
+      if (!artJobs) artJobs = [];
+      artJobs.push(new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const p = this._processTowerSheet(img, 'gravity', 'gravity_tower_lv', TD_CONFIG.towers.towerD.art);
+            if (p && typeof p.then === 'function') {
+              p.then(() => resolve(true)).catch(() => resolve(true));
+            } else { resolve(true); }
+          } catch (e) { resolve(true); }
+        };
+        img.onerror = () => resolve(true);
+        img.src = GRAVITY_TOWERS_DATA;
+      }));
+    }
+
     /* ---------- 水弹粒子与渐变光带（代码生成拖尾用） ----------
        water_dot：圆形水蓝粒子（外水蓝 0x7fc8ff、内白），运行时可再 tint；
        water_ribbon：横向 40×8 渐变光带（右侧亮、向左渐隐），origin(1,0.5)
@@ -949,6 +997,73 @@ class BootScene extends Phaser.Scene {
       }
     }
     return { x: bestX, y: bestY };
+  }
+
+  /* ============================================================
+   * 通用横向三连图裁切（风塔/引力塔共用）：把一张横向排列的三连图按
+   * 内容列边界切成 3 级独立贴图，自动检测背景做色度键抦图，按内容包
+   * 围盒裁切 + 超采样缩放。像素读写在 canvas 上完成，data URI 同源干净，
+   * file://下也可用。任一异常静默退出 → Tower 回退程序炮头，绝不黑屏。
+   *
+   * 参数：
+   *   img       : HTMLImageElement（已解码的 data URI）
+   *   kind      : 'wind' | 'gravity'（用于设置 window flag）
+   *   texPrefix : 纹理键前缀（如 'wind_tower_lv' → wind_tower_lv1/2/3）
+   *   artCfg    : config 中的 art 段（baseHeight/scale/superSample）
+   * ============================================================ */
+  _processTowerSheet(img, kind, texPrefix, artCfg) {
+    if (!img) return;
+    const c = this._thunderDrawToCanvas(img);
+    if (!c) return;
+    const data = c.ctx.getImageData(0, 0, c.w, c.h);
+    const bg = this._thunderDetectBg(data, c.w, c.h);
+    const segs = this._thunderFindSegments(data, c.w, c.h, bg);
+    if (segs.length < 3) return;  // 无法识别三段 → 回退
+    /* 超采样倍数 JSON 驱动（默认 4）。风塔/引力塔源图内容盒较大，
+       4× 超采样配合 LINEAR 采样保证清晰（与火/冰塔一致）。 */
+    const baseH = (artCfg && artCfg.baseHeight) || 54;
+    const lvScales = (artCfg && artCfg.scale) || {};
+    const superSample = (artCfg && artCfg.superSample) || 4;
+    const texEntries = [];
+    let anyOk = false;
+    for (let lv = 1; lv <= 3; lv++) {
+      const seg = segs[lv - 1];
+      if (!seg) continue;
+      const box = this._thunderContentBox(data, c.w, c.h, bg, seg.x0, seg.x1);
+      if (!box) continue;
+      /* 目标纹素高 = superSample × 显示高；s = 输出/原始 */
+      const dispH = baseH * (lvScales[lv] || 1);
+      const targetH = Math.round(superSample * dispH);
+      const key = texPrefix + lv;
+      /* 透明背景检测：bg.type === 'transparent' 时跳过色度键，直接裁切 */
+      const canvas = (bg.type === 'transparent')
+        ? this._thunderCropOnly(data, c.w, c.h, box, key, targetH)
+        : this._thunderCropAndKey(data, c.w, c.h, bg, box, key, targetH);
+      if (!canvas) continue;
+      texEntries.push({ key: key, canvas: canvas });
+      anyOk = true;
+    }
+    /* 异步：所有 Canvas → dataURL → Image → addImage（与火/冰/水/雷塔一致：
+       HTMLImageElement 直通 alpha，避免 Canvas 内部预乘 alpha 被 WebGL
+       texImage2D 二次预乘导致边缘发虚）。 */
+    return Promise.all(texEntries.map((entry) => new Promise((resolve) => {
+      const im = new Image();
+      im.onload = () => {
+        try {
+          if (this.textures.exists(entry.key)) this.textures.remove(entry.key);
+          this.textures.addImage(entry.key, im);
+        } catch (e) {}
+        resolve();
+      };
+      im.onerror = () => resolve();
+      im.src = entry.canvas.toDataURL('image/png');
+    }))).then(() => {
+      /* 至少一级贴图就绪即启用美术路径；高级缺失由 Tower 逐级回退 */
+      if (anyOk) {
+        if (kind === 'wind') window.__windTowerArt = true;
+        else if (kind === 'gravity') window.__gravityTowerArt = true;
+      }
+    });
   }
 
   /* 小工具：在一张临时 Graphics 上绘制并生成纹理 */

@@ -37,6 +37,16 @@ class Tower extends Phaser.GameObjects.Container {
        贴图缺失时回退程序化炮头 turret_towerE。 */
     this.isThunder = (typeKey === 'towerE') &&
       window.__thunderTowerArt === true && scene.textures.exists('thunder_tower_lv1');
+    /* 引力塔（towerD）：磁铁美术贴图（gravity_tower_lvN，按等级切换）。
+       磁铁为静态造型，不随目标旋转（与冰塔一致），索敌/吸引逻辑不变；
+       贴图缺失时回退程序化炮头 turret_towerD。 */
+    this.isGravity = (typeKey === 'towerD') &&
+      window.__gravityTowerArt === true && scene.textures.exists('gravity_tower_lv1');
+    /* 风元素塔（towerF）：龙卷风美术贴图（wind_tower_lvN，按等级切换）。
+       龙卷风整体位置不变，每帧绕中心持续旋转（速度 JSON 驱动，逐级递增），
+       不随目标转向；贴图缺失时回退程序化炮头 turret_towerF。 */
+    this.isWind = (typeKey === 'towerF') &&
+      window.__windTowerArt === true && scene.textures.exists('wind_tower_lv1');
     if (this.isFire) {
       this.head = scene.add.container(0, -6);
       this.turret = scene.add.image(0, 0, this._fireTexKey());
@@ -69,6 +79,19 @@ class Tower extends Phaser.GameObjects.Container {
       if (typeof ThunderArc !== 'undefined') {
         this._thunderArc = new ThunderArc(this);
       }
+    } else if (this.isGravity) {
+      /* 引力塔：磁铁静态贴图，锚点居中，不旋转（与冰塔一致） */
+      this.head = null;
+      this.turret = scene.add.image(0, -6, this._gravityTexKey());
+      this._gravityApplyArt();
+      this.add(this.turret);
+    } else if (this.isWind) {
+      /* 风塔：龙卷风贴图，锚点居中，每帧绕中心持续旋转（update 中做）；
+         旋转轴即贴图中心，位置不变、不变形、不随目标转向。 */
+      this.head = null;
+      this.turret = scene.add.image(0, 0, this._windTexKey());
+      this._windApplyArt();
+      this.add(this.turret);
     } else {
       this.head = null;
       this.turret = scene.add.image(0, 0, 'turret_' + typeKey);
@@ -128,12 +151,13 @@ class Tower extends Phaser.GameObjects.Container {
     this.behavior = new BehaviorClass(this, this.cfg);
     this.aimAngle = -Math.PI / 2;          // 初始朝上
     this.hasTarget = false;                // 火塔：无目标时火焰自然竖立
-    // 火塔/冰塔贴图不随目标旋转；雷塔/水塔平滑转向在 update 中做（雷塔需先
-    // 按本等级贴图的黄色端固有角 θ0 设好静止初始姿态：黄端自然朝上）；
+    // 火塔/冰塔/引力塔贴图不随目标旋转（保持原样）；风塔龙卷风自转在
+    // update 中做（初始旋转 0，随后每帧累加）；雷塔/水塔平滑转向在 update
+    // 中做（雷塔需先按本等级贴图的黄色端固有角 θ0 设好静止初始姿态）；
     // 其余程序化炮头零角朝右，初始 rotation=aimAngle 即朝上
     if (this.isThunder) {
       this.turret.rotation = this._thunderAimRotation(this.aimAngle);
-    } else if (!this.isFire && !this.isIce) {
+    } else if (!this.isFire && !this.isIce && !this.isGravity && !this.isWind) {
       this.turret.rotation = this.aimAngle;
     }
   }
@@ -235,6 +259,61 @@ class Tower extends Phaser.GameObjects.Container {
     const fr = this.turret.frame;
     const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
     this.turret.setDisplaySize(dh * aspect, dh);
+  }
+
+  /* 引力塔当前等级的美术贴图 key（缺失时逐级回退，最终回退程序炮头） */
+  _gravityTexKey() {
+    for (let lv = Math.min(this.level, 3); lv >= 1; lv--) {
+      const k = 'gravity_tower_lv' + lv;
+      if (this.scene.textures.exists(k)) return k;
+    }
+    return 'turret_towerD';
+  }
+
+  /* 引力塔显示定标：显示高 = config towerD.art.baseHeight × scale[等级]
+     （50/56/62px），宽按纹理原始宽高比自适应。贴图保持原图造型/颜色/大小 */
+  _gravityApplyArt() {
+    this.turret.setTexture(this._gravityTexKey());
+    const art = (this.cfg && this.cfg.art) || { baseHeight: 50, scale: {} };
+    const lvScale = (art.scale && art.scale[this.level] != null)
+      ? art.scale[this.level] : 1;
+    const h = (art.baseHeight || 50) * lvScale;
+    const fr = this.turret.frame;
+    const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
+    this.turret.setDisplaySize(h * aspect, h);
+  }
+
+  /* 风塔当前等级的美术贴图 key（缺失时逐级回退，最终回退程序炮头） */
+  _windTexKey() {
+    for (let lv = Math.min(this.level, 3); lv >= 1; lv--) {
+      const k = 'wind_tower_lv' + lv;
+      if (this.scene.textures.exists(k)) return k;
+    }
+    return 'turret_towerF';
+  }
+
+  /* 风塔显示定标：显示高 = config towerF.art.baseHeight × scale[等级]
+     （54/60.5/67px），宽按纹理原始宽高比自适应。
+     旋转轴即贴图中心（origin 0.5,0.5 默认居中），位置不变只旋转。 */
+  _windApplyArt() {
+    this.turret.setTexture(this._windTexKey());
+    const art = (this.cfg && this.cfg.art) || { baseHeight: 54, scale: {} };
+    const lvScale = (art.scale && art.scale[this.level] != null)
+      ? art.scale[this.level] : 1;
+    const h = (art.baseHeight || 54) * lvScale;
+    const fr = this.turret.frame;
+    const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
+    this.turret.setDisplaySize(h * aspect, h);
+    /* 确保锚点在贴图中心，旋转时绕中心 */
+    this.turret.setOrigin(0.5, 0.5);
+  }
+
+  /* 风塔龙卷风自转速度（弧度/秒），由 JSON 配置 art.spin[等级] 驱动。
+     一级慢 / 二级中等 / 三级最快，逐级递增。缺失时回退 2 rad/s。 */
+  _windSpinSpeed() {
+    const art = (this.cfg && this.cfg.art) || {};
+    const spin = art.spin || {};
+    return (spin[this.level] != null) ? spin[this.level] : 2;
   }
 
   /* 火塔当前等级的美术贴图 key（缺失时回退到最低可用等级） */
@@ -425,6 +504,11 @@ class Tower extends Phaser.GameObjects.Container {
       this._thunderApplyArt();
       if (this._thunderArc) this._thunderArc.setLevel(this.level);
     }
+    /* 引力塔：升级同步切换磁铁贴图与显示尺寸 */
+    if (this.isGravity) this._gravityApplyArt();
+    /* 风塔：升级同步切换龙卷风贴图与显示尺寸（旋转速度随等级自动变化，
+       _windSpinSpeed 每帧读当前等级配置，无需额外处理） */
+    if (this.isWind) this._windApplyArt();
     // 升级小动画
     this.scene.tweens.add({ targets: this, scale: 1.18, duration: 110, yoyo: true });
     return cost;
@@ -492,15 +576,23 @@ class Tower extends Phaser.GameObjects.Container {
     } else {
       this.hasTarget = false;
     }
-    // 火塔/冰塔贴图不随目标旋转；水塔/雷塔平滑旋转在 update 中做；
-    // 其他程序化炮头即时指向
-    if (!this.isFire && !this.isIce && !this.isWater && !this.isThunder) {
+    // 火塔/冰塔/引力塔贴图不随目标旋转；风塔龙卷风自转（update 中做）；
+    // 水塔/雷塔平滑旋转在 update 中做；其他程序化炮头即时指向
+    if (!this.isFire && !this.isIce && !this.isWater && !this.isThunder &&
+        !this.isGravity && !this.isWind) {
       this.turret.rotation = this.aimAngle;
     }
   }
 
   update(dt, ctx) {
     this.behavior.update(dt, ctx);
+    if (this.isWind) {
+      /* 风塔龙卷风每帧绕中心持续旋转：旋转速度由 JSON 配置 art.spin[等级]
+         驱动（一级 1.8 / 二级 3.0 / 三级 4.5 弧度/秒），逐级递增。
+         dt 单位为秒（Phaser update 标准参数），rotation += speed × dt
+         实现匀速旋转。位置不变、不变形，只在原地持续旋转。 */
+      this.turret.rotation += this._windSpinSpeed() * dt;
+    }
     if (this.isWater) {
       /* 水塔炮头平滑旋转到目标方向 aimAngle。炮口已离线烘焙朝右（角度 0），
          故直接把 turret.rotation 转到 aimAngle 即指向敌人。

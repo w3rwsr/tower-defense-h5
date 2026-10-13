@@ -2180,9 +2180,11 @@ class GameScene extends Phaser.Scene {
       });
     }
 
-    /* 3) 炮头脉冲缩放 */
+    /* 3) 炮头脉冲缩放（相对当前缩放，适配美术贴图 setDisplaySize 后的非 1 缩放） */
+    const sx = tower.turret.scaleX, sy = tower.turret.scaleY;
     this.tweens.add({
-      targets: tower.turret, scaleX: 1.18, scaleY: 1.18,
+      targets: tower.turret,
+      scaleX: sx * 1.18, scaleY: sy * 1.18,
       duration: 110, yoyo: true
     });
   }
