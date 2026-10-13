@@ -41,6 +41,17 @@
   const WK_LOW = n(WK.low, 0.55);
   const WK_HIGH = Math.max(n(WK.high, 0.74), WK_LOW + 0.001);
 
+  /* 风塔龙卷风专用绿幕参数（TD_CONFIG.towers.towerF.windVideo.greenKey）：
+     与火塔 greenKey 分开，互不影响。实测龙卷风本体 green-excess ≤0.24、
+     绿幕背景及混色环 ≥0.62，转折区 0.28/0.58 正好落在两者之间的空档里
+     —— 主体（含气流弧/水珠）零残缺、背景零残留。缺失时回退火塔绿幕参数。 */
+  const WCFG = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.towers &&
+    TD_CONFIG.towers.towerF && TD_CONFIG.towers.towerF.windVideo) || {};
+  const WGK = WCFG.greenKey || GK;
+  const WGK_LOW = n(WGK.low, GK_LOW);
+  const WGK_HIGH = Math.max(n(WGK.high, GK_HIGH), WGK_LOW + 0.001);
+  const WGK_SPILL = n(WGK.spill, GK_SPILL);
+
   const PRECISION = [
     '#ifdef GL_FRAGMENT_PRECISION_HIGH',
     'precision highp float;',
@@ -89,8 +100,9 @@
   ].join('\n');
 
   /* D. 风塔专用绿幕色度键（预乘 alpha 输出）。
-     与 B 的唯一差别是输出颜色预乘 alpha。Phaser 默认
-     premultipliedAlpha=true → blendFunc = (ONE, ONE_MINUS_SRC_ALPHA)；
+     与 B 的差别：① 输出颜色预乘 alpha；② 阈值用风塔专用参数 WGK_*
+     （见上方 WCFG，实测空档 0.28/0.58，主体零残缺、背景零残留）。
+     Phaser 默认 premultipliedAlpha=true → blendFunc = (ONE, ONE_MINUS_SRC_ALPHA)；
      shader 若输出非预乘颜色，alpha=0 的背景像素其 rgb 仍会被加到画面上
      （实测绿幕泄漏：地图绿 131,206,87 → 164,247,104）。把 rgb 乘 alpha
      后，alpha=0 的像素贡献为 0，绿幕完全透明、无绿边。 */
@@ -99,8 +111,8 @@
     '{',
     '    vec4 tex = texture2D(uMainSampler, outTexCoord);',
     '    float ex = tex.g - max(tex.r, tex.b);',
-    '    float a = 1.0 - smoothstep(' + GK_LOW.toFixed(3) + ', ' + GK_HIGH.toFixed(3) + ', ex);',
-    '    float g2 = min(tex.g, max(tex.r, tex.b) + ' + GK_SPILL.toFixed(3) + ');',
+    '    float a = 1.0 - smoothstep(' + WGK_LOW.toFixed(3) + ', ' + WGK_HIGH.toFixed(3) + ', ex);',
+    '    float g2 = min(tex.g, max(tex.r, tex.b) + ' + WGK_SPILL.toFixed(3) + ');',
     '    vec3 rgb = vec3(tex.r, g2, tex.b) * outTint.bgr;',
     '    float A = a * outTint.a;',
     '    if (outTintEffect == 2.0) {',
