@@ -2401,7 +2401,8 @@ class GameScene extends Phaser.Scene {
         g.clear();
         g.lineStyle(2.5, color, st.a);
         g.strokeCircle(x, y, st.r);
-        g.fillStyle(0xffffff, st.a * 0.5);
+        /* 内芯用元素色（非白色），避免攻击时地图上随机闪过白色亮光 */
+        g.fillStyle(color, st.a * 0.6);
         g.fillCircle(x, y, st.r * 0.4);
       },
       onComplete: () => g.destroy()

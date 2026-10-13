@@ -925,6 +925,17 @@ class BootScene extends Phaser.Scene {
         }
       }
     }
+    /* 二次去绿：清理边缘残留的绿色溢出像素（g 偏高但未进 KEY_SOFT 软过渡带）。
+       只对 alpha > 16 的像素：若 g > max(r,b) + 5（明显偏绿），把 g 降到 max(r,b)。
+       不影响蓝白主体（白 excess=0、蓝 excess 负），只清理残留绿边/碎片。 */
+    if (isGreen) {
+      for (let i = 0; i < od.length; i += 4) {
+        if (od[i + 3] > 16) {
+          const r = od[i], g = od[i + 1], b = od[i + 2];
+          if (g > Math.max(r, b) + 5) od[i + 1] = Math.max(r, b);
+        }
+      }
+    }
     tctx.putImageData(out, 0, 0);
     /* Step 2: 高质量放大到目标尺寸（4 倍超采样），返回 Canvas。
        调用方负责 Canvas → dataURL → Image → addImage（与火/冰/水塔完全一致：
@@ -1040,6 +1051,29 @@ class BootScene extends Phaser.Scene {
         ? this._thunderCropOnly(data, c.w, c.h, box, key, targetH)
         : this._thunderCropAndKey(data, c.w, c.h, bg, box, key, targetH);
       if (!canvas) continue;
+      /* 风塔：检测龙卷风质心（视觉重心），写入 window.__windCentroid[等级]。
+         漏斗形龙卷风（上宽下窄）几何中心偏下接近尾部，origin(0.5,0.5) 会让
+         主体绕尾部旋转。质心偏上（宽部像素多），origin 设到质心 → 原地卷动。 */
+      if (kind === 'wind') {
+        try {
+          const cx2 = canvas.getContext('2d');
+          const wd = cx2.getImageData(0, 0, canvas.width, canvas.height).data;
+          let sx = 0, sy = 0, sw = 0;
+          for (let py = 0; py < canvas.height; py++) {
+            for (let px = 0; px < canvas.width; px++) {
+              const a = wd[(py * canvas.width + px) * 4 + 3];
+              if (a > 16) { sx += px * a; sy += py * a; sw += a; }
+            }
+          }
+          if (sw > 0) {
+            if (!window.__windCentroid) window.__windCentroid = {};
+            window.__windCentroid[lv] = {
+              x: (sx / sw) / canvas.width,
+              y: (sy / sw) / canvas.height
+            };
+          }
+        } catch (e) { /* 忽略：质心检测失败不影响抦图 */ }
+      }
       texEntries.push({ key: key, canvas: canvas });
       anyOk = true;
     }
