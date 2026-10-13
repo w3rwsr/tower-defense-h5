@@ -29,22 +29,27 @@ const WIND_VIDEO = (() => {
   const SRC = 'assets/wind_towers.mp4?v=' + VER;
   const VID_W = 640, VID_H = 640;        // 视频尺寸（H.264 640x640）
 
-  /* 三段龙卷风【内容包围盒】（视频纹理像素坐标）。
-     来源：读首帧做连通域分析取最大连通块（排除 H.264 绿幕压缩噪点），
-     再每边留 3px 容差覆盖自转时气流弧的摆动。含 y 偏移——龙卷风只占
-     视频高度的一部分，若按"视频全高"定标会把本体压成细条。
-     用 setTexture(key, 'lv'+n) 切到预定义子帧，再按【包围盒宽高比】
-     缩放到 DISP_H 目标显示高度，造型不拉伸。 */
+  /* 三段龙卷风【主体包围盒】（视频纹理像素坐标）。
+     来源：首帧按列内容密度（≥5% 高）扫出主体列范围，再用连通域定 y 范围
+     （保留漏斗尖），每边 1px 容差。**不含**龙卷风左侧那段独立的白色气流弧
+     ——旧值（55/213/413 起）比主体左边界系统偏左 23~28px，把该白弧切了进来，
+     它颜色是浅蓝白（green-excess≈-0.03）色度键抠不掉，渲染后就是用户看到的
+     "左上角白色残留"。收紧到主体边界即可彻底去除，且不伤本体。
+     含 y 偏移——龙卷风只占视频高度的一部分，按"视频全高"定标会压成细条。 */
   const SEG = {
-    1: { x: 55,  y: 297, w: 108, h: 124 },   // 一级（左）：最小
-    2: { x: 213, y: 271, w: 142, h: 160 },   // 二级（中）
-    3: { x: 413, y: 259, w: 186, h: 178 }    // 三级（右）：最大
+    1: { x: 81,  y: 299, w: 62,  h: 120 },   // 一级（左）：最小
+    2: { x: 240, y: 275, w: 95,  h: 154 },   // 二级（中）
+    3: { x: 435, y: 261, w: 138, h: 174 }    // 三级（右）：最大
   };
 
-  /* 显示尺寸（世界单位）：与 config.towers.towerF.art 一致——
-     baseHeight × scale[等级] = 54 / 60.5 / 67。
-     按包围盒宽高比自适应显示宽度，避免拉伸龙卷风形状。 */
-  const DISP_H = { 1: 54, 2: 60.5, 3: 67 };
+  /* 显示高度（世界单位）= config.towers.towerF.art 的 baseHeight × scale[等级]，
+     JSON 驱动（改 config 即可调尺寸，无需改代码）。默认 44 / 49.28 / 54.56，
+     即原 54 基准整体缩小到 0.815 倍。读取异常回退内置默认。 */
+  const ART = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.towers &&
+    TD_CONFIG.towers.towerF && TD_CONFIG.towers.towerF.art) || {};
+  const BASE_H = (typeof ART.baseHeight === 'number' && ART.baseHeight > 0)
+    ? ART.baseHeight : 44;
+  const LV_SCALE = ART.scale || { 1: 1.0, 2: 1.12, 3: 1.24 };
 
   const api = {
     supported: false,
@@ -169,11 +174,12 @@ const WIND_VIDEO = (() => {
   };
 
   /* 返回某等级的显示尺寸 { w, h }（世界单位）：
-     高 = baseHeight × scale[等级]（54/60.5/67）；宽 = 高 × 包围盒宽高比，
-     保持龙卷风原始造型不拉伸。 */
+     高 = baseHeight × scale[等级]（JSON 驱动，默认 44/49.28/54.56）；
+     宽 = 高 × 包围盒宽高比，保持龙卷风原始造型不拉伸。 */
   api.displaySize = function (lv) {
     const s = SEG[lv] || SEG[1];
-    const h = DISP_H[lv] || 54;
+    const sc = (LV_SCALE[lv] != null) ? LV_SCALE[lv] : 1;
+    const h = BASE_H * sc;
     return { w: h * (s.w / s.h), h: h };
   };
 
