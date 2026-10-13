@@ -29,19 +29,21 @@ const WIND_VIDEO = (() => {
   const SRC = 'assets/wind_towers.mp4?v=' + VER;
   const VID_W = 640, VID_H = 640;        // 视频尺寸（H.264 640x640）
 
-  /* 三段内容边界（按首帧像素扫描实测）。
-     每段【x0, x1】为视频纹理像素坐标；裁切时内缩 1px 防绿幕抗锯齿
-     溢出。每段实际宽度 = x1 - x0 + 1。 */
+  /* 三段龙卷风【内容包围盒】（视频纹理像素坐标）。
+     来源：读首帧做连通域分析取最大连通块（排除 H.264 绿幕压缩噪点），
+     再每边留 3px 容差覆盖自转时气流弧的摆动。含 y 偏移——龙卷风只占
+     视频高度的一部分，若按"视频全高"定标会把本体压成细条。
+     用 setTexture(key, 'lv'+n) 切到预定义子帧，再按【包围盒宽高比】
+     缩放到 DISP_H 目标显示高度，造型不拉伸。 */
   const SEG = {
-    1: { x0: 83,  x1: 140, w: 58 },   // 一级：龙卷风较小（左段）
-    2: { x0: 242, x1: 332, w: 91 },   // 二级：中段
-    3: { x0: 437, x1: 570, w: 134 }   // 三级：龙卷风最大（右段）
+    1: { x: 55,  y: 297, w: 108, h: 124 },   // 一级（左）：最小
+    2: { x: 213, y: 271, w: 142, h: 160 },   // 二级（中）
+    3: { x: 413, y: 259, w: 186, h: 178 }    // 三级（右）：最大
   };
 
   /* 显示尺寸（世界单位）：与 config.towers.towerF.art 一致——
      baseHeight × scale[等级] = 54 / 60.5 / 67。
-     视频段宽高比 ≠ 1（段宽 / 视频高），按段实际宽高比自适应，
-     避免拉伸龙卷风形状。 */
+     按包围盒宽高比自适应显示宽度，避免拉伸龙卷风形状。 */
   const DISP_H = { 1: 54, 2: 60.5, 3: 67 };
 
   const api = {
@@ -75,7 +77,7 @@ const WIND_VIDEO = (() => {
       probe.canPlayType('video/mp4; codecs="avc1.42E01E"') !== '');
     if (!canH264) return;
     const pipelineReady = (typeof fireVideoPipelineReady === 'function') &&
-      !!fireVideoPipelineReady(scene, 'FireVideoGK');
+      !!fireVideoPipelineReady(scene, 'WindVideoGK');
     if (!pipelineReady) return;
     this.supported = true;
 
@@ -110,7 +112,7 @@ const WIND_VIDEO = (() => {
         [1, 2, 3].forEach((lv) => {
           const s = SEG[lv];
           const fk = 'lv' + lv;
-          if (!tex.has(fk)) tex.add(fk, 0, s.x0, 0, s.w, VID_H);
+          if (!tex.has(fk)) tex.add(fk, 0, s.x, s.y, s.w, s.h);
         });
         this._ready = true;
         const ws = this._waiters;
@@ -153,11 +155,11 @@ const WIND_VIDEO = (() => {
 
   api.isReady = function () { return !!(this.supported && this._ready); };
 
-  /* 返回某等级的纹理裁切区域 { x, y, w, h }（纹理像素坐标）。
-     y=0, h=VID_H 全高；x/w 来自首帧扫描实测。 */
+  /* 返回某等级的纹理裁切区域 { x, y, w, h }（纹理像素坐标），
+     即该段龙卷风的内容包围盒。 */
   api.cropForLevel = function (lv) {
     const s = SEG[lv] || SEG[1];
-    return { x: s.x0, y: 0, w: s.w, h: VID_H };
+    return { x: s.x, y: s.y, w: s.w, h: s.h };
   };
 
   /* 返回某等级对应的 Phaser frame key（在 init 时预定义的子帧）。
@@ -167,20 +169,19 @@ const WIND_VIDEO = (() => {
   };
 
   /* 返回某等级的显示尺寸 { w, h }（世界单位）：
-     高 = baseHeight × scale[等级]；宽 = 高 × 段宽高比，保持龙卷风
-     原始形状不拉伸。 */
+     高 = baseHeight × scale[等级]（54/60.5/67）；宽 = 高 × 包围盒宽高比，
+     保持龙卷风原始造型不拉伸。 */
   api.displaySize = function (lv) {
     const s = SEG[lv] || SEG[1];
     const h = DISP_H[lv] || 54;
-    const aspect = s.w / VID_H;          // 段宽 / 视频高
-    return { w: h * aspect, h: h };
+    return { w: h * (s.w / s.h), h: h };
   };
 
   /* 该等级龙卷风的视觉中心在纹理像素坐标中的位置：
      供 Tower 计算发射点等用途（当前风塔弹道从塔心发射，未用到）。 */
   api.segmentCenter = function (lv) {
     const s = SEG[lv] || SEG[1];
-    return { x: (s.x0 + s.x1) / 2, y: VID_H / 2 };
+    return { x: s.x + s.w / 2, y: s.y + s.h / 2 };
   };
 
   /* GameScene 每帧调用：把当前视频帧上传到共享 GL 纹理（全场 1 次） */

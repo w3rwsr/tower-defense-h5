@@ -284,7 +284,8 @@
     if (typeof FireVideoPipeline !== 'undefined') pipes.FireVideo = FireVideoPipeline;
     if (typeof FireVideoGKPipeline !== 'undefined') pipes.FireVideoGK = FireVideoGKPipeline;
     if (typeof FireVideoWKPipeline !== 'undefined') pipes.FireVideoWK = FireVideoWKPipeline;
-    if (pipes.FireVideo || pipes.FireVideoGK || pipes.FireVideoWK) gameCfg.render.pipeline = pipes;
+    if (typeof WindVideoGKPipeline !== 'undefined') pipes.WindVideoGK = WindVideoGKPipeline;
+    if (pipes.FireVideo || pipes.FireVideoGK || pipes.FireVideoWK || pipes.WindVideoGK) gameCfg.render.pipeline = pipes;
   } catch (e) { /* 忽略：按等级回退 */ }
   const game = new Phaser.Game(gameCfg);
 

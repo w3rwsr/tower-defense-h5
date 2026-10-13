@@ -339,12 +339,12 @@ class Tower extends Phaser.GameObjects.Container {
     if (typeof WIND_VIDEO === 'undefined' || !WIND_VIDEO.isReady()) return;
     /* 绿幕管线不可用绝不接管（否则亮绿方块直接上墙） */
     if (typeof fireVideoPipelineReady !== 'function' ||
-      !fireVideoPipelineReady(this.scene, 'FireVideoGK')) return;
+      !fireVideoPipelineReady(this.scene, 'WindVideoGK')) return;
     try {
       /* setTexture 带子帧 frameKey，比 setCrop 可靠（setCrop 在 setDisplaySize
          后偶发不更新 cutX/cutWidth，会把整张 640x640 视频都显示出来） */
       this.windImg.setTexture('wind_video_full', WIND_VIDEO.frameKeyForLevel(this.level));
-      this.windImg.setPipeline('FireVideoGK');
+      this.windImg.setPipeline('WindVideoGK');
       this.windImg.setBlendMode(Phaser.BlendModes.NORMAL);
       const d = WIND_VIDEO.displaySize(this.level);
       this.windImg.setDisplaySize(d.w, d.h);

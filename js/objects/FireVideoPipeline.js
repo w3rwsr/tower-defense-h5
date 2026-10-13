@@ -88,6 +88,29 @@
     '}'
   ].join('\n');
 
+  /* D. 风塔专用绿幕色度键（预乘 alpha 输出）。
+     与 B 的唯一差别是输出颜色预乘 alpha。Phaser 默认
+     premultipliedAlpha=true → blendFunc = (ONE, ONE_MINUS_SRC_ALPHA)；
+     shader 若输出非预乘颜色，alpha=0 的背景像素其 rgb 仍会被加到画面上
+     （实测绿幕泄漏：地图绿 131,206,87 → 164,247,104）。把 rgb 乘 alpha
+     后，alpha=0 的像素贡献为 0，绿幕完全透明、无绿边。 */
+  const WIND_VIDEO_GK_FS = PRECISION + '\n' + [
+    'void main ()',
+    '{',
+    '    vec4 tex = texture2D(uMainSampler, outTexCoord);',
+    '    float ex = tex.g - max(tex.r, tex.b);',
+    '    float a = 1.0 - smoothstep(' + GK_LOW.toFixed(3) + ', ' + GK_HIGH.toFixed(3) + ', ex);',
+    '    float g2 = min(tex.g, max(tex.r, tex.b) + ' + GK_SPILL.toFixed(3) + ');',
+    '    vec3 rgb = vec3(tex.r, g2, tex.b) * outTint.bgr;',
+    '    float A = a * outTint.a;',
+    '    if (outTintEffect == 2.0) {',
+    '        gl_FragColor = vec4(outTint.bgr * A, A);',
+    '    } else {',
+    '        gl_FragColor = vec4(rgb * A, A);',
+    '    }',
+    '}'
+  ].join('\n');
+
   /* C. 白幕色度键 */
   const FIRE_VIDEO_WK_FS = PRECISION + '\n' + [
     'void main ()',
@@ -120,6 +143,12 @@
       super({ game, fragShader: FIRE_VIDEO_WK_FS });
     }
   }
+  /* 风塔专用（预乘输出，见 D 段说明） */
+  class WindVideoGKPipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipeline {
+    constructor(game) {
+      super({ game, fragShader: WIND_VIDEO_GK_FS });
+    }
+  }
 
   /* 供 Tower 端判断某条管线是否已在当前渲染器注册（WebGL） */
   function fireVideoPipelineReady(scene, name) {
@@ -133,5 +162,6 @@
   window.FireVideoPipeline = FireVideoPipeline;
   window.FireVideoGKPipeline = FireVideoGKPipeline;
   window.FireVideoWKPipeline = FireVideoWKPipeline;
+  window.WindVideoGKPipeline = WindVideoGKPipeline;
   window.fireVideoPipelineReady = fireVideoPipelineReady;
 })();
