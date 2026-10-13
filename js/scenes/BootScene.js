@@ -1011,6 +1011,48 @@ class BootScene extends Phaser.Scene {
   }
 
   /* ============================================================
+   * 横向三连图"取 3 主体段"（风塔/引力塔专用，不动雷塔共享的
+   * _thunderFindSegments）：先按内容列分段，再按每段内容像素数丢弃
+   * 明显偏小的碎片段——源图边缘常残留相邻元素的碎块（实测
+   * wind_towers.png 共 5 段：左端 1px 噪点 + 3 个龙卷风 + 右端 46×35
+   * 的相邻龙卷风碎片），旧的"段数≠3 就总宽三等分"兜底会把相邻龙卷风
+   * 切进来。改为按像素数过滤后从左到右取前 3 段为 1/2/3 级，绝不切到
+   * 相邻元素。返回 [{x0,x1}×3]；不足 3 段返回 []。
+   * ============================================================ */
+  _towerMainSegments(imgData, w, h, bg) {
+    const d = imgData.data;
+    const cols = new Array(w).fill(false);
+    for (let x = 0; x < w; x++) {
+      for (let y = 0; y < h; y += 2) {
+        if (this._thunderIsContent(d, (y * w + x) * 4, bg)) { cols[x] = true; break; }
+      }
+    }
+    const runs = [];
+    let start = -1;
+    for (let x = 0; x <= w; x++) {
+      if (x < w && cols[x]) { if (start < 0) start = x; }
+      else if (start >= 0) { runs.push({ x0: start, x1: x - 1 }); start = -1; }
+    }
+    if (runs.length < 3) return [];
+    /* 每段内容像素数（隔行隔列采样，仅用于碎片判定，开销与源图同量级） */
+    for (const s of runs) {
+      let n = 0;
+      for (let y = 0; y < h; y += 2) {
+        for (let x = s.x0; x <= s.x1; x += 2) {
+          if (this._thunderIsContent(d, (y * w + x) * 4, bg)) n++;
+        }
+      }
+      s.n = n;
+    }
+    const mx = Math.max(...runs.map((s) => s.n));
+    /* 丢弃明显偏小的碎片段（< 最大段的 8%）：实测碎片约 0.3%，主体同级 */
+    const main = runs.filter((s) => s.n >= mx * 0.08);
+    main.sort((a, b) => a.x0 - b.x0);
+    if (main.length < 3) return [];
+    return main.slice(0, 3);
+  }
+
+  /* ============================================================
    * 通用横向三连图裁切（风塔/引力塔共用）：把一张横向排列的三连图按
    * 内容列边界切成 3 级独立贴图，自动检测背景做色度键抦图，按内容包
    * 围盒裁切 + 超采样缩放。像素读写在 canvas 上完成，data URI 同源干净，
@@ -1028,7 +1070,8 @@ class BootScene extends Phaser.Scene {
     if (!c) return;
     const data = c.ctx.getImageData(0, 0, c.w, c.h);
     const bg = this._thunderDetectBg(data, c.w, c.h);
-    const segs = this._thunderFindSegments(data, c.w, c.h, bg);
+    /* 用"取 3 主体段"（按像素数过滤碎片），避免三等分兜底切到相邻元素 */
+    const segs = this._towerMainSegments(data, c.w, c.h, bg);
     if (segs.length < 3) return;  // 无法识别三段 → 回退
     /* 超采样倍数 JSON 驱动（默认 4）。风塔/引力塔源图内容盒较大，
        4× 超采样配合 LINEAR 采样保证清晰（与火/冰塔一致）。 */
@@ -1051,29 +1094,6 @@ class BootScene extends Phaser.Scene {
         ? this._thunderCropOnly(data, c.w, c.h, box, key, targetH)
         : this._thunderCropAndKey(data, c.w, c.h, bg, box, key, targetH);
       if (!canvas) continue;
-      /* 风塔：检测龙卷风质心（视觉重心），写入 window.__windCentroid[等级]。
-         漏斗形龙卷风（上宽下窄）几何中心偏下接近尾部，origin(0.5,0.5) 会让
-         主体绕尾部旋转。质心偏上（宽部像素多），origin 设到质心 → 原地卷动。 */
-      if (kind === 'wind') {
-        try {
-          const cx2 = canvas.getContext('2d');
-          const wd = cx2.getImageData(0, 0, canvas.width, canvas.height).data;
-          let sx = 0, sy = 0, sw = 0;
-          for (let py = 0; py < canvas.height; py++) {
-            for (let px = 0; px < canvas.width; px++) {
-              const a = wd[(py * canvas.width + px) * 4 + 3];
-              if (a > 16) { sx += px * a; sy += py * a; sw += a; }
-            }
-          }
-          if (sw > 0) {
-            if (!window.__windCentroid) window.__windCentroid = {};
-            window.__windCentroid[lv] = {
-              x: (sx / sw) / canvas.width,
-              y: (sy / sw) / canvas.height
-            };
-          }
-        } catch (e) { /* 忽略：质心检测失败不影响抦图 */ }
-      }
       texEntries.push({ key: key, canvas: canvas });
       anyOk = true;
     }

@@ -304,13 +304,12 @@ class Tower extends Phaser.GameObjects.Container {
     const fr = this.turret.frame;
     const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
     this.turret.setDisplaySize(h * aspect, h);
-    /* 旋转中心 = 龙卷风质心（视觉重心）。BootScene 裁切时检测并写入
-       window.__windCentroid[等级]（归一化 0~1）。漏斗形龙卷风几何中心偏下
-       接近尾部，用质心 origin 让旋转绕主体重心 → 原地卷动，不绕尾部打转。
-       质心检测缺失时回退几何中心 0.5,0.5。 */
-    const c = window.__windCentroid && window.__windCentroid[this.level];
-    if (c && typeof c.x === 'number') this.turret.setOrigin(c.x, c.y);
-    else this.turret.setOrigin(0.5, 0.5);
+    /* 锚点 = 贴图几何中心 (0.5,0.5)。裁切后包围盒紧贴龙卷风本体（碎片已
+       被 _towerMainSegments 过滤），其几何中心即龙卷风的视觉中心；旋转轴
+       必须过中心——上一版误用像素质心作轴（实测质心偏右上 ≈0.53,0.40），
+       导致整张图绕偏心点甩动，看起来像"平面转圈/绕尾部打转"。
+       用刚体平面旋转（只改 rotation），绝不缩放/挤压 → 不变形。 */
+    this.turret.setOrigin(0.5, 0.5);
   }
 
   /* 风塔龙卷风自转速度（弧度/秒），由 JSON 配置 art.spin[等级] 驱动。
