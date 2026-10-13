@@ -44,6 +44,13 @@ class BootScene extends Phaser.Scene {
        任何异常都不阻断启动） */
     try { FIRE_BURN.init(this); } catch (e) { /* 忽略：Tower 端静态兜底 */ }
 
+    /* 风塔龙卷风视频（assets/wind_towers.mp4，横排三等级龙卷风）。
+       全场共享 1 个 HTMLVideoElement + 1 个 Phaser 视频纹理，三塔用
+       setCrop 显示对应段；绿幕背景走 FireVideoGK 管线色度键透明。
+       不支持/加载失败时 supported=false，Tower 端回退静态贴图
+       wind_tower_lvN + Tween 旋转，与火塔降级路径一致。 */
+    try { WIND_VIDEO.init(this); } catch (e) { /* 忽略：Tower 端静态兜底 */ }
+
     /* ---------- 塔底座阴影（所有塔共用） ---------- */
     this.makeTexture('tower_base', 64, 64, (g) => {
       g.fillStyle(0x000000, 0.18);

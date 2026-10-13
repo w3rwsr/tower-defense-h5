@@ -86,12 +86,28 @@ class Tower extends Phaser.GameObjects.Container {
       this._gravityApplyArt();
       this.add(this.turret);
     } else if (this.isWind) {
-      /* 风塔：龙卷风贴图，锚点居中，每帧绕中心持续旋转（update 中做）；
-         旋转轴即贴图中心，位置不变、不变形、不随目标转向。 */
+      /* 风塔：龙卷风贴图（静态兜底）+ 视频叠加层。
+         静态贴图始终先建（兜底），视频纹理就绪后由 _showWindVideo 接管
+         显示：windImg 切到共享纹理 wind_video_full + setCrop 显示对应段 +
+         setPipeline('FireVideoGK') 绿幕色度键透明，并隐藏静态贴图。
+         视频/管线不可用、file:// 跨域污染等情况 supported=false 时保持
+         静态贴图 + 每帧 rotation 兜底（与火塔降级路径一致）。 */
       this.head = null;
       this.turret = scene.add.image(0, 0, this._windTexKey());
       this._windApplyArt();
       this.add(this.turret);
+      /* 视频层占位（独立 image，叠在静态贴图之上，与 turret 同位于容器
+         原点）；用 'fire_dot' 任意已存在小贴图占位，whenReady 就绪后
+         setTexture 切到视频纹理。 */
+      this._windVideoActive = false;
+      this._windVideoOk = (typeof WIND_VIDEO !== 'undefined') && WIND_VIDEO.supported;
+      if (this._windVideoOk) {
+        this.windImg = scene.add.image(0, 0, 'fire_dot').setVisible(false);
+        this.windImg.setBlendMode(Phaser.BlendModes.NORMAL);
+        this.add(this.windImg);
+        WIND_VIDEO.use();
+        WIND_VIDEO.whenReady(() => this._showWindVideo());
+      }
     } else {
       this.head = null;
       this.turret = scene.add.image(0, 0, 'turret_' + typeKey);
@@ -296,6 +312,10 @@ class Tower extends Phaser.GameObjects.Container {
      （54/60.5/67px），宽按纹理原始宽高比自适应。
      旋转轴即贴图中心（origin 0.5,0.5 默认居中），位置不变只旋转。 */
   _windApplyArt() {
+    if (this._windVideoActive) {
+      this._applyWindVideoCrop();
+      return;
+    }
     this.turret.setTexture(this._windTexKey());
     const art = (this.cfg && this.cfg.art) || { baseHeight: 54, scale: {} };
     const lvScale = (art.scale && art.scale[this.level] != null)
@@ -310,6 +330,43 @@ class Tower extends Phaser.GameObjects.Container {
        导致整张图绕偏心点甩动，看起来像"平面转圈/绕尾部打转"。
        用刚体平面旋转（只改 rotation），绝不缩放/挤压 → 不变形。 */
     this.turret.setOrigin(0.5, 0.5);
+  }
+
+  /* 视频纹理就绪 / 升级换级时：切管线、换纹理、固定居中显示。
+     视频本身已含龙卷风循环旋转，接管后不再每帧 rotation（update 中跳过）。 */
+  _showWindVideo() {
+    if (!this.windImg || !this.windImg.active || !this.scene) return;
+    if (typeof WIND_VIDEO === 'undefined' || !WIND_VIDEO.isReady()) return;
+    /* 绿幕管线不可用绝不接管（否则亮绿方块直接上墙） */
+    if (typeof fireVideoPipelineReady !== 'function' ||
+      !fireVideoPipelineReady(this.scene, 'FireVideoGK')) return;
+    try {
+      /* setTexture 带子帧 frameKey，比 setCrop 可靠（setCrop 在 setDisplaySize
+         后偶发不更新 cutX/cutWidth，会把整张 640x640 视频都显示出来） */
+      this.windImg.setTexture('wind_video_full', WIND_VIDEO.frameKeyForLevel(this.level));
+      this.windImg.setPipeline('FireVideoGK');
+      this.windImg.setBlendMode(Phaser.BlendModes.NORMAL);
+      const d = WIND_VIDEO.displaySize(this.level);
+      this.windImg.setDisplaySize(d.w, d.h);
+      this.windImg.setOrigin(0.5, 0.5);
+      this.windImg.setPosition(0, 0);
+      this.windImg.setVisible(true);
+      if (!this._windVideoActive) {
+        this._windVideoActive = true;
+        this.turret.setVisible(false);  // 隐藏静态贴图（视频已接管）
+      }
+    } catch (e) { /* shader 绑定失败：保持静态贴图兜底 */ }
+  }
+
+  /* 视频层换级时更新 frame + 显示尺寸：按当前等级切到对应段 frame，
+     setDisplaySize 按段宽高比缩放保持龙卷风形状不拉伸。 */
+  _applyWindVideoCrop() {
+    if (!this.windImg) return;
+    this.windImg.setTexture('wind_video_full', WIND_VIDEO.frameKeyForLevel(this.level));
+    const d = WIND_VIDEO.displaySize(this.level);
+    this.windImg.setDisplaySize(d.w, d.h);
+    this.windImg.setOrigin(0.5, 0.5);
+    this.windImg.setPosition(0, 0);
   }
 
   /* 风塔龙卷风自转速度（弧度/秒），由 JSON 配置 art.spin[等级] 驱动。
@@ -510,9 +567,12 @@ class Tower extends Phaser.GameObjects.Container {
     }
     /* 引力塔：升级同步切换磁铁贴图与显示尺寸 */
     if (this.isGravity) this._gravityApplyArt();
-    /* 风塔：升级同步切换龙卷风贴图与显示尺寸（旋转速度随等级自动变化，
-       _windSpinSpeed 每帧读当前等级配置，无需额外处理） */
-    if (this.isWind) this._windApplyArt();
+    /* 风塔：升级同步切换静态贴图与显示尺寸；视频已接管时切换 crop
+       到新等级段，未接管时按静态贴图 + 旋转兜底 */
+    if (this.isWind) {
+      this._windApplyArt();
+      if (this._windVideoActive) this._applyWindVideoCrop();
+    }
     // 升级小动画
     this.scene.tweens.add({ targets: this, scale: 1.18, duration: 110, yoyo: true });
     return cost;
@@ -591,11 +651,11 @@ class Tower extends Phaser.GameObjects.Container {
   update(dt, ctx) {
     this.behavior.update(dt, ctx);
     if (this.isWind) {
-      /* 风塔龙卷风每帧绕中心持续旋转：旋转速度由 JSON 配置 art.spin[等级]
-         驱动（一级 1.8 / 二级 3.0 / 三级 4.5 弧度/秒），逐级递增。
-         dt 单位为秒（Phaser update 标准参数），rotation += speed × dt
-         实现匀速旋转。位置不变、不变形，只在原地持续旋转。 */
-      this.turret.rotation += this._windSpinSpeed() * dt;
+      /* 风塔龙卷风自转：视频接管后由视频自身旋转（三龙卷风同步循环），
+         不再每帧 rotation；未接管时按 JSON 配置 art.spin[等级] 每帧累加。 */
+      if (!this._windVideoActive) {
+        this.turret.rotation += this._windSpinSpeed() * dt;
+      }
     }
     if (this.isWater) {
       /* 水塔炮头平滑旋转到目标方向 aimAngle。炮口已离线烘焙朝右（角度 0），
@@ -633,6 +693,9 @@ class Tower extends Phaser.GameObjects.Container {
     this._clearFireFx();
     if (this._burnOk) {
       FIRE_BURN.release(this._burnLv);
+    }
+    if (this._windVideoOk) {
+      WIND_VIDEO.release();
     }
     if (this._thunderArc) {
       this._thunderArc.destroy();
