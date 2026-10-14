@@ -13,7 +13,8 @@
  * 【BOSS_DEATH】死亡视频管理（三个独立视频，播放一次不循环）
  *   - 懒加载：Boss 出场时 prewarm(对应变体)，死亡时通常早已就绪；
  *   - Boss 被击杀时 play(key,x,y,scene) 接管：隐藏并销毁 Boss 本体，
- *     在死亡位置叠加爆炸视频（锚点居中，不遮挡 UI），播完 onended；
+ *     在死亡位置叠加爆炸视频（锚点居中，不遮挡 UI），按 bossDeath.
+ *     playbackRate 倍速播放（JSON 可调），播完 onended；
  *   - 结束衔接：死亡视频最后一帧含「皇冠躺地 + 粘液滩」——视频层以
  *     videoFade(300ms) 淡出（粘液随之消失），同时从末帧提取的皇冠贴图
  *     （CrownArtData.js，与视频中皇冠同造型同位置）出现在落点，用
@@ -37,7 +38,7 @@
 
   const CFG = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.enemies &&
     TD_CONFIG.enemies.bossVideo) || {};
-  const DISP_H = CFG.displayH || { gold: 112, blue: 112, gray: 112 };
+  const DISP_H = CFG.displayH || { gold: 78, blue: 78, gray: 78 };
   const SRC = (CFG.src || 'assets/boss_walk.mp4') + '?v=' + VER;
 
   /* 三段显示窗口（视频纹理像素坐标），行范围实测 y[106..437] + 安全余量 */
@@ -131,7 +132,7 @@
   api.frameKey = function (seg) { return SEG[seg] ? seg : 'gold'; };
   api.displaySize = function (seg) {
     const s = SEG[seg] || SEG.gold;
-    const h = DISP_H[seg] || 112;
+    const h = DISP_H[seg] || 78;
     return { w: h * (s.w / s.h), h: h };
   };
 
@@ -176,6 +177,9 @@
   const MAX_PLAYING = Math.max(1, DC.maxPlaying || 2);
   const VIDEO_FADE = Math.max(0, DC.videoFade != null ? DC.videoFade : 300);
   const CROWN_FADE = Math.max(200, DC.crownFade != null ? DC.crownFade : 1500);
+  /* 死亡视频播放倍速（JSON bossDeath.playbackRate，1=原速）：设置在 video
+     元素上，ended 事件自动提前触发，皇冠淡出/销毁时序无需任何改动 */
+  const DEATH_RATE = Math.max(0.1, DC.playbackRate != null ? DC.playbackRate : 1);
   const DEATH_H = DC.deathDisplayH || {};
   const CROWN_H = DC.crownDisplayH || {};
   const CROWN_ANCHOR = DC.crownAnchor || {};
@@ -279,6 +283,7 @@
 
     const v = st.video;
     try { v.currentTime = 0; } catch (e) { /* 首播无妨 */ }
+    try { v.playbackRate = DEATH_RATE; } catch (e) { /* 老内核不支持则原速 */ }
     const p = v.play();
     if (p && p.catch) p.catch(() => {});
     st.playing = true;

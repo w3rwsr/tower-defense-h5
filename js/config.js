@@ -734,29 +734,38 @@ window.TD_CONFIG = {
        快怪/慢怪的【血量/移速/金币】仍由下方 enemyX / enemyY 配置，已满足
        「快怪血低·移速快·金币少 / 慢怪血高·移速慢·金币多」。
        bg/key：实测视频底色 L1 距离抠像参数（换素材须同步重测）；
-       displayH：两段显示高度（世界单位，宽按段宽高比自动算，不变形）。 */
+       displayH：两段显示高度（世界单位，宽按段宽高比自动算，不变形）。
+       尺寸依据：视频实测内容宽度/段高 ≈ 绿 0.861 / 蓝 0.933，路宽 50px →
+       绿 57（可见宽约 49.1，不超路，维持原值）；蓝 52（可见宽约 48.5，
+       原 68 时可见宽 63.4 明显超路，已修正） */
     "slimeVideo": {
       "src": "assets/slime_walk.mp4",
       "bg": { "r": 50.7, "g": 228.7, "b": 57.8 },
       "key": { "low": 0.06, "high": 0.13 },
-      "displayH": { "green": 57, "blue": 68 }
+      "displayH": { "green": 57, "blue": 52 }
     },
 
     /* BOSS 运动视频（assets/boss_walk.mp4，640x640 绿幕，横排三只：左金/中蓝/右灰）。
        全场共享 1 个视频 + 1 个纹理，三段 frame 按实测元素边界固定分区
        （内容 x[11..213]/[220..421]/[429..627]，段界 0/213.5/426.5/640）。
        displayH = 每只 BOSS 的显示高度（世界单位，宽随段宽高比不变形），
-       改这里即可调 BOSS 视频大小。 */
+       改这里即可调 BOSS 视频大小。
+       尺寸依据：视频实测内容宽度/段高 ≈ 金 0.605 / 蓝 0.623 / 灰 0.605，
+       路宽 50px（world.pathWidth）→ displayH 78 时可见宽约 47.2~48.6px，
+       三只均不超出路面（112 时可见宽 68~70px，明显超路）。
+       三只统一 78（≈0.70×原 112），体型保持相近；要微调只改这三个数。 */
     "bossVideo": {
       "src": "assets/boss_walk.mp4",
       "bg": { "r": 71.0, "g": 220.0, "b": 80.0 },
       "key": { "low": 0.06, "high": 0.13 },
-      "displayH": { "gold": 112, "blue": 112, "gray": 112 }
+      "displayH": { "gold": 78, "blue": 78, "gray": 78 }
     },
 
     /* BOSS 死亡视频（三个独立绿幕视频，播放一次不循环）+ 皇冠淡出。
        bg/key = 三个死亡视频统一键控参数（背景实测绿幕中值 36,199,38）；
        maxPlaying = 同时播放的死亡视频上限（超出走降级，控手机性能）；
+       playbackRate = 死亡视频播放倍速（1=原速；1.5~2 加快，JSON 驱动），
+       结束仍由视频 ended 事件驱动 → 皇冠淡出/销毁时序自动跟随，不受影响；
        videoFade = 死亡视频播完后整层淡出时长 ms（爆炸残留粘液自然消失）；
        crownFade = 皇冠落地后缓慢淡出时长 ms（JSON 驱动，1~2 秒）；
        deathDisplayH = 死亡爆炸显示高度（世界单位）；
@@ -767,6 +776,7 @@ window.TD_CONFIG = {
       "bg": { "r": 36.0, "g": 199.0, "b": 38.0 },
       "key": { "low": 0.06, "high": 0.13 },
       "maxPlaying": 2,
+      "playbackRate": 1.75,    // 死亡动画加速：1.75 倍速（1=原速，可调 1.5~2）
       "videoFade": 300,
       "crownFade": 1500,
       "deathDisplayH": { "gold": 240, "blue": 240, "gray": 240 },
@@ -789,8 +799,10 @@ window.TD_CONFIG = {
       "darkColor": 0xc94444,
       /* 显示高度（世界单位）：宽按贴图/视频段宽高比自动算，保持造型不变形；
          超采样静态贴图 / 高分辨率视频经 setDisplaySize 缩回世界尺寸，
-         DPR 下与塔清晰度一致 */
-      "art": { "h": 50, "superSample": 2 },
+         DPR 下与塔清晰度一致。
+         静态贴图宽高比实测 1.04 → h 46 时宽约 47.8 ≤ 路宽 50（视频版由
+         slimeVideo.displayH 驱动，绿怪 57 可见宽约 49.1 同样不超路） */
+      "art": { "h": 46, "superSample": 2 },
       /* 绿幕视频接管：绿色快怪=左段；视频不可用时回退静态贴图 + 蹦跳 Tween */
       "slimeVideo": { "frame": "green", "hopHeight": 6 }
     },
@@ -803,7 +815,10 @@ window.TD_CONFIG = {
       "leakDamage": 2,
       "color": 0xa06cd5,
       "darkColor": 0x7447a6,
-      "art": { "h": 60, "superSample": 2 },
+      /* 静态贴图宽高比实测 1.167 → h 41 时宽约 47.8 ≤ 路宽 50
+         （原 60 时宽 70 明显超路；视频版由 slimeVideo.displayH 驱动：
+         蓝 68→52，可见宽 63.4→48.5，同样修正不超路） */
+      "art": { "h": 41, "superSample": 2 },
       /* 绿幕视频接管：蓝紫慢怪=右段 */
       "slimeVideo": { "frame": "blue", "hopHeight": 7 }
     },
@@ -824,9 +839,10 @@ window.TD_CONFIG = {
       "boss": true,
       "barThickness": 8,
       /* 显示高度（世界单位）：三只 BOSS 贴图（assets/bosses.png 裁出）宽高比
-         约 0.74，宽自动算 → 约 66x90，保持原造型不变形；贴图 3x 超采样
+         实测约 0.74，宽自动算 → h 65 时宽约 48 ≤ 路宽 50（原 90 时宽 66
+         超路；与视频版可见宽 47~49 一致），保持原造型不变形；贴图 3x 超采样
          （270px 高）经 setDisplaySize 缩回，DPR 下与塔清晰度一致 */
-      "art": { "h": 90 }
+      "art": { "h": 65 }
     }
   },
 
