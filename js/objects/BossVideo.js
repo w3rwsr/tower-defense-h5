@@ -31,7 +31,7 @@
   /* ============================================================
    * 一、BOSS_VIDEO —— 运动视频单例
    * ============================================================ */
-  const VER = '20261014a';
+  const VER = '20261014e';
   const TEX_KEY = 'boss_video_full';
   const VID_W = 640, VID_H = 640;
 
@@ -51,6 +51,7 @@
   const api = {
     supported: false,
     _inited: false,
+    _scenePaused: false,
     _scene: null,
     _video: null,
     _ready: false,
@@ -148,13 +149,17 @@
     this._scenePaused = false;
     this._sync();
   };
+  /* GameScene 每帧调用：把当前视频帧上传到共享 GL 纹理（全场 1 次）。
+     Phaser 3.80 裸视频纹理【不会】随渲染自动上传——只有 Video 游戏对象
+     内部才会 update；用 HTMLVideoElement 直接建纹理必须每帧手动
+     source.update()（与 SlimeVideo.tick 同款），否则画面永远停在首帧。 */
   api.tick = function () {
-    if (!this._ready || !this._video) return;
+    if (!this.supported || !this._ready || !this.textures) return;
+    if (this._refs <= 0 || !this._video ||
+      this._video.paused || this._video.readyState < 2) return;
     const tex = this.textures.get(TEX_KEY);
-    if (tex && tex.source && tex.source[0] && tex.source[0].video) {
-      /* 引用计数 >0 时 video 在播放，Phaser 视频纹理随渲染自动更新；
-         手动 update 兜底（暂停恢复首帧等场景） */
-    }
+    const src = tex && tex.source && tex.source[0];
+    if (src) { try { src.update(); } catch (e) {} }
   };
   api.setPaused = function (v) {
     this._scenePaused = !!v;
@@ -196,6 +201,18 @@
       !!fireVideoPipelineReady(scene, 'BossDeathGK');
     if (!pipelineReady) return;
     this.supported = true;
+    /* 死亡视频不在此处预载：启动瞬间并发 6 个视频首帧解码会拖慢/卡住
+       Boot（弱机黑屏）。改由 GameScene.create 在「本关有 Boss」时调用
+       prewarmAll()——进关后到 Boss 出场间隔数十秒，死亡时必然就绪；
+       Boss 出场时 Enemy 端仍有 prewarm(key) 兜底。 */
+  };
+
+  /* 进关后后台预载三个死亡视频（preload=auto，不播放）。消除旧方案
+     「Boss 出场才 prewarm、出场即被秒时 play() 因 !ready 永久降级」
+     的竞态；重复调用安全（已建条目直接返回）。 */
+  dapi.prewarmAll = function () {
+    if (!this.supported) return;
+    SEGS.forEach((k) => { try { this.prewarm(k); } catch (e) { /* 单个失败不影响其余 */ } });
   };
 
   /* 懒加载某个死亡视频（Boss 出场时调用；重复调用安全） */
@@ -336,9 +353,19 @@
     this._paused = false;
   };
 
+  /* GameScene 每帧调用：为每个【正在播放】的死亡视频上传当前帧。
+     与运动视频同理：Phaser 3.80 裸视频纹理不自动上传，不手动 update
+     死亡画面会永远停在首帧（看似"死亡视频没播放"，10 秒后直接皇冠）。 */
   dapi.tick = function () {
-    /* Phaser 视频纹理在渲染时自动上传当前帧，无需手动处理；
-       保留钩子与 SLIME_VIDEO 接线结构一致 */
+    if (!this.supported || !this.textures) return;
+    for (const k in this._st) {
+      const st = this._st[k];
+      if (!st.playing || !st.ready || !st.video ||
+        st.video.paused || st.video.readyState < 2) continue;
+      const tex = this.textures.get(st.texKey);
+      const src = tex && tex.source && tex.source[0];
+      if (src) { try { src.update(); } catch (e) {} }
+    }
   };
 
   dapi.setPaused = function (v) {

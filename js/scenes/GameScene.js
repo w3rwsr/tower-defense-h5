@@ -86,6 +86,16 @@ class GameScene extends Phaser.Scene {
     try { BOSS_VIDEO.enterScene(); } catch (e) {}
     /* BOSS 死亡视频：新一局停掉所有播放中的死亡动画并清零计数 */
     try { BOSS_DEATH.enterScene(); } catch (e) {}
+    /* 本关波次含 Boss 时，进关即后台预载三个死亡视频（不播放）。从进关到
+       Boss 出场间隔数十秒，死亡时必然就绪；消除旧方案「Boss 出场才 prewarm、
+       出场即被秒时 play() 因 !ready 永久走降级」的竞态。第 1 关无 Boss 不预载。
+       不能放进 Boot：启动瞬间 6 个视频并发首帧解码会拖慢黑屏（弱机明显）。 */
+    try {
+      if (BOSS_DEATH.prewarmAll &&
+        JSON.stringify(this.levelCfg.waves).indexOf('enemyBoss') >= 0) {
+        BOSS_DEATH.prewarmAll();
+      }
+    } catch (e) {}
 
     /* ---- 波次状态机：ready(可开战) / active(出怪中) / won / lost ---- */
     this.state = 'ready';
@@ -746,8 +756,9 @@ class GameScene extends Phaser.Scene {
     /* 史莱姆共享视频：每帧把当前视频帧上传到共享 GL 纹理（全场 1 次，
        仅场上有史莱姆且视频在播时才上传，控制手机端开销） */
     try { SLIME_VIDEO.tick(); } catch (e) {}
-    /* BOSS 运动视频 / 死亡视频：Phaser 视频纹理随渲染自动上传当前帧，
-       tick 保留为空钩子，与 SLIME_VIDEO 接线结构一致（控制手机端开销） */
+    /* BOSS 运动视频 / 死亡视频：tick 内把当前视频帧手动上传到 GL 纹理
+       （Phaser 3.80 裸视频纹理不自动上传，不 update 画面会停在首帧）；
+       仅在有 BOSS / 有死亡视频播放时才实际工作，控制手机端开销 */
     try { BOSS_VIDEO.tick(); } catch (e) {}
     try { BOSS_DEATH.tick(); } catch (e) {}
     // 暂停或结算时冻结全部逻辑（画面保持）
@@ -1253,6 +1264,28 @@ class GameScene extends Phaser.Scene {
       }
       this.closeTowerPicker();
       return;
+    }
+
+    // 【火力点相邻时优先于浮框命中】浮框宽约 3 槽（~200px），火力点间距
+    // 仅 76px，点「另一个火力点」经常落在旧浮框覆盖范围内。旧逻辑一律被
+    // 下方浮框 hitTest 吞掉，浮框不重建，上一次金币不足算出的置灰/不可点
+    // 状态被保留——即使金币已恢复，点其他火力点也弹不出可用的新框。
+    // 修复：命中的是另一个合法火力点时，直接把浮框切到该点重建
+    // （openTowerPicker 每次重算金币，塔槽可用状态恒为最新）。
+    const pickPR = (this.buildCfg.picker && this.buildCfg.picker.spotPickRadius != null)
+      ? this.buildCfg.picker.spotPickRadius : this.buildCfg.touchRadius;
+    const pickSpotHit = this.snapHotspot(x, y);
+    if (this._pickSpot && pickSpotHit && this._pickSpot.key !== pickSpotHit.key &&
+      this.canBuildAt(pickSpotHit.x, pickSpotHit.y, pickSpotHit.key)) {
+      const pd2 = (pickSpotHit.x - x) * (pickSpotHit.x - x) +
+        (pickSpotHit.y - y) * (pickSpotHit.y - y);
+      if (pd2 <= pickPR * pickPR) {
+        this.hidePanel();
+        this.selectedTower = null;
+        this.rangeGfx.clear();
+        this.openTowerPicker(pickSpotHit);
+        return;
+      }
     }
 
     // 点在选塔浮框上：交给框内塔槽按钮，地图不响应（淡入未完成时也算命中）
