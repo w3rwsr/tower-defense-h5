@@ -741,6 +741,43 @@ window.TD_CONFIG = {
       "key": { "low": 0.06, "high": 0.13 },
       "displayH": { "green": 57, "blue": 68 }
     },
+
+    /* BOSS 运动视频（assets/boss_walk.mp4，640x640 绿幕，横排三只：左金/中蓝/右灰）。
+       全场共享 1 个视频 + 1 个纹理，三段 frame 按实测元素边界固定分区
+       （内容 x[11..213]/[220..421]/[429..627]，段界 0/213.5/426.5/640）。
+       displayH = 每只 BOSS 的显示高度（世界单位，宽随段宽高比不变形），
+       改这里即可调 BOSS 视频大小。 */
+    "bossVideo": {
+      "src": "assets/boss_walk.mp4",
+      "bg": { "r": 71.0, "g": 220.0, "b": 80.0 },
+      "key": { "low": 0.06, "high": 0.13 },
+      "displayH": { "gold": 112, "blue": 112, "gray": 112 }
+    },
+
+    /* BOSS 死亡视频（三个独立绿幕视频，播放一次不循环）+ 皇冠淡出。
+       bg/key = 三个死亡视频统一键控参数（背景实测绿幕中值 36,199,38）；
+       maxPlaying = 同时播放的死亡视频上限（超出走降级，控手机性能）；
+       videoFade = 死亡视频播完后整层淡出时长 ms（爆炸残留粘液自然消失）；
+       crownFade = 皇冠落地后缓慢淡出时长 ms（JSON 驱动，1~2 秒）；
+       deathDisplayH = 死亡爆炸显示高度（世界单位）；
+       crownDisplayH = 皇冠显示高度（与死亡视频中皇冠观感一致）；
+       crownAnchor = 皇冠在死亡视频里的落点（视频像素坐标，换算到世界位置）。 */
+    "bossDeath": {
+      "src": "assets/boss_death_#KEY#.mp4",
+      "bg": { "r": 36.0, "g": 199.0, "b": 38.0 },
+      "key": { "low": 0.06, "high": 0.13 },
+      "maxPlaying": 2,
+      "videoFade": 300,
+      "crownFade": 1500,
+      "deathDisplayH": { "gold": 240, "blue": 240, "gray": 240 },
+      "crownDisplayH": { "gold": 42, "blue": 30, "gray": 30 },
+      "crownAnchor": {
+        "gold": { "x": 321, "y": 434 },
+        "blue": { "x": 322, "y": 392 },
+        "gray": { "x": 323, "y": 394 }
+      }
+    },
+
     "enemyX": {
       "name": "敌人X",
       "hp": 46,

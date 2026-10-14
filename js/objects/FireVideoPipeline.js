@@ -67,6 +67,35 @@
   const SK_LOW = n(SK.low, 0.06);
   const SK_HIGH = Math.max(n(SK.high, 0.13), SK_LOW + 0.001);
 
+  /* F. BOSS 运动视频专用背景色距离键（预乘 alpha 输出，结构与 E 相同）。
+     boss_walk.mp4 背景为绿幕 RGB(71,220,80)（与史莱姆视频略不同），三只 BOSS
+     本体（金 233,194,79 / 蓝 51,147,218 / 灰 118,123,138）到背景的 L1 距离
+     ≥0.14，背景 d≈0，空档 0.06/0.13 —— 主体零残缺、背景零残留。 */
+  const BCFG = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.enemies &&
+    TD_CONFIG.enemies.bossVideo) || {};
+  const BBG = BCFG.bg || { r: 71.0, g: 220.0, b: 80.0 };
+  const BK2 = BCFG.key || { low: 0.06, high: 0.13 };
+  const BBG_R = n(BBG.r, 71.0) / 255.0;
+  const BBG_G = n(BBG.g, 220.0) / 255.0;
+  const BBG_B = n(BBG.b, 80.0) / 255.0;
+  const BBK_LOW = n(BK2.low, 0.06);
+  const BBK_HIGH = Math.max(n(BK2.high, 0.13), BBK_LOW + 0.001);
+
+  /* G. BOSS 死亡视频专用背景色距离键（预乘 alpha 输出）。
+     三个死亡视频背景绿幕实测 RGB(32,188,42)/(43,201,35)/(36,199,38)，取中值
+     (36,199,38) 统一键控：各视频背景到该色的 d≤0.025（远低于 low 0.06），
+     爆炸火光/皇冠（金/白/红橙）d≥0.3 全不透明；爆炸残留的深绿粘液 d≈0.1
+     半透明自然过渡。 */
+  const DCFG = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.enemies &&
+    TD_CONFIG.enemies.bossDeath) || {};
+  const DBG2 = DCFG.bg || { r: 36.0, g: 199.0, b: 38.0 };
+  const DK2 = DCFG.key || { low: 0.06, high: 0.13 };
+  const DBG_R = n(DBG2.r, 36.0) / 255.0;
+  const DBG_G = n(DBG2.g, 199.0) / 255.0;
+  const DBG_B = n(DBG2.b, 38.0) / 255.0;
+  const DBK_LOW = n(DK2.low, 0.06);
+  const DBK_HIGH = Math.max(n(DK2.high, 0.13), DBK_LOW + 0.001);
+
   const PRECISION = [
     '#ifdef GL_FRAGMENT_PRECISION_HIGH',
     'precision highp float;',
@@ -160,6 +189,40 @@
     '}'
   ].join('\n');
 
+  /* F. BOSS 运动视频距离键（结构与 E 相同，参数见上方 F 段常量） */
+  const BOSS_WALK_FS = PRECISION + '\n' + [
+    'void main ()',
+    '{',
+    '    vec4 tex = texture2D(uMainSampler, outTexCoord);',
+    '    float d = (abs(tex.r - ' + BBG_R.toFixed(4) + ') + abs(tex.g - ' + BBG_G.toFixed(4) + ') + abs(tex.b - ' + BBG_B.toFixed(4) + ')) / 3.0;',
+    '    float a = smoothstep(' + BBK_LOW.toFixed(3) + ', ' + BBK_HIGH.toFixed(3) + ', d);',
+    '    vec3 rgb = tex.rgb * outTint.bgr;',
+    '    float A = a * outTint.a;',
+    '    if (outTintEffect == 2.0) {',
+    '        gl_FragColor = vec4(outTint.bgr * A, A);',
+    '    } else {',
+    '        gl_FragColor = vec4(rgb * A, A);',
+    '    }',
+    '}'
+  ].join('\n');
+
+  /* G. BOSS 死亡视频距离键（结构与 E 相同，参数见上方 G 段常量） */
+  const BOSS_DEATH_FS = PRECISION + '\n' + [
+    'void main ()',
+    '{',
+    '    vec4 tex = texture2D(uMainSampler, outTexCoord);',
+    '    float d = (abs(tex.r - ' + DBG_R.toFixed(4) + ') + abs(tex.g - ' + DBG_G.toFixed(4) + ') + abs(tex.b - ' + DBG_B.toFixed(4) + ')) / 3.0;',
+    '    float a = smoothstep(' + DBK_LOW.toFixed(3) + ', ' + DBK_HIGH.toFixed(3) + ', d);',
+    '    vec3 rgb = tex.rgb * outTint.bgr;',
+    '    float A = a * outTint.a;',
+    '    if (outTintEffect == 2.0) {',
+    '        gl_FragColor = vec4(outTint.bgr * A, A);',
+    '    } else {',
+    '        gl_FragColor = vec4(rgb * A, A);',
+    '    }',
+    '}'
+  ].join('\n');
+
   /* C. 白幕色度键 */
   const FIRE_VIDEO_WK_FS = PRECISION + '\n' + [
     'void main ()',
@@ -204,6 +267,18 @@
       super({ game, fragShader: SLIME_VIDEO_FS });
     }
   }
+  /* BOSS 运动视频专用（背景色距离键 + 预乘输出，见 F 段说明） */
+  class BossWalkGKPipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipeline {
+    constructor(game) {
+      super({ game, fragShader: BOSS_WALK_FS });
+    }
+  }
+  /* BOSS 死亡视频专用（背景色距离键 + 预乘输出，见 G 段说明） */
+  class BossDeathGKPipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipeline {
+    constructor(game) {
+      super({ game, fragShader: BOSS_DEATH_FS });
+    }
+  }
 
   /* 供 Tower 端判断某条管线是否已在当前渲染器注册（WebGL） */
   function fireVideoPipelineReady(scene, name) {
@@ -219,5 +294,7 @@
   window.FireVideoWKPipeline = FireVideoWKPipeline;
   window.WindVideoGKPipeline = WindVideoGKPipeline;
   window.SlimeVideoGKPipeline = SlimeVideoGKPipeline;
+  window.BossWalkGKPipeline = BossWalkGKPipeline;
+  window.BossDeathGKPipeline = BossDeathGKPipeline;
   window.fireVideoPipelineReady = fireVideoPipelineReady;
 })();

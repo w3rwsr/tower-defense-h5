@@ -133,6 +133,32 @@ class Enemy extends Phaser.GameObjects.Container {
       this._startStaticSlime();
     }
 
+    /* ---- BOSS 运动视频接管（boss_walk.mp4：左金/中蓝/右灰三段） ----
+       与史莱姆同模式：全场共享单视频 + BossWalkGK 距离键管线；就绪后把
+       body 换成对应段 frame，视频自身即行走动画；不支持/加载失败/超时
+       则保持静态 BOSS 贴图（Player 端零改动，数值照旧）。 */
+    this._bossKey = null;
+    this._bossVideoUsed = false;
+    this._bossVideoActive = false;
+    this._bossGuard = null;
+    const bossVcfg = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.enemies &&
+      TD_CONFIG.enemies.bossVideo) || null;
+    if (this.opts && this.opts.bossTexKey && bossVcfg &&
+      typeof BOSS_VIDEO !== 'undefined' && BOSS_VIDEO.supported) {
+      this._bossKey = String(this.opts.bossTexKey).replace('boss_', '');
+      this._bossVideoUsed = true;
+      BOSS_VIDEO.use();
+      BOSS_VIDEO.whenReady(() => this._showBossVideo());
+      /* 解码失败/长时间未就绪 → 释放引用，保留静态贴图 */
+      this._bossGuard = scene.time.delayedCall(4000, () => {
+        if (!this._bossVideoActive) this._endBossVideo();
+      });
+    }
+    /* Boss 出场即预载对应死亡视频（懒加载，死亡时通常早已就绪） */
+    if (this._bossKey && typeof BOSS_DEATH !== 'undefined' && BOSS_DEATH.prewarm) {
+      try { BOSS_DEATH.prewarm(this._bossKey); } catch (e) { /* 降级兜底 */ }
+    }
+
     /* ---- 血条 ---- */
     const barW = cfg.radius * 2.4;
     this.barW = barW;
@@ -599,6 +625,25 @@ class Enemy extends Phaser.GameObjects.Container {
     this.refreshVulnView(false); // 传 0 层效果：清掉易伤文字
     if (this.vulnText) { try { this.vulnText.destroy(); } catch (_) {} this.vulnText = null; }
     this.body.setTint(0xffffff);
+
+    /* ---- BOSS 死亡视频接管 ----
+       Boss 被击杀 → 在死亡位置叠加对应死亡动画视频（锚点居中，独立于
+       Boss 对象播放）；播完后视频层快速淡出、皇冠贴图缓慢淡出（见
+       BOSS_DEATH._finish）。接管失败（未就绪/并发超限/不支持）走下方
+       原有弹跳动画 + 皇冠淡出降级，功能不缺失。 */
+    const bossKey = (this.opts && this.opts.bossTexKey) ?
+      String(this.opts.bossTexKey).replace('boss_', '') : null;
+    if (bossKey && typeof BOSS_DEATH !== 'undefined' && BOSS_DEATH.supported) {
+      const px = this.x, py = this.y;
+      if (BOSS_DEATH.play(bossKey, px, py, this.scene)) {
+        this.removed = true;
+        this.destroy();       // Boss 本体立即销毁，视频/皇冠由 BOSS_DEATH 托管
+        return;
+      }
+    }
+    /* 降级皇冠：无视频能力时也保留「皇冠缓慢消失」效果（代码叠加贴图） */
+    if (bossKey) this._spawnFadingCrown(bossKey, this.x, this.y);
+
     this.scene.tweens.add({
       targets: this,
       scale: 1.35,
@@ -608,6 +653,31 @@ class Enemy extends Phaser.GameObjects.Container {
         this.removed = true;
         this.destroy();
       }
+    });
+  }
+
+  /* 降级路径的皇冠淡出：从死亡视频末帧提取的皇冠贴图，原地缓慢淡出 */
+  _spawnFadingCrown(key, x, y) {
+    const scene = this.scene;
+    if (!scene || !scene.add || !scene.tweens || !scene.textures) return;
+    if (typeof TD_CONFIG === 'undefined' || !TD_CONFIG.enemies ||
+      !TD_CONFIG.enemies.bossDeath) return;
+    const texKey = 'crown_' + key;
+    if (!scene.textures.exists(texKey)) return;
+    const dc = TD_CONFIG.enemies.bossDeath;
+    const ch = (dc.crownDisplayH && dc.crownDisplayH[key]) || 30;
+    const fade = Math.max(200, dc.crownFade != null ? dc.crownFade : 1500);
+    const crown = scene.add.image(x, y + 18, texKey);
+    const tex = scene.textures.get(texKey);
+    const ratio = (tex && tex.source && tex.source[0]) ?
+      tex.source[0].width / Math.max(1, tex.source[0].height) : 1.4;
+    crown.setDisplaySize(ch * ratio, ch);
+    crown.setDepth(59);
+    scene.tweens.add({
+      targets: crown,
+      alpha: 0,
+      duration: fade,
+      onComplete: () => { try { if (crown.active) crown.destroy(); } catch (_) {} }
     });
   }
 
@@ -677,9 +747,40 @@ class Enemy extends Phaser.GameObjects.Container {
     this._videoActive = false;
   }
 
+  /* ============================================================
+   * BOSS 运动视频（boss_walk.mp4：左金/中蓝/右灰三段，共享单视频）
+   * ============================================================ */
+
+  /* 视频就绪：body 换共享视频纹理对应段 frame + BossWalkGK 距离键管线 */
+  _showBossVideo() {
+    if (this.dead || this.removed || !this.scene || !this.body || !this._bossKey) return;
+    if (typeof BOSS_VIDEO === 'undefined' || !BOSS_VIDEO.isReady()) return;
+    if (typeof fireVideoPipelineReady !== 'function' ||
+      !fireVideoPipelineReady(this.scene, 'BossWalkGK')) {
+      this._endBossVideo();
+      return;
+    }
+    const d = BOSS_VIDEO.displaySize(this._bossKey);
+    this.body.setTexture(BOSS_VIDEO.texKey(), BOSS_VIDEO.frameKey(this._bossKey));
+    this.body.setPipeline('BossWalkGK');
+    this.body.setDisplaySize(d.w, d.h);
+    this._bossVideoActive = true;
+  }
+
+  /* 收尾：释放共享运动视频引用（保留静态贴图显示，不加蹦跳） */
+  _endBossVideo() {
+    if (this._bossGuard) { try { this._bossGuard.remove(false); } catch (_) {} this._bossGuard = null; }
+    if (this._bossVideoUsed) {
+      this._bossVideoUsed = false;
+      try { if (typeof BOSS_VIDEO !== 'undefined') BOSS_VIDEO.release(); } catch (_) {}
+    }
+    this._bossVideoActive = false;
+  }
+
   /* 任一销毁路径（playDeath / destroyImmediately / 场景关闭）统一释放视频引用 */
   destroy(fromScene) {
     this._endSlime();
+    this._endBossVideo();
     super.destroy(fromScene);
   }
 }

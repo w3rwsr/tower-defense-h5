@@ -82,6 +82,10 @@ class GameScene extends Phaser.Scene {
     try { WIND_VIDEO.enterScene(); } catch (e) {}
     /* 史莱姆共享视频：新一局引用计数归零并暂停（史莱姆生成时重新注册） */
     try { SLIME_VIDEO.enterScene(); } catch (e) {}
+    /* BOSS 共享运动视频：新一局引用计数归零并暂停（Boss 生成时重新注册） */
+    try { BOSS_VIDEO.enterScene(); } catch (e) {}
+    /* BOSS 死亡视频：新一局停掉所有播放中的死亡动画并清零计数 */
+    try { BOSS_DEATH.enterScene(); } catch (e) {}
 
     /* ---- 波次状态机：ready(可开战) / active(出怪中) / won / lost ---- */
     this.state = 'ready';
@@ -742,6 +746,10 @@ class GameScene extends Phaser.Scene {
     /* 史莱姆共享视频：每帧把当前视频帧上传到共享 GL 纹理（全场 1 次，
        仅场上有史莱姆且视频在播时才上传，控制手机端开销） */
     try { SLIME_VIDEO.tick(); } catch (e) {}
+    /* BOSS 运动视频 / 死亡视频：Phaser 视频纹理随渲染自动上传当前帧，
+       tick 保留为空钩子，与 SLIME_VIDEO 接线结构一致（控制手机端开销） */
+    try { BOSS_VIDEO.tick(); } catch (e) {}
+    try { BOSS_DEATH.tick(); } catch (e) {}
     // 暂停或结算时冻结全部逻辑（画面保持）
     const rawDt = Math.min(delta, 50) / 1000;
     const dt = (this.paused || this.state === 'won' || this.state === 'lost')
@@ -3422,6 +3430,11 @@ class GameScene extends Phaser.Scene {
     try { WIND_VIDEO.setPaused(v); } catch (e) {}
     /* 史莱姆共享视频随游戏暂停/恢复（暂停即停解码，省电防卡） */
     try { SLIME_VIDEO.setPaused(v); } catch (e) {}
+    /* BOSS 运动视频随暂停停播/恢复 */
+    try { BOSS_VIDEO.setPaused(v); } catch (e) {}
+    /* BOSS 死亡视频（爆炸动画）随暂停停播/恢复；皇冠 Tween 已被
+       tweens.timeScale=0 冻结，恢复后继续淡出 */
+    try { BOSS_DEATH.setPaused(v); } catch (e) {}
   }
 
   toggleSpeed() {

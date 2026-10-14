@@ -288,8 +288,13 @@
     if (typeof FireVideoWKPipeline !== 'undefined') pipes.FireVideoWK = FireVideoWKPipeline;
     if (typeof WindVideoGKPipeline !== 'undefined') pipes.WindVideoGK = WindVideoGKPipeline;
     if (typeof SlimeVideoGKPipeline !== 'undefined') pipes.SlimeVideoGK = SlimeVideoGKPipeline;
+    /* BOSS 运动视频 / 死亡视频距离键管线（BossVideo.js 配套） */
+    if (typeof BossWalkGKPipeline !== 'undefined') pipes.BossWalkGK = BossWalkGKPipeline;
+    if (typeof BossDeathGKPipeline !== 'undefined') pipes.BossDeathGK = BossDeathGKPipeline;
     if (pipes.FireVideo || pipes.FireVideoGK || pipes.FireVideoWK || pipes.WindVideoGK ||
-      pipes.SlimeVideoGK) gameCfg.render.pipeline = pipes;
+      pipes.SlimeVideoGK || pipes.BossWalkGK || pipes.BossDeathGK) {
+      gameCfg.render.pipeline = pipes;
+    }
   } catch (e) { /* 忽略：按等级回退 */ }
   const game = new Phaser.Game(gameCfg);
 

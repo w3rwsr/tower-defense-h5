@@ -57,6 +57,10 @@ class BootScene extends Phaser.Scene {
        快怪本体与绿幕较近，不能用 green-excess 键）。不支持/加载失败时
        supported=false，Enemy 端回退静态贴图 + 蹦跳 Tween。 */
     try { SLIME_VIDEO.init(this); } catch (e) { /* 忽略：Enemy 端静态兜底 */ }
+    /* BOSS 运动视频 + 死亡视频（BossVideo.js）：init 只做支持性检测与
+       运动视频加载；死亡视频按 Boss 出场懒加载（prewarm），不拖慢启动。 */
+    try { BOSS_VIDEO.init(this); } catch (e) { /* 忽略：Enemy 端静态兜底 */ }
+    try { BOSS_DEATH.init(this); } catch (e) { /* 忽略：Enemy 端降级兜底 */ }
 
     /* ---------- 塔底座阴影（所有塔共用） ---------- */
     this.makeTexture('tower_base', 64, 64, (g) => {
@@ -621,6 +625,31 @@ class BootScene extends Phaser.Scene {
         const durl = SLIME_STATIC_ART[k];
         if (!durl) return;
         const key = 'slime_static_' + k;
+        artJobs.push(new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            try {
+              if (this.textures.exists(key)) this.textures.remove(key);
+              this.textures.addImage(key, img);
+              resolve(true);
+            } catch (e) { resolve(false); }
+          };
+          img.onerror = () => resolve(false);
+          img.src = durl;
+        }));
+      });
+    }
+
+    /* ---------- 皇冠贴图（CrownArtData.js，data URI，离线生成） ----------
+       从三个 Boss 死亡视频末帧提取的金/蓝/灰皇冠落地造型（绿幕距离键 +
+       despill 抠透明，2x 超采样）。Boss 死亡视频播完后叠加在落点缓慢淡出；
+       视频降级时同样用它做皇冠淡出。缺失时跳过皇冠淡出，不影响死亡动画。 */
+    if (typeof CROWN_ART !== 'undefined' && CROWN_ART) {
+      if (!artJobs) artJobs = [];
+      Object.keys(CROWN_ART).forEach((k) => {
+        const durl = CROWN_ART[k];
+        if (!durl) return;
+        const key = 'crown_' + k;
         artJobs.push(new Promise((resolve) => {
           const img = new Image();
           img.onload = () => {
