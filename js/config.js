@@ -767,10 +767,18 @@ window.TD_CONFIG = {
        playbackRate = 死亡视频播放倍速（1=原速；1.5~2 加快，JSON 驱动），
        结束仍由视频 ended 事件驱动 → 皇冠淡出/销毁时序自动跟随，不受影响；
        videoFade = 死亡视频播完后整层淡出时长 ms（爆炸残留粘液自然消失）；
+       crownFadeIn = 皇冠淡入时长 ms（与视频层 300ms 淡出交叉溶解，消除
+       视频皇冠→代码皇冠交接的突变）；
        crownFade = 皇冠落地后缓慢淡出时长 ms（JSON 驱动，1~2 秒）；
-       deathDisplayH = 死亡爆炸显示高度（世界单位）；
-       crownDisplayH = 皇冠显示高度（与死亡视频中皇冠观感一致）；
-       crownAnchor = 皇冠在死亡视频里的落点（视频像素坐标，换算到世界位置）。 */
+       deathDisplayH = 死亡爆炸显示高度（世界单位）。尺寸依据：逐帧实测
+       三个视频最大内容宽 640/510/536 → 显示高 50/62/59 时可见宽均 ≤ 50
+       （= 路宽 world.pathWidth，与 Boss 生前可见宽 47~49 一致），爆炸/
+       粘液/皇冠全程不超出路面；原 240 时爆炸可见宽 240 明显超路。
+       crownDisplayH = 皇冠显示高度（随 deathDisplayH 等比缩放：
+       42/30/30 × 新 dh/240 ≈ 9/8/7，与视频中的皇冠观感一致）；
+       crownAnchor = 皇冠在死亡视频里的落点（视频像素坐标，换算到世界
+       位置；实测末帧皇冠中心 gold(322,434)/blue(322,391)/gray(323,394)，
+       与配置误差 ≤1px，保持不变）。 */
     "bossDeath": {
       "src": "assets/boss_death_#KEY#.mp4",
       "bg": { "r": 36.0, "g": 199.0, "b": 38.0 },
@@ -778,9 +786,10 @@ window.TD_CONFIG = {
       "maxPlaying": 2,
       "playbackRate": 1.75,    // 死亡动画加速：1.75 倍速（1=原速，可调 1.5~2）
       "videoFade": 300,
-      "crownFade": 1500,
-      "deathDisplayH": { "gold": 240, "blue": 240, "gray": 240 },
-      "crownDisplayH": { "gold": 42, "blue": 30, "gray": 30 },
+      "crownFadeIn": 200,      // 皇冠淡入（与视频层淡出交叉溶解）
+      "crownFade": 1500,       // 皇冠缓慢淡出（1~2 秒，Sine 平滑）
+      "deathDisplayH": { "gold": 50, "blue": 62, "gray": 59 },
+      "crownDisplayH": { "gold": 9, "blue": 8, "gray": 7 },
       "crownAnchor": {
         "gold": { "x": 321, "y": 434 },
         "blue": { "x": 322, "y": 392 },

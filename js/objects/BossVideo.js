@@ -17,8 +17,9 @@
  *     playbackRate 倍速播放（JSON 可调），播完 onended；
  *   - 结束衔接：死亡视频最后一帧含「皇冠躺地 + 粘液滩」——视频层以
  *     videoFade(300ms) 淡出（粘液随之消失），同时从末帧提取的皇冠贴图
- *     （CrownArtData.js，与视频中皇冠同造型同位置）出现在落点，用
- *     Tween 缓慢淡出 crownFade(1.5s，JSON 可调)，之后销毁皇冠；
+ *     （CrownArtData.js，与视频中皇冠同造型同位置）在 crownFadeIn(200ms)
+ *     内淡入交叉溶解，再以 Tween 缓慢淡出 crownFade(1.5s，JSON 可调)，
+ *     之后销毁皇冠；
  *   - 降级：视频不支持 / 未就绪 / 并发超限 / file:// 跨域 → 返回 false，
  *     Enemy 端走原有死亡动画 + 皇冠贴图淡出，功能不缺失；
  *   - 性能：maxPlaying(JSON) 限制同时播放数量；不播放时全部 pause。
@@ -177,6 +178,9 @@
   const MAX_PLAYING = Math.max(1, DC.maxPlaying || 2);
   const VIDEO_FADE = Math.max(0, DC.videoFade != null ? DC.videoFade : 300);
   const CROWN_FADE = Math.max(200, DC.crownFade != null ? DC.crownFade : 1500);
+  /* 皇冠淡入时长（JSON：crownFadeIn）：视频层 300ms 淡出期间皇冠同步淡入，
+     两者交叉溶解，消除「视频皇冠 → 代码皇冠」交接瞬间的突变/微错位感 */
+  const CROWN_FADE_IN = Math.max(0, DC.crownFadeIn != null ? DC.crownFadeIn : 200);
   /* 死亡视频播放倍速（JSON bossDeath.playbackRate，1=原速）：设置在 video
      元素上，ended 事件自动提前触发，皇冠淡出/销毁时序无需任何改动 */
   const DEATH_RATE = Math.max(0.1, DC.playbackRate != null ? DC.playbackRate : 1);
@@ -274,7 +278,7 @@
     const tex = this.textures.get(st.texKey);
     if (!tex || !tex.has('__BASE')) return false;
 
-    const dh = DEATH_H[key] || 240;
+    const dh = DEATH_H[key] || 50;
     const img = scene.add.image(x, y, st.texKey);
     img.setPipeline('BossDeathGK');
     img.setDisplaySize(dh, dh);   // 视频 640x640 正方形，宽=高不变形
@@ -311,14 +315,16 @@
       return;
     }
 
-    /* 皇冠：与死亡视频中的皇冠同造型（末帧提取），落在同一位置 */
+    /* 皇冠：与死亡视频中的皇冠同造型（末帧提取），落在同一位置
+       （crownAnchor 实测=视频末帧皇冠中心，误差 ≤1px；世界偏移按
+       deathDisplayH 等比换算，视频皇冠与代码皇冠逐像素对齐） */
     const cTex = 'crown_' + key;
     if (this.textures && this.textures.exists(cTex)) {
       const anchor = CROWN_ANCHOR[key] || { x: 321, y: 434 };
-      const dh = DEATH_H[key] || 240;
+      const dh = DEATH_H[key] || 50;
       const dx = (anchor.x - 320) / 640 * dh;
       const dy = (anchor.y - 320) / 640 * dh;
-      const ch = CROWN_H[key] || 27;
+      const ch = CROWN_H[key] || 9;
       const crown = scene.add.image(x + dx, y + dy, cTex);
       const tex = this.textures.get(cTex);
       if (tex && tex.source && tex.source[0]) {
@@ -327,14 +333,25 @@
       } else {
         crown.setDisplaySize(ch, ch);
       }
-      crown.setDepth(59);
-      /* 皇冠缓慢淡出（JSON：crownFade），淡出后销毁皇冠对象 */
+      crown.setDepth(59);          // 位于视频层(60)之下：视频皇冠淡出时下方皇冠透出，交叉溶解
+      crown.setAlpha(0);
+      /* 皇冠淡入（JSON：crownFadeIn）→ 缓慢淡出（JSON：crownFade，
+         Sine 平滑过渡），淡出结束后销毁皇冠对象 */
       scene.tweens.add({
         targets: crown,
-        alpha: 0,
-        duration: CROWN_FADE,
-        delay: 0,
-        onComplete: () => { try { if (crown.active) crown.destroy(); } catch (e) {} }
+        alpha: 1,
+        duration: CROWN_FADE_IN,
+        ease: 'Sine.easeOut',
+        onComplete: () => {
+          scene.tweens.add({
+            targets: crown,
+            alpha: 0,
+            duration: CROWN_FADE,
+            delay: 0,
+            ease: 'Sine.easeInOut',
+            onComplete: () => { try { if (crown.active) crown.destroy(); } catch (e) {} }
+          });
+        }
       });
     }
 
