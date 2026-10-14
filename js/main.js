@@ -276,16 +276,20 @@
     scene: [BootScene, LevelSelectScene, GameScene]
   };
   /* 火塔燃烧视频专用管线：FireVideo=黑底亮度键（lv2），
-     FireVideoGK=绿幕色度键（lv1/lv3），FireVideoWK=白幕色度键（备用）。
-     背景类型由 FireBurn 读像素自动检测。脚本缺失/异常时不注册，
-     Tower 端黑底回退 ADD、绿/白幕回退静态贴图，绝不阻断启动 */
+     FireVideoGK=绿幕色度键（lv1/lv3），FireVideoWK=白幕色度键（备用）；
+     WindVideoGK=风塔龙卷风绿幕色度键（预乘输出）；
+     SlimeVideoGK=史莱姆小怪【背景色距离键】（预乘输出，绿色快怪本体不被抠缺）。
+     背景类型由 FireBurn/视频模块按实测参数决定。脚本缺失/异常时不注册，
+     Tower/Enemy 端回退静态贴图，绝不阻断启动 */
   try {
     const pipes = {};
     if (typeof FireVideoPipeline !== 'undefined') pipes.FireVideo = FireVideoPipeline;
     if (typeof FireVideoGKPipeline !== 'undefined') pipes.FireVideoGK = FireVideoGKPipeline;
     if (typeof FireVideoWKPipeline !== 'undefined') pipes.FireVideoWK = FireVideoWKPipeline;
     if (typeof WindVideoGKPipeline !== 'undefined') pipes.WindVideoGK = WindVideoGKPipeline;
-    if (pipes.FireVideo || pipes.FireVideoGK || pipes.FireVideoWK || pipes.WindVideoGK) gameCfg.render.pipeline = pipes;
+    if (typeof SlimeVideoGKPipeline !== 'undefined') pipes.SlimeVideoGK = SlimeVideoGKPipeline;
+    if (pipes.FireVideo || pipes.FireVideoGK || pipes.FireVideoWK || pipes.WindVideoGK ||
+      pipes.SlimeVideoGK) gameCfg.render.pipeline = pipes;
   } catch (e) { /* 忽略：按等级回退 */ }
   const game = new Phaser.Game(gameCfg);
 

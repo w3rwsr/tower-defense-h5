@@ -52,6 +52,21 @@
   const WGK_HIGH = Math.max(n(WGK.high, GK_HIGH), WGK_LOW + 0.001);
   const WGK_SPILL = n(WGK.spill, GK_SPILL);
 
+  /* 史莱姆小怪专用背景色距离键（TD_CONFIG.enemies.slimeVideo）：
+     视频背景为纯亮绿 RGB(50.7,228.7,57.8)，但与「绿色快怪」本体颜色较近，
+     不能用 green-excess 键（绿怪本体 green-excess 与绿幕重叠 → 会被一起抠缺）。
+     改用【到背景色的 L1 距离】：实测背景 d≈0，快/慢怪本体 d≥0.14，
+     空档 0.06/0.13 —— 主体（含深色描边）零残缺、背景零残留。 */
+  const SCFG = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.enemies &&
+    TD_CONFIG.enemies.slimeVideo) || {};
+  const SBG = SCFG.bg || { r: 50.7, g: 228.7, b: 57.8 };
+  const SK = SCFG.key || { low: 0.06, high: 0.13 };
+  const SBG_R = n(SBG.r, 50.7) / 255.0;
+  const SBG_G = n(SBG.g, 228.7) / 255.0;
+  const SBG_B = n(SBG.b, 57.8) / 255.0;
+  const SK_LOW = n(SK.low, 0.06);
+  const SK_HIGH = Math.max(n(SK.high, 0.13), SK_LOW + 0.001);
+
   const PRECISION = [
     '#ifdef GL_FRAGMENT_PRECISION_HIGH',
     'precision highp float;',
@@ -123,6 +138,28 @@
     '}'
   ].join('\n');
 
+  /* E. 史莱姆小怪专用背景色距离键（预乘 alpha 输出）。
+     与 B/D 不同：键参数来自【到实测背景色的 L1 距离】，而非绿通道超出量
+     ——「绿色快怪」本体 green-excess 与绿幕接近，用 D 会把主体一起抠缺。
+     alpha = smoothstep(low, high, d)，d = (|Δr|+|Δg|+|Δb|)/3：
+     背景 d≈0 → 全透明；主体（含深色描边）d≥0.14 → 全不透明；边缘平滑过渡。
+     不做 despill：绿怪本体绿通道本就很高，压绿会改色。 */
+  const SLIME_VIDEO_FS = PRECISION + '\n' + [
+    'void main ()',
+    '{',
+    '    vec4 tex = texture2D(uMainSampler, outTexCoord);',
+    '    float d = (abs(tex.r - ' + SBG_R.toFixed(4) + ') + abs(tex.g - ' + SBG_G.toFixed(4) + ') + abs(tex.b - ' + SBG_B.toFixed(4) + ')) / 3.0;',
+    '    float a = smoothstep(' + SK_LOW.toFixed(3) + ', ' + SK_HIGH.toFixed(3) + ', d);',
+    '    vec3 rgb = tex.rgb * outTint.bgr;',
+    '    float A = a * outTint.a;',
+    '    if (outTintEffect == 2.0) {',
+    '        gl_FragColor = vec4(outTint.bgr * A, A);',
+    '    } else {',
+    '        gl_FragColor = vec4(rgb * A, A);',
+    '    }',
+    '}'
+  ].join('\n');
+
   /* C. 白幕色度键 */
   const FIRE_VIDEO_WK_FS = PRECISION + '\n' + [
     'void main ()',
@@ -161,6 +198,12 @@
       super({ game, fragShader: WIND_VIDEO_GK_FS });
     }
   }
+  /* 史莱姆小怪专用（背景色距离键 + 预乘输出，见 E 段说明） */
+  class SlimeVideoGKPipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipeline {
+    constructor(game) {
+      super({ game, fragShader: SLIME_VIDEO_FS });
+    }
+  }
 
   /* 供 Tower 端判断某条管线是否已在当前渲染器注册（WebGL） */
   function fireVideoPipelineReady(scene, name) {
@@ -175,5 +218,6 @@
   window.FireVideoGKPipeline = FireVideoGKPipeline;
   window.FireVideoWKPipeline = FireVideoWKPipeline;
   window.WindVideoGKPipeline = WindVideoGKPipeline;
+  window.SlimeVideoGKPipeline = SlimeVideoGKPipeline;
   window.fireVideoPipelineReady = fireVideoPipelineReady;
 })();

@@ -80,6 +80,8 @@ class GameScene extends Phaser.Scene {
     try { FIRE_BURN.enterScene(); } catch (e) {}
     /* 风塔龙卷风视频：同上，共享单视频，新一局重置引用与暂停 */
     try { WIND_VIDEO.enterScene(); } catch (e) {}
+    /* 史莱姆共享视频：新一局引用计数归零并暂停（史莱姆生成时重新注册） */
+    try { SLIME_VIDEO.enterScene(); } catch (e) {}
 
     /* ---- 波次状态机：ready(可开战) / active(出怪中) / won / lost ---- */
     this.state = 'ready';
@@ -737,6 +739,9 @@ class GameScene extends Phaser.Scene {
     try { FIRE_BURN.tick(); } catch (e) {}
     // 风塔龙卷风视频帧上传共享纹理（全场 1 次，三塔共用同一纹理）
     try { WIND_VIDEO.tick(); } catch (e) {}
+    /* 史莱姆共享视频：每帧把当前视频帧上传到共享 GL 纹理（全场 1 次，
+       仅场上有史莱姆且视频在播时才上传，控制手机端开销） */
+    try { SLIME_VIDEO.tick(); } catch (e) {}
     // 暂停或结算时冻结全部逻辑（画面保持）
     const rawDt = Math.min(delta, 50) / 1000;
     const dt = (this.paused || this.state === 'won' || this.state === 'lost')
@@ -952,6 +957,19 @@ class GameScene extends Phaser.Scene {
     return Math.round(baseHp * Math.pow(growth, wi));
   }
 
+  /* 当前波次对应的 BOSS 变体（三种 BOSS：金/蓝/灰，全部 JSON 驱动）
+     读取 TD_CONFIG.boss：
+       variants   : [{ key, tex, hpMul, speed, leakMul, reward }, ...]
+       waveVariant: { "<波次索引>": <变体下标> }（0 起；表外回退下标 0）
+     返回变体对象（含 tex 贴图键），无配置时返回 null（走程序化占位贴图）。 */
+  bossVariantAt(waveIdx) {
+    const b = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.boss) || null;
+    if (!b || !b.variants || !b.variants.length) return null;
+    const map = b.waveVariant || {};
+    const vi = (waveIdx != null && map[String(waveIdx)] != null) ? map[String(waveIdx)] : 0;
+    return b.variants[vi] || b.variants[0] || null;
+  }
+
   /* 敌人出生：按波数成长缩放血量（规则见 waveSmallHp）；
      BOSS 血量 = 同波小怪(enemyX)血量 × bossFactor，bossFactor 优先级：
      group.bossHpFactor（per-group，第 3 关第 3/4 波 16×/第 5 波 40×，
@@ -962,7 +980,11 @@ class GameScene extends Phaser.Scene {
   spawnEnemy(entry) {
     const typeKey = entry.type;
     const routeId = entry.route || 0;
-    const e = new Enemy(this, typeKey, routeId);
+    /* 三种 BOSS 按波次接入（JSON 驱动 TD_CONFIG.boss.variants / waveVariant）：
+       第 3/4/5 波(索引 2/3/4) = 金/蓝/灰 BOSS，同关内三种依次登场 */
+    const isBossType = !!(TD_CONFIG.enemies[typeKey] && TD_CONFIG.enemies[typeKey].boss);
+    const bv = isBossType ? this.bossVariantAt(this.waveIndex) : null;
+    const e = new Enemy(this, typeKey, routeId, (bv && bv.tex) ? { bossTexKey: bv.tex } : null);
     const isBoss = !!e.cfg.boss;
     if (isBoss) {
       const wcfg = this.levelCfg.waves;
@@ -971,9 +993,18 @@ class GameScene extends Phaser.Scene {
       if (entry.bossHpFactor != null) bossFactor = entry.bossHpFactor;
       else if (wcfg.finalBossHpFactor != null) bossFactor = wcfg.finalBossHpFactor;
       else bossFactor = bossCfg.hpMultiplier;
-      e.maxHp = this.waveSmallHp(TD_CONFIG.enemies.enemyX.hp) * bossFactor;
+      /* 血量 = 同波小怪血量 × bossFactor（保留原有设定）× 变体 hpMul（默认 1） */
+      e.maxHp = Math.round(this.waveSmallHp(TD_CONFIG.enemies.enemyX.hp) * bossFactor *
+        ((bv && bv.hpMul != null) ? bv.hpMul : 1));
       e.hp = e.maxHp;
-      e.leakDamage = TD_CONFIG.enemies.enemyX.leakDamage * bossCfg.leakMultiplier;
+      /* 移速 / 击杀金币 / 漏血扣生命 全部取变体 JSON（缺省回退全局系数）：
+         漏血 = 普通怪(enemyX)漏血 × leakMul（默认 3 = 普通怪的 3 倍） */
+      if (bv) {
+        if (bv.speed != null) e.baseSpeed = bv.speed;
+        if (bv.reward != null) e.reward = Math.max(0, bv.reward);
+      }
+      e.leakDamage = TD_CONFIG.enemies.enemyX.leakDamage *
+        ((bv && bv.leakMul != null) ? bv.leakMul : bossCfg.leakMultiplier);
       /* 三阶段 BOSS（第 5 关，JSON 驱动 waves.bossPhases）：仅末波 BOSS 标记
          一阶段（血量阈值分裂），3/4 波 BOSS 与无配置关卡不参与、零影响 */
       if (wcfg.bossPhases && this.waveIndex === wcfg.list.length - 1) {
@@ -1078,7 +1109,7 @@ class GameScene extends Phaser.Scene {
     const base = Math.floor(total / n);
     const len = this.routeLength(e.routeId);
     for (let i = 0; i < n; i++) {
-      const mi = new Enemy(this, e.typeKey, e.routeId);
+      const mi = new Enemy(this, e.typeKey, e.routeId, e.opts.bossTexKey ? { bossTexKey: e.opts.bossTexKey } : null);
       mi.maxHp = (i === n - 1) ? Math.max(1, total - base * (n - 1)) : base;
       mi.hp = mi.maxHp;
       mi.bossPhase = 2;
@@ -1121,7 +1152,8 @@ class GameScene extends Phaser.Scene {
   /** 合体：在最后一只分身位置生成强化 BOSS（回血比例 × 分身总量） */
   spawnMergedBoss(link, bp) {
     const hpv = Math.max(1, Math.round(link.total * ((bp.mergeHealRatio != null) ? bp.mergeHealRatio : 0.5)));
-    const mb = new Enemy(this, 'enemyBoss', link.lastRoute);
+    const bvM = this.bossVariantAt(this.waveIndex);
+    const mb = new Enemy(this, 'enemyBoss', link.lastRoute, (bvM && bvM.tex) ? { bossTexKey: bvM.tex } : null);
     mb.maxHp = hpv;
     mb.hp = hpv;
     mb.bossPhase = 3;
@@ -3388,6 +3420,8 @@ class GameScene extends Phaser.Scene {
     try { FIRE_BURN.setPaused(v); } catch (e) {}
     /* 风塔龙卷风视频同步暂停/恢复 */
     try { WIND_VIDEO.setPaused(v); } catch (e) {}
+    /* 史莱姆共享视频随游戏暂停/恢复（暂停即停解码，省电防卡） */
+    try { SLIME_VIDEO.setPaused(v); } catch (e) {}
   }
 
   toggleSpeed() {

@@ -730,6 +730,17 @@ window.TD_CONFIG = {
     }
   },
   "enemies": {
+    /* 史莱姆蹦跳视频（全场共享单视频，左段=绿色快怪 / 右段=蓝紫慢怪）。
+       快怪/慢怪的【血量/移速/金币】仍由下方 enemyX / enemyY 配置，已满足
+       「快怪血低·移速快·金币少 / 慢怪血高·移速慢·金币多」。
+       bg/key：实测视频底色 L1 距离抠像参数（换素材须同步重测）；
+       displayH：两段显示高度（世界单位，宽按段宽高比自动算，不变形）。 */
+    "slimeVideo": {
+      "src": "assets/slime_walk.mp4",
+      "bg": { "r": 50.7, "g": 228.7, "b": 57.8 },
+      "key": { "low": 0.06, "high": 0.13 },
+      "displayH": { "green": 57, "blue": 68 }
+    },
     "enemyX": {
       "name": "敌人X",
       "hp": 46,
@@ -738,7 +749,13 @@ window.TD_CONFIG = {
       "reward": 9,          // 击杀金币
       "leakDamage": 1,      // 到达终点扣生命
       "color": 0xff6b6b,
-      "darkColor": 0xc94444
+      "darkColor": 0xc94444,
+      /* 显示高度（世界单位）：宽按贴图/视频段宽高比自动算，保持造型不变形；
+         超采样静态贴图 / 高分辨率视频经 setDisplaySize 缩回世界尺寸，
+         DPR 下与塔清晰度一致 */
+      "art": { "h": 50, "superSample": 2 },
+      /* 绿幕视频接管：绿色快怪=左段；视频不可用时回退静态贴图 + 蹦跳 Tween */
+      "slimeVideo": { "frame": "green", "hopHeight": 6 }
     },
     "enemyY": {
       "name": "敌人Y",
@@ -748,7 +765,10 @@ window.TD_CONFIG = {
       "reward": 18,
       "leakDamage": 2,
       "color": 0xa06cd5,
-      "darkColor": 0x7447a6
+      "darkColor": 0x7447a6,
+      "art": { "h": 60, "superSample": 2 },
+      /* 绿幕视频接管：蓝紫慢怪=右段 */
+      "slimeVideo": { "frame": "blue", "hopHeight": 7 }
     },
 
     /* BOSS —— 第 2 关末波末敌。血量/漏血在 GameScene.spawnEnemy 动态覆盖：
@@ -765,7 +785,11 @@ window.TD_CONFIG = {
       "color": 0xff3b3b,
       "darkColor": 0x8a1212,
       "boss": true,
-      "barThickness": 8
+      "barThickness": 8,
+      /* 显示高度（世界单位）：三只 BOSS 贴图（assets/bosses.png 裁出）宽高比
+         约 0.74，宽自动算 → 约 66x90，保持原造型不变形；贴图 3x 超采样
+         （270px 高）经 setDisplaySize 缩回，DPR 下与塔清晰度一致 */
+      "art": { "h": 90 }
     }
   },
 
@@ -773,7 +797,22 @@ window.TD_CONFIG = {
   "boss": {
     "hpMultiplier": 8,      // 兜底：BOSS 血量 = 同波小怪血量 × 此值（末波实际走 waves.finalBossHpFactor）
     "leakMultiplier": 3,    // BOSS 漏怪扣生命 = 普通怪(enemyX)漏血 × 此值
-    "rewardBonus": 0       // 击杀额外金币（已含在 enemyBoss.reward）
+    "rewardBonus": 0,      // 击杀额外金币（已含在 enemyBoss.reward）
+
+    /* 三只 BOSS 变体（对应 assets/bosses.png 从左到右：金 / 蓝 / 灰），
+       tex = 离线裁切+白底抠图后的贴图键（js/BossArtData.js）；全部 JSON 驱动：
+         hp   = 同波小怪末波血量 × waves.finalBossHpFactor × hpMul（保留你现有设定）
+         speed= 本怪移速(px/s)；leakMul = 漏怪扣生命 = 普通怪漏血 × 此值（默认 3）
+         reward = 击杀金币（BOSS 不吃小怪金币加成）
+       改成你想要的数值即可，无需改代码。 */
+    "variants": [
+      { "key": "gold", "tex": "boss_gold", "hpMul": 1,    "speed": 38, "leakMul": 3, "reward": 120 },
+      { "key": "blue", "tex": "boss_blue", "hpMul": 1.2,  "speed": 34, "leakMul": 3, "reward": 150 },
+      { "key": "gray", "tex": "boss_gray", "hpMul": 1.45, "speed": 30, "leakMul": 3, "reward": 190 }
+    ],
+    /* 波次索引(0 起) → 变体下标：第 3/4/5 波(索引 2/3/4) = 金/蓝/灰 BOSS，
+       同一关内三种 BOSS 依次登场；表外波次回退下标 0（金色） */
+    "waveVariant": { "2": 0, "3": 1, "4": 2 }
   },
 
   /* ---------- 关卡独立配置 ----------

@@ -51,6 +51,13 @@ class BootScene extends Phaser.Scene {
        wind_tower_lvN + Tween 旋转，与火塔降级路径一致。 */
     try { WIND_VIDEO.init(this); } catch (e) { /* 忽略：Tower 端静态兜底 */ }
 
+    /* 史莱姆小怪蹦跳视频（assets/slime_walk.mp4，横排两只：左绿色快怪/右蓝紫慢怪）。
+       全场共享 1 个 HTMLVideoElement + 1 个 Phaser 视频纹理，每只怪用对应 frame
+       显示自己那一段；亮绿幕背景走 SlimeVideoGK 管线【背景色距离键】透明（绿色
+       快怪本体与绿幕较近，不能用 green-excess 键）。不支持/加载失败时
+       supported=false，Enemy 端回退静态贴图 + 蹦跳 Tween。 */
+    try { SLIME_VIDEO.init(this); } catch (e) { /* 忽略：Enemy 端静态兜底 */ }
+
     /* ---------- 塔底座阴影（所有塔共用） ---------- */
     this.makeTexture('tower_base', 64, 64, (g) => {
       g.fillStyle(0x000000, 0.18);
@@ -85,6 +92,8 @@ class BootScene extends Phaser.Scene {
     /* ---------- 敌人 ---------- */
     Object.keys(C.enemies).forEach((key) => {
       const e = C.enemies[key];
+      /* enemies 下除小怪/BOSS 外还有 slimeVideo 等非实体配置项，跳过（无 radius） */
+      if (!e || typeof e.radius !== 'number') return;
       const size = e.radius * 2 + 12;
       const c = size / 2;
       this.makeTexture('enemy_' + key, size, size, (g) => {
@@ -578,6 +587,54 @@ class BootScene extends Phaser.Scene {
         g.fillRect(i * (40 / steps), 4 - w / 2, 40 / steps + 0.6, w);
       }
     });
+
+    /* ---------- 敌人美术数据（EnemyArtData.js，data URI，离线生成） ----------
+       ① BOSS_ART：三只 BOSS 贴图 boss_gold/boss_blue/boss_gray（按元素边界裁切 +
+          白底连通域抠图）；Enemy 端由 GameScene 按波次选变体贴图。
+       ② SLIME_STATIC_ART：史莱姆静态降级贴图 slime_static_green/slime_static_blue
+          （视频不可用时的兜底，如 Canvas 渲染器 / file:// 跨域 / 手机不支持）。
+       与火/冰/水/雷塔一致：异步解码后 addImage 注册纹理，并入 artJobs 等待链，
+       就绪后再进选关（贴图缺失时不阻塞启动，Enemy 端自动回退程序化占位贴图）。 */
+    if (typeof BOSS_ART !== 'undefined' && BOSS_ART) {
+      if (!artJobs) artJobs = [];
+      Object.keys(BOSS_ART).forEach((k) => {
+        const durl = BOSS_ART[k];
+        if (!durl) return;
+        const key = 'boss_' + k;
+        artJobs.push(new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            try {
+              if (this.textures.exists(key)) this.textures.remove(key);
+              this.textures.addImage(key, img);
+              resolve(true);
+            } catch (e) { resolve(false); }
+          };
+          img.onerror = () => resolve(false);
+          img.src = durl;
+        }));
+      });
+    }
+    if (typeof SLIME_STATIC_ART !== 'undefined' && SLIME_STATIC_ART) {
+      if (!artJobs) artJobs = [];
+      Object.keys(SLIME_STATIC_ART).forEach((k) => {
+        const durl = SLIME_STATIC_ART[k];
+        if (!durl) return;
+        const key = 'slime_static_' + k;
+        artJobs.push(new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            try {
+              if (this.textures.exists(key)) this.textures.remove(key);
+              this.textures.addImage(key, img);
+              resolve(true);
+            } catch (e) { resolve(false); }
+          };
+          img.onerror = () => resolve(false);
+          img.src = durl;
+        }));
+      });
+    }
 
     /* 内嵌贴图就绪后再进选关（小图解码通常几十 ms；超时兜底绝不阻断启动） */
     if (artJobs) {

@@ -3,12 +3,13 @@
  * 沿 GameScene 预计算的路径移动，支持减速 debuff 与血条。
  * ============================================================ */
 class Enemy extends Phaser.GameObjects.Container {
-  constructor(scene, typeKey, routeId) {
+  constructor(scene, typeKey, routeId, opts) {
     const cfg = TD_CONFIG.enemies[typeKey];
     const rid = routeId || 0;   // 所属路线（多路线关卡：0=上路 / 1=下路），缺省 0
     const p = scene.pathPointAt(0, rid);
     super(scene, p.x, p.y);
     this.routeId = rid;
+    this.opts = opts || {};     // 构造选项（bossTexKey：BOSS 变体贴图键，按波次由 GameScene 指定）
 
     this.typeKey = typeKey;
     this.cfg = cfg;
@@ -90,9 +91,47 @@ class Enemy extends Phaser.GameObjects.Container {
     this.pullDY = 0;
     this.pullFresh = false;
 
-    /* ---- 卡通占位贴图 ---- */
-    this.body = scene.add.image(0, 0, 'enemy_' + typeKey);
+    /* ---- 贴图：BOSS 变体贴图 / 史莱姆静态降级贴图 / 程序化占位贴图 ---- */
+    const art = cfg.art || {};
+    let texKey = 'enemy_' + typeKey;
+    if (this.opts.bossTexKey && scene.textures.exists(this.opts.bossTexKey)) {
+      /* BOSS 三变体贴图（boss_gold/boss_blue/boss_gray，EnemyArtData.js，离线裁切+
+         白底抠图）；缺失时回退程序化占位 enemy_enemyBoss */
+      texKey = this.opts.bossTexKey;
+    } else if (cfg.slimeVideo) {
+      /* 史莱姆静态降级贴图（slime_static_green/blue，从视频单帧掏出，与视频观感一致） */
+      const sKey = 'slime_static_' + cfg.slimeVideo.frame;
+      if (scene.textures.exists(sKey)) texKey = sKey;
+    }
+    this.body = scene.add.image(0, 0, texKey);
+    /* 显示尺寸归一化：JSON art.h = 世界高度，宽按贴图宽高比（保持原造型不变形）；
+       超采样静态贴图靠 setDisplaySize 缩回世界尺寸，DPR 下与塔清晰度一致 */
+    this._applyArtSize(art);
     this.add(this.body);
+
+    /* ---- 史莱姆蹦跳视频接管（绿色快怪=左段 / 蓝紫慢怪=右段） ----
+       全场共享单视频纹理，就绪后把 body 贴图换成视频对应段 frame + 专用距离键
+       管线，视频自身即蹦跳动画；不支持/加载失败/超时则保持静态贴图 + 蹦跳
+       Tween 降级（见 _startStaticSlime）。 */
+    this._slimeCfg = cfg.slimeVideo || null;
+    this._slimeUsed = false;
+    this._videoActive = false;
+    this._staticSlime = false;
+    this._hopTween = null;
+    this._slimeGuard = null;
+    if (this._slimeCfg && typeof SLIME_VIDEO !== 'undefined' && SLIME_VIDEO.supported) {
+      this._slimeUsed = true;
+      SLIME_VIDEO.use();
+      SLIME_VIDEO.whenReady(() => this._showSlimeVideo());
+      /* 解码失败/长时间未就绪 → 静态降级，避免小怪卡成静止占位 */
+      this._slimeGuard = scene.time.delayedCall(3000, () => {
+        if (!this._videoActive) this._startStaticSlime();
+      });
+    } else if (this._slimeCfg) {
+      /* 当前环境不支持视频（Canvas 渲染器 / file:// 跨域 / 无 H.264）：
+         直接静态贴图 + 蹦跳 Tween */
+      this._startStaticSlime();
+    }
 
     /* ---- 血条 ---- */
     const barW = cfg.radius * 2.4;
@@ -578,5 +617,69 @@ class Enemy extends Phaser.GameObjects.Container {
     if (this.vulnText) { try { this.vulnText.destroy(); } catch (_) {} this.vulnText = null; }
     this.removed = true;
     this.destroy();
+  }
+
+  /* ============================================================
+   * 史莱姆贴图 / 视频（绿色快怪 & 蓝紫慢怪）
+   * ------------------------------------------------------------
+   * 视频就绪 → body 换共享视频纹理对应段 frame + SlimeVideoGK 距离键管线，
+   * 视频自身即蹦跳动画；不可用 → 静态贴图 + 循环蹦跳 Tween 降级。
+   * 共享视频按引用计数播放（场上有史莱姆才解码），销毁时统一释放。
+   * ============================================================ */
+
+  /* 按 JSON art.h（世界高度）设定 body 显示尺寸，保持贴图宽高比不变形 */
+  _applyArtSize(art) {
+    const h = art && art.h;
+    if (!h || !this.body) return;
+    const fw = this.body.width, fh = this.body.height;
+    if (!fw || !fh) return;
+    this.body.setDisplaySize(h * (fw / fh), h);
+  }
+
+  /* 史莱姆视频就绪：把身体贴图切到共享视频纹理对应段 frame + 距离键管线 */
+  _showSlimeVideo() {
+    if (this.dead || this.removed || !this.scene || !this.body) return;
+    if (typeof SLIME_VIDEO === 'undefined' || !SLIME_VIDEO.isReady()) return;
+    if (typeof fireVideoPipelineReady !== 'function' ||
+      !fireVideoPipelineReady(this.scene, 'SlimeVideoGK')) {
+      this._startStaticSlime();
+      return;
+    }
+    const frame = (this._slimeCfg && this._slimeCfg.frame) || 'green';
+    const d = SLIME_VIDEO.displaySize(frame);
+    this.body.setTexture(SLIME_VIDEO.texKey(), SLIME_VIDEO.frameKey(frame));
+    this.body.setPipeline('SlimeVideoGK');
+    this.body.setDisplaySize(d.w, d.h);
+    if (this._hopTween) { try { this._hopTween.stop(); } catch (_) {} this._hopTween = null; }
+    this._staticSlime = false;
+    this._videoActive = true;
+  }
+
+  /* 静态降级：静态贴图 + 循环蹦跳 Tween（手机端不支持视频播放时用） */
+  _startStaticSlime() {
+    if (this._videoActive || this._staticSlime || this.dead || this.removed || !this.scene) return;
+    this._staticSlime = true;
+    const hop = (this._slimeCfg && this._slimeCfg.hopHeight) || 6;
+    this._hopTween = this.scene.tweens.add({
+      targets: this.body, y: -hop, duration: 260, yoyo: true,
+      repeat: -1, ease: 'Sine.easeInOut'
+    });
+  }
+
+  /* 收尾：停蹦跳 Tween + 释放共享视频引用（引用计数归零即暂停解码） */
+  _endSlime() {
+    if (this._slimeGuard) { try { this._slimeGuard.remove(false); } catch (_) {} this._slimeGuard = null; }
+    if (this._hopTween) { try { this._hopTween.stop(); } catch (_) {} this._hopTween = null; }
+    if (this._slimeUsed) {
+      this._slimeUsed = false;
+      try { if (typeof SLIME_VIDEO !== 'undefined') SLIME_VIDEO.release(); } catch (_) {}
+    }
+    this._videoActive = false;
+  }
+
+  /* 任一销毁路径（playDeath / destroyImmediately / 场景关闭）统一释放视频引用 */
+  destroy(fromScene) {
+    this._endSlime();
+    super.destroy(fromScene);
   }
 }
