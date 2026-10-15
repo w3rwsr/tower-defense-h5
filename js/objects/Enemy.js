@@ -77,6 +77,18 @@ class Enemy extends Phaser.GameObjects.Container {
     this.bossPhase = 0;       // 0=普通怪/无阶段；1=一阶段（阈值分裂）；2=分身；3=合体强化
     this.bossPhaseLink = 0;   // 同一次分裂的分身共享的组号（合体时机按组判定）
     this.bossPhasePool = 0;   // 本次分裂的分身总血量（合体回血基数）
+    this.bossMini = false;    // 小 BOSS 标记（第 7 关绿色史莱姆分身）：用 enemyX 贴图
+                              // 但享受 BOSS 待遇（免疫牵引/冰冻易伤，走分身计数流程）
+
+    /* ---- BOSS 护盾（第 7 关，JSON 驱动 waves.bossShields） ----
+       shield = { type:'element'|'hp', element, hits, maxHits, hp, maxHp }
+         element 盾：免疫同元素伤害/附着（不计有效次数），其余命中累计次数破盾；
+         hp 盾：护盾血量吸收伤害，盾破前本体不掉血。 */
+    this.shield = null;
+    this.shieldGfx = null;    // 护盾光环 Graphics
+    this.shieldBar = null;    // 护盾剩余条 Graphics（元素盾=次数 / 血量盾=护盾血）
+    this.shieldText = null;   // 元素盾剩余次数文字
+    this.shieldTween = null;  // 光环脉动
 
     /* ---- 范围吸引（塔D）：pullBack = 沿路【带符号】的吸引位移（像素）
          正=已越过塔投影点被向回拉，负=还在塔之前被向前拉近。
@@ -171,8 +183,14 @@ class Enemy extends Phaser.GameObjects.Container {
     this.drawHpBar(1);
   }
 
-  /* 施加减速：取更强（数值更小）的减速系数，时间刷新取较长者 */
-  applySlow(factor, duration) {
+  /* 施加减速：取更强（数值更小）的减速系数，时间刷新取较长者。
+     element 标注减速来源（'ice'=冰弹/冰反应；第 7 关冰元素护盾存在期间
+     免疫一切冰系减速——当前游戏内减速全部来自冰元素，故无元素标注同样拦截） */
+  applySlow(factor, duration, element) {
+    if (this.shield && this.shield.type === 'element' && this.shield.element === 'ice' &&
+        (!element || element === 'ice')) {
+      return;
+    }
     // 多种减速同时存在时：取更强（系数更小）者，持续时间刷新为较长者
     this.slowFactor = this.slowTimer > 0 ? Math.min(this.slowFactor, factor) : factor;
     this.slowTimer = Math.max(this.slowTimer, duration);
@@ -286,8 +304,9 @@ class Enemy extends Phaser.GameObjects.Container {
     }
     if (rule.freeze) {
       const fz = (TD_CONFIG.elementSystem.freeze || {}).duration || 2;
-      if (this.cfg && this.cfg.boss) {
-        /* BOSS 免疫冰冻/易伤：水+冰改为移速降低（JSON bossSlowRatio 驱动） */
+      if ((this.cfg && this.cfg.boss) || this.bossMini) {
+        /* BOSS 免疫冰冻/易伤：水+冰改为移速降低（JSON bossSlowRatio 驱动）。
+           第 7 关绿色史莱姆分身（bossMini）同样按 BOSS 处理。 */
         const ratio = ((TD_CONFIG.elementSystem.vuln || {}).bossSlowRatio != null)
           ? TD_CONFIG.elementSystem.vuln.bossSlowRatio : 0.3;
         this.applySlow(Math.max(0.1, 1 - ratio), fz);
@@ -321,7 +340,7 @@ class Enemy extends Phaser.GameObjects.Container {
   /* 易伤叠层：每层独立持续 vuln.duration(5s)，最多 maxStacks(3) 层；
      满层后忽略新层（不互相刷新）；BOSS 不吃易伤 */
   addVuln() {
-    if (this.cfg && this.cfg.boss) return;
+    if ((this.cfg && this.cfg.boss) || this.bossMini) return;
     const v = (TD_CONFIG.elementSystem || {}).vuln || {};
     const max = v.maxStacks != null ? v.maxStacks : 3;
     if (this.vulnStacks.length >= max) return;
@@ -454,21 +473,54 @@ class Enemy extends Phaser.GameObjects.Container {
     }
   }
 
-  takeDamage(value) {
+  /* 受伤结算。element = 本次伤害的元素属性（'fire'|'ice'|'thunder'|'water'|
+     null），由 Projectile / 电链在命中时传入：第 7 关元素护盾据此拦截。
+     调用点（附着之前）应先用 shieldBlocks(element) 跳过元素附着，避免被
+     免疫的元素仍触发反应；此处的同元素拦截仅作兜底。 */
+  takeDamage(value, element) {
     /* 传送后 0.5s 无敌：伤害与索敌均跳过（含单体/溅射/电链） */
     if (this.dead || this.invulnTimer > 0) return;
-    /* 易伤（仅小怪，BOSS 不吃）：受伤 = 原伤害 × (1 + 每层10% × 层数，满层+30%) */
+    /* 元素护盾（第 7 关）：同元素伤害完全免疫——不掉血、不计有效攻击次数 */
+    if (this.shieldBlocks(element)) return;
+    /* 易伤（仅小怪，BOSS/小BOSS 不吃）：受伤 = 原伤害 × (1 + 每层10% × 层数，满层+30%) */
     let vulnMul = 1;
-    if (this.reactionsEnabled && !(this.cfg && this.cfg.boss) && this.vulnStacks.length) {
+    if (this.reactionsEnabled && !(this.cfg && this.cfg.boss) && !this.bossMini &&
+        this.vulnStacks.length) {
       const per = ((TD_CONFIG.elementSystem || {}).vuln || {}).perStack != null
         ? TD_CONFIG.elementSystem.vuln.perStack : 0.1;
       vulnMul = 1 + per * this.vulnStacks.length;
     }
     /* 伤害减免：dmgReduction > 0 时受击实际伤害 = 原伤害 × (1 - 减免) */
     const dmg = value * vulnMul * (1 - (this.dmgReduction || 0));
-    this.hp -= dmg;
-    this.drawHpBar(Math.max(0, this.hp / this.maxHp));
-    /* 三阶段 BOSS（第 5 关，JSON 驱动）：一阶段血量降到阈值即分裂成 3 分身；
+
+    /* 血量护盾（第 7 关）：护盾血量优先吸收，盾存期间本体不掉血；
+       击破当帧的溢出伤害继续结算到本体 */
+    const hpShield = (this.shield && this.shield.type === 'hp' && this.shield.hp > 0)
+      ? this.shield : null;
+    if (hpShield) {
+      const absorbed = Math.min(hpShield.hp, dmg);
+      hpShield.hp -= absorbed;
+      this.refreshShieldView(false);
+      if (hpShield.hp > 1e-6) return; // 本击被护盾完全吸收：本体无任何变化
+      this.breakShield();
+      const rest = dmg - absorbed;
+      if (rest <= 0) return;
+      this.hp -= rest;
+      this.drawHpBar(Math.max(0, this.hp / this.maxHp));
+    } else {
+      this.hp -= dmg;
+      this.drawHpBar(Math.max(0, this.hp / this.maxHp));
+    }
+
+    /* 元素护盾：非免疫元素（或无元素攻击）每次命中计 1 次有效攻击，
+       累计满 maxHits 破盾；被免疫的同元素命中在函数入口已 return，不计次 */
+    if (this.shield && this.shield.type === 'element') {
+      this.shield.hits++;
+      this.refreshShieldView(false);
+      if (this.shield.hits >= this.shield.maxHits) this.breakShield();
+    }
+
+    /* 三阶段 BOSS（第 5/7 关，JSON 驱动）：一阶段血量降到阈值即分裂成分身；
        分裂优先于死亡判定（一击打穿阈值也走分裂），无 bossPhases 配置的
        关卡 bossPhase 恒为 0，此检查零影响 */
     if (!this.dead && this.bossPhase === 1 && this.scene.checkBossSplit(this)) return;
@@ -618,6 +670,135 @@ class Enemy extends Phaser.GameObjects.Container {
     }
   }
 
+  /* ============================================================
+   * BOSS 护盾（第 7 关，JSON 驱动 waves.bossShields；由 GameScene
+   * 在 BOSS 出生时按波次挂载）
+   *   {type:'element', element, breakHits}：
+   *       免疫同元素的附着与伤害（shieldBlocks），同元素命中不计有效次数；
+   *       其余元素/无元素攻击每次命中计 1，满 breakHits 破盾；
+   *       冰盾存活期间同时免疫冰系减速（见 applySlow）。
+   *   {type:'hp', hp}：护盾血量吸收一切伤害，盾存期间本体不掉血。
+   * ============================================================ */
+  applyShield(def) {
+    if (!def || this.dead) return;
+    this.shield = {
+      type: def.type === 'hp' ? 'hp' : 'element',
+      element: def.element || null,
+      hits: 0,
+      maxHits: def.breakHits || 40,
+      hp: def.hp || 0,
+      maxHp: def.hp || 0
+    };
+    this.showShieldGfx();
+    this.refreshShieldView(true);
+  }
+
+  /* 本次元素攻击是否被护盾完全免疫（调用点须在 attachElement 之前判定，
+     被免疫时跳过附着/伤害/减速；返回 false 不影响任何旧关卡） */
+  shieldBlocks(element) {
+    const s = this.shield;
+    return !!(s && s.type === 'element' && element && s.element === element);
+  }
+
+  /* 破盾：清状态 + 提示文字 + 扩散特效 + 销毁视觉 */
+  breakShield() {
+    const s = this.shield;
+    if (!s) return;
+    if (this.scene && typeof this.scene.floatText === 'function') {
+      const label = s.type === 'hp'
+        ? '血量护盾击破！'
+        : (s.element === 'thunder' ? '雷元素护盾击破！'
+          : s.element === 'ice' ? '冰元素护盾击破！' : '护盾击破！');
+      this.scene.floatText(this.x, this.y - this.radius - 30, label, 0xffffff);
+    }
+    if (this.scene && typeof this.scene.makePortalBurst === 'function') {
+      const col = s.type === 'hp' ? 0xffe27a
+        : (s.element === 'thunder' ? 0xb58bff : 0x7fdcff);
+      this.scene.makePortalBurst(this.x, this.y, col);
+    }
+    this.shield = null;
+    this.clearShieldGfx();
+  }
+
+  /* 护盾颜色：雷=紫 / 冰=浅蓝 / 血量=金 */
+  shieldColor() {
+    const s = this.shield;
+    if (!s) return 0xffffff;
+    if (s.type === 'hp') return 0xffe27a;
+    return s.element === 'thunder' ? 0xb58bff : 0x7fdcff;
+  }
+
+  /* 护盾光环（描边圆 + 外圈淡光 + 呼吸脉动） */
+  showShieldGfx() {
+    this.clearShieldGfx();
+    if (!this.shield || !this.scene) return;
+    const color = this.shieldColor();
+    const g = this.scene.add.graphics();
+    const r = this.radius + 7;
+    g.lineStyle(2.5, color, 0.95).strokeCircle(0, 0, r);
+    g.lineStyle(1, 0xffffff, 0.45).strokeCircle(0, 0, r + 3.5);
+    /* 四个方向的小能量点，强化"罩子"质感 */
+    g.fillStyle(color, 0.9);
+    for (let k = 0; k < 4; k++) {
+      const a = k * Math.PI / 2 + Math.PI / 4;
+      g.fillCircle(Math.cos(a) * (r + 1), Math.sin(a) * (r + 1), 2.2);
+    }
+    this.add(g);
+    this.shieldGfx = g;
+    this.shieldTween = this.scene.tweens.add({
+      targets: g, alpha: 0.5, duration: 650, yoyo: true, repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+  }
+
+  clearShieldGfx() {
+    if (this.shieldTween) {
+      try { this.shieldTween.stop(); } catch (_) {}
+      this.shieldTween = null;
+    }
+    if (this.shieldGfx) { try { this.shieldGfx.destroy(); } catch (_) {} this.shieldGfx = null; }
+    if (this.shieldBar) { try { this.shieldBar.destroy(); } catch (_) {} this.shieldBar = null; }
+    if (this.shieldText) { try { this.shieldText.destroy(); } catch (_) {} this.shieldText = null; }
+  }
+
+  /* 血条上方的小盾条：元素盾=剩余有效次数比例；血量盾=剩余护盾血比例；
+     元素盾额外显示剩余次数文字 */
+  refreshShieldView() {
+    if (!this.scene) return;
+    const s = this.shield;
+    if (!s) { this.clearShieldGfx(); return; }
+    const y0 = -this.radius - 22;
+    if (!this.shieldBar) {
+      this.shieldBar = this.scene.add.graphics();
+      this.add(this.shieldBar);
+    }
+    const g = this.shieldBar;
+    g.clear();
+    const w = this.barW;
+    g.fillStyle(0x000000, 0.35);
+    g.fillRoundedRect(-w / 2 - 1, y0 - 1, w + 2, 5, 2.5);
+    let ratio;
+    if (s.type === 'hp') {
+      ratio = Math.max(0, s.hp / Math.max(1, s.maxHp));
+    } else {
+      ratio = 1 - s.hits / Math.max(1, s.maxHits);
+    }
+    g.fillStyle(this.shieldColor(), 1);
+    g.fillRoundedRect(-w / 2, y0, Math.max(0, w * ratio), 3, 1.5);
+
+    if (s.type === 'element') {
+      if (!this.shieldText) {
+        this.shieldText = this.scene.add.text(0, y0 - 7, '', {
+          fontFamily: TD_FONT_STACK,
+          fontSize: '10px', fontStyle: 'bold', color: '#ffffff',
+          resolution: TD_TEXT_RES
+        }).setOrigin(0.5).setStroke('#2a1a4a', 3);
+        this.add(this.shieldText);
+      }
+      this.shieldText.setText('护盾 ' + Math.max(0, s.maxHits - s.hits));
+    }
+  }
+
   /* 击杀后的弹跳消失动画，结束后由场景统一销毁 */
   playDeath() {
     /* 防重入：一次死亡只允许走一条流程（视频接管 或 降级动画+皇冠）。
@@ -625,6 +806,7 @@ class Enemy extends Phaser.GameObjects.Container {
        动画，这里直接拦截，保证死亡时仅生成一个皇冠。 */
     if (this.removed || this._dying) return;
     this._dying = true;
+    this.clearShieldGfx();   // 护盾光环/盾条随死亡清除
     this.clearElementMark();  // 印记光点随死亡清除（tween 不残留）
     this.showFreezeGfx(false);
     this.refreshVulnView(false); // 传 0 层效果：清掉易伤文字
@@ -708,6 +890,7 @@ class Enemy extends Phaser.GameObjects.Container {
   }
 
   destroyImmediately() {
+    this.clearShieldGfx();
     this.clearElementMark();
     this.showFreezeGfx(false);
     if (this.vulnText) { try { this.vulnText.destroy(); } catch (_) {} this.vulnText = null; }

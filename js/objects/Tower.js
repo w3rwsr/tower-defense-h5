@@ -522,10 +522,13 @@ class Tower extends Phaser.GameObjects.Container {
   get maxLevel() { return this.cfg.upgrade.maxLevel; }
   get canUpgrade() { return this.level < this.cfg.upgrade.maxLevel; }
 
-  /* 升级费用：造价 * costFactor * 当前等级 */
+  /* 升级费用：造价 * costFactor * 当前等级 * 关卡系数。
+     关卡级 upgradeCostFactor（JSON 驱动，第 7 关=1.5）只影响升级费，
+     塔造价（this.cfg.cost）不变；未配置的关卡系数缺省 1，零影响。 */
   getUpgradeCost() {
     if (!this.canUpgrade) return null;
-    return Math.round(this.cfg.cost * this.cfg.upgrade.costFactor * this.level);
+    const lvlFactor = (this.scene.levelCfg && this.scene.levelCfg.upgradeCostFactor) || 1;
+    return Math.round(this.cfg.cost * this.cfg.upgrade.costFactor * this.level * lvlFactor);
   }
 
   getSellValue() {

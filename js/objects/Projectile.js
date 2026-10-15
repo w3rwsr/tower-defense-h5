@@ -263,13 +263,17 @@ class Projectile extends Phaser.GameObjects.Image {
         scene.enemies.forEach((e) => {
           if (e.dead || e.invulnTimer > 0) return; // 传送无敌中：不受伤也不吃减速
           if (Phaser.Math.Distance.Between(this.tx, this.ty, e.x, e.y) <= r + e.radius) {
+            /* 第 7 关元素护盾：同元素免疫时整次命中跳过（不附着/不伤血/
+               不计有效次数/不减速），由命中特效统一表现“打在罩子上” */
+            const el = this.pCfg.element || null;
+            if (el && typeof e.shieldBlocks === 'function' && e.shieldBlocks(el)) return;
             let mul = 1;
             /* 冰元素附着（第6关起参与反应，倍率“谁先触发谁享受”归塔B本次溅射） */
-            if (this.pCfg.element && typeof e.attachElement === 'function') {
-              mul = e.attachElement(this.pCfg.element, null, this.pCfg.element).reactionMul || 1;
+            if (el && typeof e.attachElement === 'function') {
+              mul = e.attachElement(el, null, el).reactionMul || 1;
             }
-            e.takeDamage(this.damage * mul);
-            if (!e.dead) e.applySlow(this.effect.slowFactor, this.effect.slowDuration);
+            e.takeDamage(this.damage * mul, el);
+            if (!e.dead) e.applySlow(this.effect.slowFactor, this.effect.slowDuration, el);
           }
         });
       }
@@ -296,14 +300,22 @@ class Projectile extends Phaser.GameObjects.Image {
     } else {
       // 单体伤害：目标仍存活才结算（小怪 / 障碍物通用 takeDamage 鸭子类型）
       if (this.target && !this.target.dead) {
-        /* 先附着元素并结算反应：倍率“谁先触发谁享受”，只加倍塔A(火)/塔C(水)
-           本次命中的伤害；第1~5关 attachElement 退化为旧视觉印记，倍率恒1 */
-        let mul = 1;
-        if (!vsObstacle && this.pCfg.element &&
-            typeof this.target.attachElement === 'function') {
-          mul = this.target.attachElement(this.pCfg.element, null, this.pCfg.element).reactionMul || 1;
+        /* 第 7 关元素护盾：同元素命中在附着之前整体跳过（不伤血/不附着/
+           不计有效次数）；障碍物无 shieldBlocks，鸭子类型自动放行 */
+        const el = this.pCfg.element || null;
+        const blocked = !vsObstacle && el &&
+          typeof this.target.shieldBlocks === 'function' &&
+          this.target.shieldBlocks(el);
+        if (!blocked) {
+          /* 先附着元素并结算反应：倍率“谁先触发谁享受”，只加倍塔A(火)/塔C(水)
+             本次命中的伤害；第1~5关 attachElement 退化为旧视觉印记，倍率恒1 */
+          let mul = 1;
+          if (!vsObstacle && el &&
+              typeof this.target.attachElement === 'function') {
+            mul = this.target.attachElement(el, null, el).reactionMul || 1;
+          }
+          this.target.takeDamage(this.damage * mul, vsObstacle ? null : el);
         }
-        this.target.takeDamage(this.damage * mul);
         scene.spawnHitFx(this.tx, this.ty, this.pCfg.color);
       }
     }

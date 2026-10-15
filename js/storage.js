@@ -4,7 +4,8 @@
  * 数据结构：{ completed: [1, 2, ...], unlockedTowers: ['towerD', ...] }
  *   completed：玩家已通关的关卡编号数组
  *   unlockedTowers：已永久解锁的塔类型 key（通关对应关卡时自动写入）
- *   关卡解锁：第 1 关恒开放；第 N 关需第 N-1 关已通关（isUnlocked）
+ *   关卡解锁：已设计关卡（第 1~7 关）全部开放，可自由进入（isUnlocked）；
+ *           通关进度仅作记录与塔解锁依据，不再限制进关
  *   塔解锁：读 TD_CONFIG.towers[key].unlock.unlockLevel（缺省默认可用）；
  *           塔D = 通关第 1 关后解锁，第 2 关及之后关卡可选用。
  *           旧存档无 unlockedTowers 字段时，按 completed 进度推导，
@@ -14,10 +15,10 @@
   'use strict';
 
   const KEY = 'td_levels_progress_v1';
-  const TOTAL_LEVELS = 6;
-  /* 当前已设计完成的关卡数：第 1～6 关可游玩（第 6 关=最终关）。
-     第 6 关解锁规则与其他关一致：通关第 5 关后解锁。 */
-  const TOTAL_DESIGNED = 6;
+  const TOTAL_LEVELS = 7;
+  /* 当前已设计完成的关卡数：第 1～7 关可游玩（第 7 关=双途重围·高难关）。
+     所有关卡开放自由进入，无需逐关解锁。 */
+  const TOTAL_DESIGNED = 7;
 
   const storage = {
     /**
@@ -28,7 +29,7 @@
      */
     __debugAllUnlocked: false,
 
-    /** 当前版本开放的最大关卡编号（第 2 关通关第 1 关后解锁，以此类推） */
+    /** 已通关的最大关卡编号（进度记录，仅用于展示/塔解锁，不再限制进关） */
     get maxUnlocked() {
       if (this.__debugAllUnlocked) return TOTAL_LEVELS;
       let n = 1;
@@ -38,7 +39,7 @@
 
     get total() { return TOTAL_LEVELS; },
 
-    /** 当前已设计完成并可游玩的最大关卡编号（第 6 关为最终关） */
+    /** 当前已设计完成并可游玩的最大关卡编号（第 7 关为当前最终关） */
     get designed() { return TOTAL_DESIGNED; },
 
     /** 某关是否已设计完成（可游玩）；超出设计范围的关卡不可进入 */
@@ -80,14 +81,14 @@
       this.refreshTowerUnlocks();
     },
 
-    /** 某关是否可进入：未设计关卡（第 5 关）恒不可进入；第 1 关恒开放；
-     *  第 N 关需第 N-1 关已通关 */
+    /** 某关是否可进入：已设计关卡（第 1~7 关）全部开放、自由进入，
+     *  不再依赖上一关是否通关；未设计关卡恒不可进入（敬请期待）。
+     *  通关进度 completed 仍正常记录并用于塔解锁，但不再限制进关。 */
     isUnlocked(level) {
       if (level < 1 || level > TOTAL_LEVELS) return false;
       if (this.__debugAllUnlocked) return true; // 调试态：全关卡放行（不落盘）
       if (level > TOTAL_DESIGNED) return false; // 未设计关卡：敬请期待，不可进入
-      if (level === 1) return true;
-      return this.isCompleted(level - 1);
+      return true; // 已设计关卡全部开放
     },
 
     /* ---------------- 塔解锁 ---------------- */

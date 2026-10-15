@@ -69,6 +69,9 @@ class GameScene extends Phaser.Scene {
     this.towers = [];
     this.enemies = [];
     this.projectiles = [];
+    /* 三阶段 BOSS 分裂/聚合链接：每局重置，避免同页跨关卡/重开残留旧链接 */
+    this.bossPhaseLinks = {};
+    this.bossPhaseLinkSeq = 0;
     /* this.obstacles 已在 create 开头的 spawnObstacles() 生成，这里不再重置 */
     this.occupied = new Map();      // 热区 key("x_y") -> Tower
     this.selectedType = null;       // 商店选中的塔类型（放置模式）
@@ -883,7 +886,11 @@ class GameScene extends Phaser.Scene {
             type: grp.type,
             route: r,
             bossHpFactor: grp.bossHpFactor,
-            hpWaveIndex: sideDef ? sideDef.hpWaveIndex : null
+            hpWaveIndex: sideDef ? sideDef.hpWaveIndex : null,
+            /* 第 7 关：组内序号 + BOSS 变体图案（金/蓝/灰按出怪序号分配，
+               左右两路各自独立从 pattern[0] 开始）；旧关卡无此字段恒 null */
+            variantIndex: i,
+            bossVariantPattern: grp.bossVariantPattern || null
           });
         }
       }
@@ -989,6 +996,34 @@ class GameScene extends Phaser.Scene {
     return b.variants[vi] || b.variants[0] || null;
   }
 
+  /* 本次出怪使用的 BOSS 变体（第 7 关支持关卡级配置，旧关卡回退全局表）：
+     1) entry.bossVariantPattern（第 5 波金/蓝/灰图案）：按组内序号取色，
+        左右两路各自从图案第 0 项开始；
+     2) waves.bossWaveVariant（关卡级 波次索引→变体 key，第 7 关第 2~4 波）；
+     3) 回退全局 bossVariantAt（第 1~6 关原逻辑，零变化）。 */
+  resolveBossVariant(entry) {
+    const wcfg = this.levelCfg && this.levelCfg.waves;
+    const variants = (TD_CONFIG.boss && TD_CONFIG.boss.variants) || [];
+    const byKey = (key) => {
+      for (const v of variants) { if (v.key === key) return v; }
+      return null;
+    };
+    if (wcfg) {
+      const pattern = entry.bossVariantPattern;
+      if (pattern && pattern.length) {
+        const key = pattern[(entry.variantIndex || 0) % pattern.length];
+        const v = byKey(key);
+        if (v) return v;
+      }
+      const waveMap = wcfg.bossWaveVariant;
+      if (waveMap && waveMap[String(this.waveIndex)] != null) {
+        const v = byKey(waveMap[String(this.waveIndex)]);
+        if (v) return v;
+      }
+    }
+    return this.bossVariantAt(this.waveIndex);
+  }
+
   /* 敌人出生：按波数成长缩放血量（规则见 waveSmallHp）；
      BOSS 血量 = 同波小怪(enemyX)血量 × bossFactor，bossFactor 优先级：
      group.bossHpFactor（per-group，第 3 关第 3/4 波 16×/第 5 波 40×，
@@ -1002,7 +1037,8 @@ class GameScene extends Phaser.Scene {
     /* 三种 BOSS 按波次接入（JSON 驱动 TD_CONFIG.boss.variants / waveVariant）：
        第 3/4/5 波(索引 2/3/4) = 金/蓝/灰 BOSS，同关内三种依次登场 */
     const isBossType = !!(TD_CONFIG.enemies[typeKey] && TD_CONFIG.enemies[typeKey].boss);
-    const bv = isBossType ? this.bossVariantAt(this.waveIndex) : null;
+    /* BOSS 变体：关卡级图案/波次映射优先（第 7 关），旧关卡回退全局波次表 */
+    const bv = isBossType ? this.resolveBossVariant(entry) : null;
     const e = new Enemy(this, typeKey, routeId, (bv && bv.tex) ? { bossTexKey: bv.tex } : null);
     const isBoss = !!e.cfg.boss;
     if (isBoss) {
@@ -1012,9 +1048,12 @@ class GameScene extends Phaser.Scene {
       if (entry.bossHpFactor != null) bossFactor = entry.bossHpFactor;
       else if (wcfg.finalBossHpFactor != null) bossFactor = wcfg.finalBossHpFactor;
       else bossFactor = bossCfg.hpMultiplier;
-      /* 血量 = 同波小怪血量 × bossFactor（保留原有设定）× 变体 hpMul（默认 1） */
+      /* 血量 = 同波小怪血量 × bossFactor（保留原有设定）× 变体 hpMul（默认 1）。
+         第 7 关 bossVariantHpMul=false：严格「小怪血 × bossFactor」，不吃
+         金/蓝/灰的 1/1.2/1.45 微调 */
+      const useHpMul = wcfg.bossVariantHpMul !== false;
       e.maxHp = Math.round(this.waveSmallHp(TD_CONFIG.enemies.enemyX.hp) * bossFactor *
-        ((bv && bv.hpMul != null) ? bv.hpMul : 1));
+        (useHpMul && bv && bv.hpMul != null ? bv.hpMul : 1));
       e.hp = e.maxHp;
       /* 移速 / 击杀金币 / 漏血扣生命 全部取变体 JSON（缺省回退全局系数）：
          漏血 = 普通怪(enemyX)漏血 × leakMul（默认 3 = 普通怪的 3 倍） */
@@ -1024,11 +1063,15 @@ class GameScene extends Phaser.Scene {
       }
       e.leakDamage = TD_CONFIG.enemies.enemyX.leakDamage *
         ((bv && bv.leakMul != null) ? bv.leakMul : bossCfg.leakMultiplier);
-      /* 三阶段 BOSS（第 5 关，JSON 驱动 waves.bossPhases）：仅末波 BOSS 标记
-         一阶段（血量阈值分裂），3/4 波 BOSS 与无配置关卡不参与、零影响 */
+      /* 三阶段 BOSS（第 5/7 关，JSON 驱动 waves.bossPhases）：仅末波 BOSS
+         标记一阶段（血量阈值分裂），其他波 BOSS 与无配置关卡不参与、零影响 */
       if (wcfg.bossPhases && this.waveIndex === wcfg.list.length - 1) {
         e.bossPhase = 1;
       }
+      /* 第 7 关：按波次给 BOSS 挂护盾（雷/冰元素盾、血量盾，JSON 驱动
+         waves.bossShields）；无配置的旧关卡拿到 undefined，零影响 */
+      const shieldDef = wcfg.bossShields ? wcfg.bossShields[String(this.waveIndex)] : null;
+      if (shieldDef && typeof e.applyShield === 'function') e.applyShield(shieldDef);
     } else {
       /* 第 5 关等关卡可配 enemyHpMul：小怪（非 BOSS）血量在波次成长基础上再乘此系数 */
       const hpMul = this.levelCfg.enemyHpMul || 1;
@@ -1115,36 +1158,67 @@ class GameScene extends Phaser.Scene {
     return true;
   }
 
-  /** 一阶段 BOSS 分裂成 N 个分身（血量均分，沿路前后错开，同组共享合体数据） */
+  /** 一阶段 BOSS 分裂成 N 个分身（沿路前后错开，同组共享合体数据）。
+   *  分身配置（全部 JSON 驱动 bossPhases）：
+   *    miniType  分身贴图/类型（第 7 关=enemyX 绿色史莱姆；缺省沿用父代 BOSS）；
+   *    miniHp    每只固定血量（第 7 关=5000；缺省走旧逻辑=剩余血×splitHpMul 均分）；
+   *    miniSpeed 分身移速（缺省沿用构造移速）；
+   *    miniTint  false=保留原生贴图色（第 7 关史莱姆绿）；缺省=旧版橙色 tint；
+   *    miniScale 分身缩放（缺省不缩放，旧关卡由 JSON 提供才生效）。 */
   splitBoss(e, bp) {
     e.dead = true;
-    /* 剩余血量计总（被一击打穿阈值时按 1 保底），× splitHpMul 得分身总量 */
+    /* 剩余血量计总（被一击打穿阈值时按 1 保底），× splitHpMul 得分身总量
+       （旧关卡均分模式使用；第 7 关 miniHp 固定血量模式忽略 total） */
     const rest = Math.max(e.hp, 1);
     const total = Math.max(1, Math.round(rest * ((bp.splitHpMul != null) ? bp.splitHpMul : 1)));
     const n = bp.splitCount || 3;
+    const miniType = bp.miniType || e.typeKey;
+    const miniCfgIsBoss = !!(TD_CONFIG.enemies[miniType] && TD_CONFIG.enemies[miniType].boss);
+    /* 分身沿用父代 BOSS 贴图，仅当分身本身就是 BOSS 类型时（旧关卡） */
+    const miniOpts = (miniCfgIsBoss && e.opts && e.opts.bossTexKey)
+      ? { bossTexKey: e.opts.bossTexKey } : null;
     this.bossPhaseLinkSeq = (this.bossPhaseLinkSeq || 0) + 1;
     this.bossPhaseLinks = this.bossPhaseLinks || {};
-    this.bossPhaseLinks[this.bossPhaseLinkSeq] = { total: total, killed: 0, lastRoute: e.routeId, lastDist: e.pathDist };
+    this.bossPhaseLinks[this.bossPhaseLinkSeq] = {
+      total: total, killed: 0, lastRoute: e.routeId, lastDist: e.pathDist,
+      /* 第 7 关聚合所需：父代最大血量与变体外观/数值 */
+      parentMaxHp: e.maxHp,
+      parentTypeKey: e.typeKey,
+      parentTexKey: (e.opts && e.opts.bossTexKey) || null,
+      parentSpeed: e.baseSpeed,
+      parentReward: e.reward,
+      parentLeak: e.leakDamage
+    };
     const base = Math.floor(total / n);
     const len = this.routeLength(e.routeId);
     for (let i = 0; i < n; i++) {
-      const mi = new Enemy(this, e.typeKey, e.routeId, e.opts.bossTexKey ? { bossTexKey: e.opts.bossTexKey } : null);
-      mi.maxHp = (i === n - 1) ? Math.max(1, total - base * (n - 1)) : base;
+      const mi = new Enemy(this, miniType, e.routeId, miniOpts);
+      if (bp.miniHp != null) {
+        /* 固定分身血量（第 7 关：每只 5000，与分裂时剩余血量无关） */
+        mi.maxHp = bp.miniHp;
+      } else {
+        mi.maxHp = (i === n - 1) ? Math.max(1, total - base * (n - 1)) : base;
+      }
       mi.hp = mi.maxHp;
       mi.bossPhase = 2;
       mi.bossPhaseLink = this.bossPhaseLinkSeq;
       mi.bossPhasePool = total;
+      /* 非 BOSS 贴图的分身（第 7 关绿色史莱姆）打上小 BOSS 标记：
+         免疫塔D牵引、免疫冰冻/易伤，但仍走分身计数（无金币/死亡视频） */
+      if (!miniCfgIsBoss) mi.bossMini = true;
+      if (bp.miniSpeed != null) mi.baseSpeed = bp.miniSpeed;
       const off = (i - (n - 1) / 2) * 26;
       mi.pathDist = Phaser.Math.Clamp(e.pathDist + off, 0, len);
       const p = this.pathPointAt(mi.pathDist, e.routeId);
       mi.setPosition(p.x, p.y);
       mi.drawHpBar(1);
       if (bp.miniScale) mi.setScale(bp.miniScale);
-      mi.body.setTint(0xff9a3c);
+      /* miniTint=false：保留原生贴图颜色（绿色史莱姆）；字段缺省维持旧版橙染 */
+      if (bp.miniTint !== false) mi.body.setTint(0xff9a3c);
       this.enemies.push(mi);
     }
-    this.banner('BOSS 分裂成 ' + n + ' 个分身！', 0xff9a3c);
-    this.makePortalBurst(e.x, e.y, 0xff9a3c);
+    this.banner('BOSS 分裂成 ' + n + ' 个小 BOSS！', 0x7be86b);
+    this.makePortalBurst(e.x, e.y, 0x7be86b);
     e.destroyImmediately();
   }
 
@@ -1168,23 +1242,50 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  /** 合体：在最后一只分身位置生成强化 BOSS（回血比例 × 分身总量） */
+  /** 合体：在最后一只分身位置重新生成大 BOSS。
+   *  血量二选一（JSON 驱动 bossPhases）：
+   *    mergeHpRatio（第 7 关=0.10）：聚合血量 = 父代大 BOSS【最大血量】× 比例；
+   *    mergeHealRatio（旧关卡，缺省 0.5）：聚合血量 = 分身血量总量 × 比例。
+   *  mergeKeepParentStats=true（第 7 关）：聚合体沿用父代变体贴图/移速/金币/
+   *    漏血，不染色、不缩放；缺省走旧逻辑（按当前波次变体 + 红色 tint）。 */
   spawnMergedBoss(link, bp) {
-    const hpv = Math.max(1, Math.round(link.total * ((bp.mergeHealRatio != null) ? bp.mergeHealRatio : 0.5)));
-    const bvM = this.bossVariantAt(this.waveIndex);
-    const mb = new Enemy(this, 'enemyBoss', link.lastRoute, (bvM && bvM.tex) ? { bossTexKey: bvM.tex } : null);
+    let hpv;
+    if (bp.mergeHpRatio != null && link.parentMaxHp != null) {
+      hpv = Math.max(1, Math.round(link.parentMaxHp * bp.mergeHpRatio));
+    } else {
+      hpv = Math.max(1, Math.round(link.total * ((bp.mergeHealRatio != null) ? bp.mergeHealRatio : 0.5)));
+    }
+    let mergeType = 'enemyBoss';
+    let mergeTex = null;
+    if (bp.mergeKeepParentStats) {
+      /* 第 7 关：聚合回分裂前的那只大 BOSS（金/蓝/灰各自独立聚合） */
+      mergeType = link.parentTypeKey || 'enemyBoss';
+      mergeTex = link.parentTexKey || null;
+    } else {
+      const bvM = this.bossVariantAt(this.waveIndex);
+      mergeTex = (bvM && bvM.tex) || null;
+    }
+    const mb = new Enemy(this, mergeType, link.lastRoute, mergeTex ? { bossTexKey: mergeTex } : null);
     mb.maxHp = hpv;
     mb.hp = hpv;
     mb.bossPhase = 3;
+    if (bp.mergeKeepParentStats) {
+      /* 沿用父代变体数值（缺省项回退构造默认） */
+      if (link.parentSpeed != null) mb.baseSpeed = link.parentSpeed;
+      if (link.parentReward != null) mb.reward = link.parentReward;
+      if (link.parentLeak != null) mb.leakDamage = link.parentLeak;
+    }
     mb.pathDist = Phaser.Math.Clamp(link.lastDist, 0, this.routeLength(link.lastRoute));
     const p = this.pathPointAt(mb.pathDist, link.lastRoute);
     mb.setPosition(p.x, p.y);
     mb.drawHpBar(1);
+    /* 缩放/染色仅旧关卡（配置了 finalScale，或未启用父代沿用）时生效 */
     if (bp.finalScale) mb.setScale(bp.finalScale);
-    mb.body.setTint(0xff6666);
+    if (!bp.mergeKeepParentStats) mb.body.setTint(0xff6666);
     this.enemies.push(mb);
-    this.banner('BOSS 合体归来！', 0xff6666);
-    this.makePortalBurst(p.x, p.y, 0xff6666);
+    this.banner(bp.mergeKeepParentStats ? '小 BOSS 重新聚合！' : 'BOSS 合体归来！',
+      bp.mergeKeepParentStats ? 0x7be86b : 0xff6666);
+    this.makePortalBurst(p.x, p.y, bp.mergeKeepParentStats ? 0x7be86b : 0xff6666);
   }
 
   onEnemyLeak(e) {
@@ -2396,7 +2497,7 @@ class GameScene extends Phaser.Scene {
       const cands = [];
       for (const e of this.enemies) {
         if (e.dead || e.invulnTimer > 0 || e === center) continue;
-        if (nonBossOnly && e.cfg && e.cfg.boss) continue;
+        if (nonBossOnly && ((e.cfg && e.cfg.boss) || e.bossMini)) continue;
         if (typeof e.hasElement === 'function' && e.hasElement(el)) continue;
         const d = Phaser.Math.Distance.Between(center.x, center.y, e.x, e.y);
         if (d > r + e.radius) continue;
@@ -2430,7 +2531,7 @@ class GameScene extends Phaser.Scene {
 
     for (const e of this.enemies) {
       if (e.dead || e.invulnTimer > 0 || e === center) continue;
-      if (nonBossOnly && e.cfg && e.cfg.boss) continue;   // BOSS 不被扩散
+      if (nonBossOnly && ((e.cfg && e.cfg.boss) || e.bossMini)) continue;   // BOSS/小BOSS 不被扩散
       if (e.element && e.elementTimer > 0) continue;      // 已有元素：不覆盖
       if (Phaser.Math.Distance.Between(center.x, center.y, e.x, e.y) > r + e.radius) continue;
 

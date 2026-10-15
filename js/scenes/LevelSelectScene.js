@@ -116,7 +116,8 @@ class LevelSelectScene extends Phaser.Scene {
       { name: '双线汇流', desc: '双出怪·双BOSS', emoji: '🔀' },
       { name: '交错迷域', desc: '交叉汇合·岔路奇兵', emoji: '🌀' },
       { name: '迷域回廊', desc: '传送穿梭·三阶BOSS', emoji: '🔮' },
-      { name: '三路会师', desc: '三线交叉·共享终点', emoji: '⚔️' }
+      { name: '三路会师', desc: '三线交叉·共享终点', emoji: '⚔️' },
+      { name: '双途重围', desc: '双线汇合·护盾BOSS', emoji: '🛡️' }
     ];
 
     const positions = this.computeCardPositions(vl);
@@ -141,14 +142,17 @@ class LevelSelectScene extends Phaser.Scene {
 
   /**
    * 计算每张卡片的中心坐标与尺寸。
-   * 强制横屏：1 行 6 张，居中排列。
+   * 强制横屏：1 行 7 张，居中排列。
    */
   computeCardPositions(vl) {
     const W = this.W;
     const out = [];
     const cardH = vl.cardH;
-    const cardW = 132, gap = 16;
-    const count = TDStorage.total;          // 关卡总数（当前 6）
+    const count = TDStorage.total;          // 关卡总数（当前 7）
+    /* 7 张单行需收窄卡宽/间距才能落在 960 世界宽度内：
+       7×116 + 6×13 = 890，两侧各留 35px；6 张时保持原 132/16 不变 */
+    const cardW = count >= 7 ? 116 : 132;
+    const gap = count >= 7 ? 13 : 16;
     const totalW = count * cardW + (count - 1) * gap;
     const startX = (W - totalW) / 2 + cardW / 2;
     for (let i = 0; i < count; i++) {

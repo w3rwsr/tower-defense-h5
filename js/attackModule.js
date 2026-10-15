@@ -235,8 +235,9 @@
       for (let i = 0; i < ctx.enemies.length; i++) {
         const e = ctx.enemies[i];
         if (e.dead || e.invulnTimer > 0) continue; // 传送后短暂无敌：不可被索敌/吸引
-        /* 小怪过滤：nonBoss 模式下 BOSS（cfg.boss===true）免疫吸引 */
-        if (this.smallOnly && e.cfg && e.cfg.boss) continue;
+        /* 小怪过滤：nonBoss 模式下 BOSS（cfg.boss===true）免疫吸引；
+           第 7 关绿色史莱姆分身带 bossMini 标记，同样免疫吸引 */
+        if (this.smallOnly && ((e.cfg && e.cfg.boss) || e.bossMini)) continue;
 
         const dx = e.x - t.x;
         const dy = e.y - t.y;
@@ -353,16 +354,26 @@
       /* 循环 jumps 次（弹跳次数）：i=0 为初始击中，i=jumps 为最后一跳 */
       for (let i = 0; i <= jumps; i++) {
         hit.add(current);
-        /* 雷元素附着（JSON effect.element 驱动）：第6关起先附着雷元素并结算
-           反应，倍率“谁先触发谁享受”归塔E 本跳伤害（火+雷×1.5 / 水+雷×1.75 /
-           冰+雷×1.5）；第1~5关退化为旧视觉印记，倍率恒 1。
-           鸭子类型守卫——障碍物无 attachElement，自动跳过 */
-        let mul = 1;
-        if (this.eff.element && !current.dead && typeof current.attachElement === 'function') {
-          mul = current.attachElement(this.eff.element, null, this.eff.element).reactionMul || 1;
+        const chainEl = this.eff.element || null;
+        /* 第 7 关雷元素护盾：雷链打在雷盾 BOSS 身上【免疫但不断链】——
+           不附着、不伤血、不计有效攻击次数，但闪电视觉仍连到它（已入
+           chainPoints/hit，避免回弹），并继续向后方小怪弹跳（下方 next
+           搜索天然越过它寻找其他未击中目标）。 */
+        const immune = !current.dead && chainEl &&
+          typeof current.shieldBlocks === 'function' && current.shieldBlocks(chainEl);
+        if (!immune) {
+          /* 雷元素附着（JSON effect.element 驱动）：第6关起先附着雷元素并结算
+             反应，倍率“谁先触发谁享受”归塔E 本跳伤害（火+雷×1.5 / 水+雷×1.75 /
+             冰+雷×1.5）；第1~5关退化为旧视觉印记，倍率恒 1。
+             鸭子类型守卫——障碍物无 attachElement，自动跳过 */
+          let mul = 1;
+          if (chainEl && !current.dead && typeof current.attachElement === 'function') {
+            mul = current.attachElement(chainEl, null, chainEl).reactionMul || 1;
+          }
+          /* 造成伤害（鸭子类型：小怪 / 障碍物通用 takeDamage；障碍物无
+             护盾概念，多收一个元素参数不影响其实现） */
+          if (!current.dead) current.takeDamage(Math.round(dmg * mul), chainEl);
         }
-        /* 造成伤害（鸭子类型：小怪 / 障碍物通用 takeDamage） */
-        if (!current.dead) current.takeDamage(Math.round(dmg * mul));
         chainPoints.push({ x: current.x, y: current.y });
 
         /* 最后一次后不再搜索下一目标 */
