@@ -620,6 +620,11 @@ class Enemy extends Phaser.GameObjects.Container {
 
   /* 击杀后的弹跳消失动画，结束后由场景统一销毁 */
   playDeath() {
+    /* 防重入：一次死亡只允许走一条流程（视频接管 或 降级动画+皇冠）。
+       重复触发（同帧多次伤害/外部再调用）会导致生成第二个皇冠或二次
+       动画，这里直接拦截，保证死亡时仅生成一个皇冠。 */
+    if (this.removed || this._dying) return;
+    this._dying = true;
     this.clearElementMark();  // 印记光点随死亡清除（tween 不残留）
     this.showFreezeGfx(false);
     this.refreshVulnView(false); // 传 0 层效果：清掉易伤文字
@@ -656,7 +661,9 @@ class Enemy extends Phaser.GameObjects.Container {
     });
   }
 
-  /* 降级路径的皇冠淡出：从死亡视频末帧提取的皇冠贴图，原地缓慢淡出 */
+  /* 降级路径的皇冠淡出：从死亡视频末帧提取的皇冠贴图，原地缓慢淡出。
+     位置与视频路径的皇冠完全一致（crownAnchor 锚点换算 + deathDisplayH），
+     并按世界尺寸收进可见区——无论走哪条路径，皇冠都落在同一位置。 */
   _spawnFadingCrown(key, x, y) {
     const scene = this.scene;
     if (!scene || !scene.add || !scene.tweens || !scene.textures) return;
@@ -665,19 +672,38 @@ class Enemy extends Phaser.GameObjects.Container {
     const texKey = 'crown_' + key;
     if (!scene.textures.exists(texKey)) return;
     const dc = TD_CONFIG.enemies.bossDeath;
-    const ch = (dc.crownDisplayH && dc.crownDisplayH[key]) || 30;
+    const ch = (dc.crownDisplayH && dc.crownDisplayH[key]) || 9;
+    const dh = (dc.deathDisplayH && dc.deathDisplayH[key]) || 50;
+    const anchor = (dc.crownAnchor && dc.crownAnchor[key]) || { x: 321, y: 434 };
+    const W = TD_CONFIG.world ? TD_CONFIG.world.width : 960;
+    const H = TD_CONFIG.world ? TD_CONFIG.world.height : 540;
+    const px = Math.max(dh / 2, Math.min(W - dh / 2, x));
+    const py = Math.max(dh / 2, Math.min(H - dh / 2, y));
+    const fadeIn = Math.max(0, dc.crownFadeIn != null ? dc.crownFadeIn : 200);
     const fade = Math.max(200, dc.crownFade != null ? dc.crownFade : 1500);
-    const crown = scene.add.image(x, y + 18, texKey);
+    const crown = scene.add.image(
+      px + (anchor.x - 320) / 640 * dh,
+      py + (anchor.y - 320) / 640 * dh, texKey);
     const tex = scene.textures.get(texKey);
     const ratio = (tex && tex.source && tex.source[0]) ?
       tex.source[0].width / Math.max(1, tex.source[0].height) : 1.4;
     crown.setDisplaySize(ch * ratio, ch);
     crown.setDepth(59);
+    crown.setAlpha(0);
     scene.tweens.add({
       targets: crown,
-      alpha: 0,
-      duration: fade,
-      onComplete: () => { try { if (crown.active) crown.destroy(); } catch (_) {} }
+      alpha: 1,
+      duration: fadeIn,
+      ease: 'Sine.easeOut',
+      onComplete: () => {
+        scene.tweens.add({
+          targets: crown,
+          alpha: 0,
+          duration: fade,
+          ease: 'Sine.easeInOut',
+          onComplete: () => { try { if (crown.active) crown.destroy(); } catch (_) {} }
+        });
+      }
     });
   }
 

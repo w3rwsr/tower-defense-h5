@@ -279,7 +279,17 @@
     if (!tex || !tex.has('__BASE')) return false;
 
     const dh = DEATH_H[key] || 50;
-    const img = scene.add.image(x, y, st.texKey);
+    /* 位置收进可见区：Boss 可能在路径端点（出生点/终点在地图边缘外）被
+       击杀，原坐标会让死亡动画（含皇冠）大部分落在画面外。按世界尺寸
+       （JSON world.width/height）把 dh×dh 效果整体收进屏幕；
+       路径端点必与地图边缘相交，收进后仍在路面范围内。皇冠位置由
+       entry.x/y 派生，同步收进。 */
+    const W = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.world) ? TD_CONFIG.world.width : 960;
+    const H = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.world) ? TD_CONFIG.world.height : 540;
+    const half = dh / 2;
+    const cx = Math.max(half, Math.min(W - half, x));
+    const cy = Math.max(half, Math.min(H - half, y));
+    const img = scene.add.image(cx, cy, st.texKey);
     img.setPipeline('BossDeathGK');
     img.setDisplaySize(dh, dh);   // 视频 640x640 正方形，宽=高不变形
     img.setDepth(60);             // 叠在敌人/路径之上，UI 之下
@@ -293,7 +303,7 @@
     st.playing = true;
     this._playing++;
 
-    const entry = { key, st, img, scene, x, y };
+    const entry = { key, st, img, scene, x: cx, y: cy };
     const onEnded = () => {
       v.removeEventListener('ended', onEnded);
       if (this._st[key] === st) this._finish(entry);
