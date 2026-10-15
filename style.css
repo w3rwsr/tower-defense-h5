@@ -57,6 +57,38 @@
   color: #ffd84a;
   min-height: 1.4em;
 }
+/* 启动加载进度条：按 defer 脚本逐个加载完成推进（见 index.html 内联脚本） */
+.boot-bar {
+  margin: 12px auto 0;
+  width: min(320px, 60vw);
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(255, 250, 240, 0.25);
+  border: 2px solid rgba(255, 250, 240, 0.6);
+  overflow: hidden;
+}
+.boot-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #ffd84a, #ffb13d);
+  transition: width 0.25s ease;
+}
+/* 加载失败手动重试按钮（自动重试次数用完后出现） */
+#boot-retry {
+  margin-top: 12px;
+  font-size: clamp(13px, 3vmin, 16px);
+  font-weight: 700;
+  color: #2b2230;
+  background: #ffd84a;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 22px;
+  cursor: pointer;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.2);
+}
+#boot-retry:active { transform: translateY(2px); box-shadow: none; }
 @keyframes boot-bounce {
   0%, 100% { transform: translateY(0) scale(1); }
   50%      { transform: translateY(-6px) scale(1.08); }

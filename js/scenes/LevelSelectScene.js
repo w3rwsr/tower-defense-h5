@@ -50,6 +50,23 @@ class LevelSelectScene extends Phaser.Scene {
     };
     this.scale.on('resize', this.handleResize);
     this.events.once('shutdown', () => this.scale.off('resize', this.handleResize));
+
+    this._deferredVideoInit();
+  }
+
+  /* 延迟错峰加载三个运动视频（wind_towers/slime_walk/boss_walk.mp4，~8.4MB）：
+     从 BootScene 移到这里——选关页已出现、首屏带宽空闲后再后台逐个下载，
+     移动端弱网下不再抢占启动资源。玩家从选关到放塔/出怪至少有数秒，
+     视频通常早已就绪；未就绪时 Tower/Enemy 走既有静态贴图降级，
+     就绪后经各模块 whenReady 回调自动接管。重复进入本场景安全：
+     各 init 内部均有 _inited 防重入。 */
+  _deferredVideoInit() {
+    const jobs = [
+      () => { try { WIND_VIDEO.init(this); } catch (e) { /* 静态兜底 */ } },
+      () => { try { SLIME_VIDEO.init(this); } catch (e) { /* 静态兜底 */ } },
+      () => { try { BOSS_VIDEO.init(this); } catch (e) { /* 静态兜底 */ } }
+    ];
+    jobs.forEach((fn, i) => setTimeout(fn, 700 + i * 1100));
   }
 
   /**

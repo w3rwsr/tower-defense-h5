@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>卡通塔防 H5（Phaser 3）</title>
-  <link rel="stylesheet" href="style.css?v=20261009n" />
+  <link rel="stylesheet" href="style.css?v=20261015c" />
   <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js）。
        全部脚本 defer：浏览器先渲染加载提示层，再并行下载、按序执行，消除手机端白屏 -->
   <script defer src="vendor/phaser.min.js?v=20260920h"></script>
@@ -16,26 +16,29 @@
     <div class="boot-box">
       <div class="boot-flame">🔥</div>
       <div class="boot-text">游戏加载中…</div>
+      <div class="boot-bar"><i id="boot-bar-fill"></i></div>
       <div class="boot-dots"><i></i><i></i><i></i></div>
       <div id="boot-loading-tip"></div>
+      <button id="boot-retry" type="button" style="display:none">⟳ 重新加载</button>
     </div>
   </div>
   <script>
     /* 启动守护（同步内联，先于所有 defer 脚本注册）：
-       1. 脚本/样式加载失败 → 提示刷新，不静默卡死；
+       1. 脚本/样式加载失败 → 置失败标记，由文末进度脚本统一走自动重试；
        2. 8 秒仍未就绪 → 提示可能网络较慢；BootScene 就绪后置 __tdBootOK 并移除提示层 */
     (function () {
       window.__tdBootOK = false;
+      window.__tdBootFailed = false;
       window.addEventListener('error', function (e) {
-        if (window.__tdBootOK) return;
+        if (window.__tdBootOK || window.__tdBootFailed) return;
         var t = e && e.target;
         if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
-          var el = document.getElementById('boot-loading-tip');
-          if (el) el.textContent = '⚠ 资源加载失败，请检查网络后刷新重试';
+          window.__tdBootFailed = true;
+          if (window.__tdBootOnFail) window.__tdBootOnFail();
         }
       }, true);
       setTimeout(function () {
-        if (!window.__tdBootOK) {
+        if (!window.__tdBootOK && !window.__tdBootFailed) {
           var el = document.getElementById('boot-loading-tip');
           if (el) el.textContent = '加载时间较长，请耐心等待；若长时间无响应请刷新';
         }
@@ -120,13 +123,13 @@
   <script defer src="js/IceBulletData.js?v=20261010a"></script>
   <script defer src="js/WaterTowerArtData.js?v=20261010f"></script>
   <script defer src="js/WaterBulletData.js?v=20261010c"></script>
-  <script defer src="js/ThunderSheetData.js?v=20261012f"></script>
-  <script defer src="js/WindTowersArtData.js?v=20261013b"></script>
-  <script defer src="js/GravityTowersArtData.js?v=20261013b"></script>
+  <script defer src="js/ThunderSheetData.js?v=20261015c"></script>
+  <script defer src="js/WindTowersArtData.js?v=20261015c"></script>
+  <script defer src="js/GravityTowersArtData.js?v=20261015c"></script>
   <!-- 敌人美术数据（BOSS 三只独立贴图 + 史莱姆静态降级贴图，data URI，离线生成） -->
   <script defer src="js/EnemyArtData.js?v=20261014a"></script>
   <!-- 死亡皇冠贴图（从三个 Boss 死亡视频末帧提取，data URI，离线生成） -->
-  <script defer src="js/CrownArtData.js?v=20261014a"></script>
+  <script defer src="js/CrownArtData.js?v=20261015c"></script>
   <script defer src="js/objects/FireBurn.js?v=20261009n"></script>
   <script defer src="js/objects/FireVideoPipeline.js?v=20261014c"></script>
   <script defer src="js/objects/SlimeVideo.js?v=20261014b"></script>
@@ -134,9 +137,57 @@
   <script defer src="js/objects/WindVideo.js?v=20261013i"></script>
   <script defer src="js/objects/Tower.js?v=20261015a"></script>
   <script defer src="js/objects/ThunderArc.js?v=20261012m"></script>
-  <script defer src="js/scenes/BootScene.js?v=20261014c"></script>
-  <script defer src="js/scenes/LevelSelectScene.js?v=20261015a"></script>
+  <script defer src="js/scenes/BootScene.js?v=20261015c"></script>
+  <script defer src="js/scenes/LevelSelectScene.js?v=20261015c"></script>
   <script defer src="js/scenes/GameScene.js?v=20261015a"></script>
   <script defer src="js/main.js?v=20261014c"></script>
+  <script>
+    /* 启动进度条 + 失败自动重试（放在所有 defer 脚本之后：
+       本内联脚本在文档解析期同步执行，早于任何 defer 脚本执行，
+       因此 load 监听一个都不会漏；defer 脚本每个加载+执行完毕
+       都会触发自身 load 事件，进度条随之推进）。
+       失败处理：sessionStorage 计数，自动刷新重试至多 2 次，
+       仍失败则显示手动「重新加载」按钮，绝不静默卡死；
+       启动成功后由 BootScene 清除计数（见 BootScene.create）。 */
+    (function () {
+      var RETRY_KEY = '__tdBootRetry', MAX_RETRY = 2;
+      var fill = document.getElementById('boot-bar-fill');
+      var tip = document.getElementById('boot-loading-tip');
+      var btn = document.getElementById('boot-retry');
+      var scripts = document.querySelectorAll('script[src]');
+      var total = scripts.length, done = 0;
+      function render() {
+        var pct = total ? Math.round(done / total * 100) : 0;
+        if (fill) fill.style.width = pct + '%';
+        if (tip && !window.__tdBootFailed && !window.__tdBootOK) {
+          tip.textContent = '正在加载资源 ' + done + '/' + total + '（' + pct + '%）';
+        }
+      }
+      /* 失败统一入口（由开头启动守护的 window error 捕获调用） */
+      window.__tdBootOnFail = function () {
+        var n = 0;
+        try { n = parseInt(sessionStorage.getItem(RETRY_KEY) || '0', 10) || 0; } catch (e) {}
+        if (n < MAX_RETRY) {
+          try { sessionStorage.setItem(RETRY_KEY, String(n + 1)); } catch (e) {}
+          if (tip) tip.textContent = '⚠ 资源加载失败，正在自动重试（第 ' + (n + 1) + '/' + MAX_RETRY + ' 次）…';
+          /* 竞态防护：若游戏已奇迹般启动（失败的是非关键脚本），不再打断 */
+          setTimeout(function () { if (!window.__tdBootOK) location.reload(); }, 1200);
+        } else {
+          if (tip) tip.textContent = '⚠ 资源加载失败，请检查网络后点击重试';
+          if (btn) btn.style.display = '';
+        }
+      };
+      Array.prototype.forEach.call(scripts, function (s) {
+        s.addEventListener('load', function () { done++; render(); });
+      });
+      render();
+      /* 极端情况：失败发生在本脚本注册前（如 phaser 秒断网）→ 补触发 */
+      if (window.__tdBootFailed) window.__tdBootOnFail();
+      if (btn) btn.addEventListener('click', function () {
+        try { sessionStorage.setItem(RETRY_KEY, '0'); } catch (e) {}
+        location.reload();
+      });
+    })();
+  </script>
 </body>
 </html>

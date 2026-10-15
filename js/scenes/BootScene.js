@@ -31,9 +31,11 @@ class BootScene extends Phaser.Scene {
     this.cameras.main.centerOn(TD_CONFIG.world.width / 2, TD_CONFIG.world.height / 2);
 
     /* Phaser 就绪：移除 index.html 的启动加载提示层（仅启动时执行一次，
-       本场景不会重进，无重复移除问题） */
+       本场景不会重进，无重复移除问题）；同时清除加载失败自动重试计数
+       （index.html 启动守护用 sessionStorage.__tdBootRetry 限制重试 ≤2 次） */
     try {
       window.__tdBootOK = true;
+      try { sessionStorage.removeItem('__tdBootRetry'); } catch (e2) { /* 隐私模式忽略 */ }
       const bl = document.getElementById('boot-loading');
       if (bl && bl.parentNode) bl.parentNode.removeChild(bl);
     } catch (e) { /* 忽略：提示层缺失不影响游戏 */ }
@@ -44,22 +46,14 @@ class BootScene extends Phaser.Scene {
        任何异常都不阻断启动） */
     try { FIRE_BURN.init(this); } catch (e) { /* 忽略：Tower 端静态兜底 */ }
 
-    /* 风塔龙卷风视频（assets/wind_towers.mp4，横排三等级龙卷风）。
-       全场共享 1 个 HTMLVideoElement + 1 个 Phaser 视频纹理，三塔用
-       setCrop 显示对应段；绿幕背景走 FireVideoGK 管线色度键透明。
-       不支持/加载失败时 supported=false，Tower 端回退静态贴图
-       wind_tower_lvN + Tween 旋转，与火塔降级路径一致。 */
-    try { WIND_VIDEO.init(this); } catch (e) { /* 忽略：Tower 端静态兜底 */ }
-
-    /* 史莱姆小怪蹦跳视频（assets/slime_walk.mp4，横排两只：左绿色快怪/右蓝紫慢怪）。
-       全场共享 1 个 HTMLVideoElement + 1 个 Phaser 视频纹理，每只怪用对应 frame
-       显示自己那一段；亮绿幕背景走 SlimeVideoGK 管线【背景色距离键】透明（绿色
-       快怪本体与绿幕较近，不能用 green-excess 键）。不支持/加载失败时
-       supported=false，Enemy 端回退静态贴图 + 蹦跳 Tween。 */
-    try { SLIME_VIDEO.init(this); } catch (e) { /* 忽略：Enemy 端静态兜底 */ }
-    /* BOSS 运动视频 + 死亡视频（BossVideo.js）：init 只做支持性检测与
-       运动视频加载；死亡视频按 Boss 出场懒加载（prewarm），不拖慢启动。 */
-    try { BOSS_VIDEO.init(this); } catch (e) { /* 忽略：Enemy 端静态兜底 */ }
+    /* 风塔/史莱姆/BOSS 三个运动视频（wind_towers/slime_walk/boss_walk.mp4，
+       合计 ~8.4MB）【不在启动时加载】——移动端弱网下它们会抢占首屏带宽、
+       拖长选关页出现时间。改为进入选关页后由 LevelSelectScene 延迟错峰
+       后台加载（见 LevelSelectScene.create 的 _deferredVideoInit）；
+       加载期间/不支持时 supported=false，Tower/Enemy 端回退静态贴图，
+       视频就绪后通过 whenReady 回调自动接管，功能观感均不受影响。 */
+    /* BOSS 死亡视频（BossVideo.js）：init 只做支持性检测不下载视频；
+       死亡视频按 Boss 出场懒加载（prewarm），不拖慢启动。 */
     try { BOSS_DEATH.init(this); } catch (e) { /* 忽略：Enemy 端降级兜底 */ }
 
     /* ---------- 塔底座阴影（所有塔共用） ---------- */
