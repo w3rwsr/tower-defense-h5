@@ -476,16 +476,21 @@ html.is-mobile.is-portrait #app {
    手机端 HUD 重排（电脑端完全不受影响——全部规则以 html.is-mobile
    为前提，桌面没有 is-mobile class 时一条都不命中）：
 
-   【布局规则】信息栏与设置按钮分置顶边两端，互不重叠、均避开道路：
-   · 信息栏（关卡/金币/生命/波次）：一行横向排列，贴 app 顶边、
-     左起 22%（顶部左侧偏中）——避开左上角各关进路口（路心 y≈80~135、
-     路面 y≥55），胶囊行高换算世界坐标仅占 y≈0~35，下方到路面(y≥55)
-     留有草地间隔，任何关卡都不压路；「图标 + 数字」紧凑胶囊、半透明
-     背景、整条点击穿透（pointer-events:none），不影响火力点操作；
-   · 设置按钮（暂停 + 倍速合并为一个 ⚙ 小图标）：单独在【右上角】，
-     与信息栏分开展示；点击向下展开半透明悬浮面板（暂停/继续 + 1x/2x，
-     热区 ≥40px），面板右对齐收入屏幕内，临时出现、半透明可透见路面；
-     收起时只占一个小齿轮位。
+   【布局规则】信息栏与设置按钮都贴 app 顶边（= 视觉横屏后的屏幕右边缘），
+   上下分开、互不重叠、均避开道路：
+   · 信息栏（关卡/金币/生命/波次）：app 空间单列 = 屏幕上一行横排，
+     屏幕左→右顺序为 关卡、金币、生命、波次（column-reverse 保证阅读
+     顺序）；只显示「图标 + 数字」，紧凑、半透明背景、整条点击穿透
+     （pointer-events:none），不影响火力点操作；位于屏幕右侧偏上
+     （app 顶边 left:10%）。
+     ——已知妥协（用户确认接受）：app 经 rotate(90deg) 视觉横屏后，
+     单排 4 胶囊在 app 空间是 ~69px 高的列，换算世界坐标纵深 0~95px，
+     超出全关卡顶缘无路安全带（y≤50），在第 2/4/6/7 关会轻微压到
+     顶缘道路边缘；以半透明背景透见路面，不遮挡判定与操作。
+   · 设置按钮（暂停 + 倍速合并为一个 ⚙ 小图标）：单独在【屏幕右下角】
+     草地（app 顶边右端，世界坐标 x≥905、y≤44 的无路角），与信息栏
+     分开展示；点击向屏幕左侧展开半透明悬浮面板（暂停/继续 + 1x/2x，
+     热区 ≥40px），面板半透明可透见路面；收起时只占一个小齿轮位。
    ====================================================================== */
 html.is-mobile #hud-top {
   justify-content: flex-start;   /* 信息栏/控制区均脱离流定位，本条仅作兜底 */
@@ -493,34 +498,35 @@ html.is-mobile #hud-top {
 }
 html.is-mobile .stats {
   position: absolute;            /* 相对 #hud-top（整宽、贴 app 顶边） */
-  left: 22%;                     /* 顶部左侧偏中：避开左上角各关进路口 */
-  top: calc(3px + env(safe-area-inset-top));
-  flex-direction: row;           /* 一行横向排列：关卡/金币/生命/波次 */
+  left: 10%;                     /* 屏幕右侧偏上：避开左上角各关进路口 */
+  top: calc(2px + env(safe-area-inset-top));
+  display: flex;
+  flex-direction: column-reverse; /* app 列 = 屏幕横排；reverse 使屏幕左→右 = DOM 顺序 */
   align-items: center;
-  gap: 3px;
-  flex-wrap: nowrap;
-  padding: 2px 7px;
+  gap: 2px;
+  padding: 2px 5px;
   border-radius: 999px;
   background: rgba(255, 252, 240, .55);   /* 半透明：不遮挡游戏画面 */
   pointer-events: none;                    /* 整条信息栏点击穿透，火力点可正常点 */
 }
 html.is-mobile .chip {
-  gap: 3px;
+  gap: 2px;
   padding: 1px 4px;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.15;             /* 压低行高：两行总高 ≤37px，保证世界纵深 ≤48 不压路 */
   background: transparent;
   box-shadow: none;
 }
-html.is-mobile .chip b { font-size: 12px; }
+html.is-mobile .chip b { font-size: 11px; }
 html.is-mobile .chip-level,
 html.is-mobile .chip-level b { background: transparent; }
 html.is-mobile .chip-level b { color: #0d2c4d; }
 
-/* ---- 右上角：暂停 + 倍速合并菜单（与信息栏分置顶边两端，不重叠） ---- */
+/* ---- 屏幕右下角：暂停 + 倍速合并菜单（与信息栏上下分开，不重叠） ---- */
 html.is-mobile .controls {
-  position: absolute;            /* 相对 #hud-top（贴 app 顶边） */
-  top: calc(3px + env(safe-area-inset-top));
-  right: 6px;
+  position: absolute;            /* 相对 #hud-top（贴 app 顶边 = 屏幕右缘） */
+  top: calc(2px + env(safe-area-inset-top));
+  right: 8px;                    /* 右下角无路草地角：世界 x≥905/y≤44，全关不压路 */
   gap: 4px;
 }
 /* 手机端隐藏原并排按钮，改由合并菜单接管（DOM 保留：syncHud 仍会更新其状态） */
