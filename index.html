@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>卡通塔防 H5（Phaser 3）</title>
-  <link rel="stylesheet" href="style.css?v=20261016m" />
+  <link rel="stylesheet" href="style.css?v=20261016n" />
   <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js）。
        全部脚本 defer：浏览器先渲染加载提示层，再并行下载、按序执行，消除手机端白屏 -->
   <script defer src="vendor/phaser.min.js?v=20260920h"></script>
@@ -121,7 +121,7 @@
   <!-- ===== 脚本按依赖顺序加载（全部 defer：按文档顺序执行，下载并行） =====
        FireBurnData.js（~600KB 内嵌燃烧视频）不在此同步加载——由 main.js 在
        Phaser 启动前后台动态注入，选关页先行进入，视频数据就绪后自动挂接 -->
-  <script defer src="js/config.js?v=20261016b"></script>
+  <script defer src="js/config.js?v=20261016d"></script>
   <script defer src="js/storage.js?v=20261016a"></script>
   <!-- 开发调试工具：仅 URL 带 #dbg 时激活（全内容解锁 + 应用内浏览器），无 #dbg 的正式环境脚本立即退出，不创建 DOM、不写任何存储 -->
   <script defer src="js/debugTools.js?v=20260921r"></script>
@@ -141,6 +141,8 @@
   <script defer src="js/EnemyArtData.js?v=20261014a"></script>
   <!-- 死亡皇冠贴图（从三个 Boss 死亡视频末帧提取，data URI，离线生成） -->
   <script defer src="js/CrownArtData.js?v=20261015c"></script>
+  <!-- 公主窗口图片（点击终点城堡大门弹出，整图缩放 data URI，离线生成） -->
+  <script defer src="js/PrincessArtData.js?v=20261016a"></script>
   <script defer src="js/objects/FireBurn.js?v=20261009n"></script>
   <script defer src="js/objects/FireVideoPipeline.js?v=20261014c"></script>
   <script defer src="js/objects/SlimeVideo.js?v=20261014b"></script>
@@ -148,9 +150,9 @@
   <script defer src="js/objects/WindVideo.js?v=20261013i"></script>
   <script defer src="js/objects/Tower.js?v=20261015a"></script>
   <script defer src="js/objects/ThunderArc.js?v=20261012m"></script>
-  <script defer src="js/scenes/BootScene.js?v=20261015c"></script>
+  <script defer src="js/scenes/BootScene.js?v=20261016b"></script>
   <script defer src="js/scenes/LevelSelectScene.js?v=20261015c"></script>
-  <script defer src="js/scenes/GameScene.js?v=20261016d"></script>
+  <script defer src="js/scenes/GameScene.js?v=20261016f"></script>
   <script defer src="js/main.js?v=20261014c"></script>
   <script>
     /* 启动进度条 + 失败自动重试（放在所有 defer 脚本之后：

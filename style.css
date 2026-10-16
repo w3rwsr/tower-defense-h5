@@ -213,6 +213,9 @@ html, body {
 /* 当前关卡标识：蓝色调与金币/生命/波次区分 */
 .chip-level { background: rgba(219, 238, 255, .95); color: #17406b; }
 .chip-level b { color: #0d2c4d; }
+/* 生命值已移到终点城堡大门旁悬浮牌，游戏中隐藏顶部生命 chip
+   （由 GameScene 进入时加 class，仅隐藏该 chip，金币/波次不受影响） */
+.chip-lives.hidden-by-gate { display: none !important; }
 
 .btn-ctrl {
   min-width: 56px;

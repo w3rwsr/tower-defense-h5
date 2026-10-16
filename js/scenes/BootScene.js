@@ -233,6 +233,95 @@ class BootScene extends Phaser.Scene {
       g.fillEllipse(21, 8, 24, 7);
     });
 
+    /* ---------- 终点城堡大门（圆润卡通 / 扁平 / 明亮，与草地+土路地图同色系） ----------
+       120x128，显示时 origin(0.5,1) 钉在终点绘制位置。两侧圆塔 + 粉色尖顶+小旗，
+       中央城垛墙 + 圆拱木门（双扇/木板纹/金把手）。撞击闪白光用同名白色 tint 副本。 */
+    this.makeTexture('castle_gate', 120, 128, (g) => {
+      /* 脚下软阴影 */
+      g.fillStyle(0x000000, 0.15);
+      g.fillEllipse(60, 124, 84, 10);
+      /* 两侧圆塔塔身（奶油石色） */
+      const tower = (tx) => {
+        g.fillStyle(0xf4e6c8, 1);
+        g.fillRoundedRect(tx, 44, 26, 80, 9);
+        g.lineStyle(2.5, 0xc8a86e, 1);
+        g.strokeRoundedRect(tx, 44, 26, 80, 9);
+        /* 粉色锥形塔顶 */
+        g.fillStyle(0xe8789c, 1);
+        g.fillTriangle(tx - 3, 48, tx + 13, 16, tx + 29, 48);
+        g.lineStyle(2.5, 0xbf5279, 1);
+        g.lineBetween(tx - 3, 48, tx + 13, 16);
+        g.lineBetween(tx + 13, 16, tx + 29, 48);
+        /* 塔顶小金球 + 小旗 */
+        g.fillStyle(0xffd24a, 1);
+        g.fillCircle(tx + 13, 14, 3);
+        g.lineStyle(1.6, 0x8a5a2b, 1);
+        g.lineBetween(tx + 13, 14, tx + 13, 2);
+        g.fillStyle(0xff8fb1, 1);
+        g.fillTriangle(tx + 13, 3, tx + 25, 6, tx + 13, 10);
+        /* 塔身小窗 + 高光 */
+        g.fillStyle(0xb88a52, 1);
+        g.fillRoundedRect(tx + 9, 62, 8, 11, 4);
+        g.fillStyle(0xffffff, 0.35);
+        g.fillEllipse(tx + 7, 54, 5, 8);
+      };
+      tower(8);
+      tower(86);
+      /* 中央城墙（城垛） */
+      g.fillStyle(0xf7ecd2, 1);
+      g.fillRoundedRect(26, 58, 68, 66, 7);
+      g.lineStyle(2.5, 0xc8a86e, 1);
+      g.strokeRoundedRect(26, 58, 68, 66, 7);
+      for (let i = 0; i < 3; i++) {
+        g.fillStyle(0xf7ecd2, 1);
+        g.fillRoundedRect(31 + i * 21, 49, 14, 12, 3);
+        g.lineStyle(2, 0xc8a86e, 1);
+        g.strokeRoundedRect(31 + i * 21, 49, 14, 12, 3);
+      }
+      /* 圆拱门框（浅石色描边环） */
+      g.fillStyle(0xd9b98a, 1);
+      g.fillRoundedRect(33, 56, 54, 68, 26);
+      /* 木门双扇 */
+      g.fillStyle(0xa56132, 1);
+      g.fillRoundedRect(38, 61, 44, 63, 21);
+      g.lineStyle(2.5, 0x6e3d1c, 1);
+      g.strokeRoundedRect(38, 61, 44, 63, 21);
+      /* 中缝 + 每扇两道木板纹 */
+      g.lineStyle(2, 0x7d4722, 1);
+      g.lineBetween(60, 66, 60, 124);
+      g.lineStyle(1.4, 0x8a5228, 0.8);
+      g.lineBetween(49, 72, 49, 120);
+      g.lineBetween(53.5, 74, 53.5, 118);
+      g.lineBetween(66.5, 74, 66.5, 118);
+      g.lineBetween(71, 72, 71, 120);
+      /* 横向木纹节疤 */
+      g.lineStyle(1.2, 0x8a5228, 0.7);
+      g.lineBetween(42, 92, 56, 92);
+      g.lineBetween(64, 100, 78, 100);
+      /* 金色门把手 */
+      g.fillStyle(0xffd24a, 1);
+      g.fillCircle(55, 98, 3.2); g.fillCircle(65, 98, 3.2);
+      g.lineStyle(1.2, 0xb8860f, 1);
+      g.strokeCircle(55, 98, 3.2); g.strokeCircle(65, 98, 3.2);
+      /* 墙面高光点 */
+      g.fillStyle(0xffffff, 0.4);
+      g.fillEllipse(36, 70, 6, 9);
+      g.fillEllipse(84, 70, 6, 9);
+    });
+
+    /* ---------- 血量牌小爱心（门旁血量显示用，红色心形 + 左上高光） ---------- */
+    this.makeTexture('heart_icon', 20, 18, (g) => {
+      g.fillStyle(0xff5d6e, 1);
+      g.fillCircle(7, 7, 5.5);
+      g.fillCircle(13, 7, 5.5);
+      g.fillTriangle(2.2, 9, 17.8, 9, 10, 17);
+      g.lineStyle(1.6, 0xd33b4d, 1);
+      g.strokeCircle(7, 7, 5.5);
+      g.strokeCircle(13, 7, 5.5);
+      g.fillStyle(0xffffff, 0.55);
+      g.fillCircle(5.5, 5, 1.7);
+    });
+
     /* ---------- 火元素塔（towerA）1/2/3 级美术贴图 ----------
        优先 FireTowerArtData.js：离线已按同一算法抠图的 data URI（同源干净，
        file:// 也可上传 WebGL），异步解码完成后注册纹理。注意此处只登记异步
@@ -657,6 +746,25 @@ class BootScene extends Phaser.Scene {
           img.src = durl;
         }));
       });
+    }
+
+    /* ---------- 公主窗口图片（PrincessArtData.js，data URI，整图不抠图） ----------
+       点击城堡大门弹出的窗口里居中完整显示；异步解码后注册纹理 'princess'。
+       缺失时静默跳过（仅弹窗内无图，大门与游戏主流程不受影响）。 */
+    if (typeof PRINCESS_ART !== 'undefined' && PRINCESS_ART && PRINCESS_ART.data) {
+      if (!artJobs) artJobs = [];
+      artJobs.push(new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            if (this.textures.exists('princess')) this.textures.remove('princess');
+            this.textures.addImage('princess', img);
+            resolve(true);
+          } catch (e) { resolve(false); }
+        };
+        img.onerror = () => resolve(false);
+        img.src = PRINCESS_ART.data;
+      }));
     }
 
     /* 内嵌贴图就绪后再进选关（小图解码通常几十 ms；超时兜底绝不阻断启动） */

@@ -61,11 +61,18 @@ class GameScene extends Phaser.Scene {
     this.drawPath();
     this.drawPortals();
     this.drawDecor();
+    /* 终点城堡大门改在 lives 初始化后构建（门旁血量牌要读初始生命数） */
 
     /* ---- 游戏状态 ---- */
     const econ = this.levelCfg.economy || TD_CONFIG.economy;
     this.gold = econ.startGold;
     this.lives = econ.startLives;
+    /* 终点城堡大门（含点击热区与门旁血量牌；生命值已初始化） */
+    this.drawCastleGates();
+    /* 顶部 HUD 的血量 chip 隐藏——血量已改为大门旁悬浮牌显示
+       （仅游戏中隐藏，不破坏选关场景对整个 hud-top 的 display 控制） */
+    const _livesChip = document.querySelector('.chip-lives');
+    if (_livesChip) _livesChip.classList.add('hidden-by-gate');
     this.towers = [];
     this.enemies = [];
     this.projectiles = [];
@@ -478,27 +485,8 @@ class GameScene extends Phaser.Scene {
       g.fillCircle(st.x, st.y, 26); g.strokeCircle(st.x, st.y, 26);
       g.fillStyle(0xffffff, 0.5); g.fillCircle(st.x - 4, st.y - 5, 7);
     }
-    /* 终点（红色洞穴）：第 5 关 goals JSON 配置多个终点（左右双洞穴，共享
-       生命值），按每条路线末端路径点绘制；1~4 关无 goals 字段，
-       维持原行为——只在最后一条路线末端画一个洞穴。
-       绘制位置经 goalDrawPos 钳入画面内（第 1~4 关逻辑终点在屏幕外
-       y=580，漏怪判定不变，仅视觉标记钳到路出屏边缘），保证所有关卡
-       终点样式统一可见（与第 5 关同一 drawGoalCave 样式） */
-    const goals = this.levelCfg.goals;
-    if (goals && goals.length) {
-      for (const gl of goals) {
-        const rg = this.routeGeoms[gl.route];
-        if (!rg) continue;
-        const wp = rg.waypoints[rg.waypoints.length - 1];
-        const dp = this.goalDrawPos(wp.x, wp.y);
-        this.drawGoalCave(g, dp.x, dp.y);
-      }
-    } else {
-      const lastWp = this.routeGeoms[this.routeGeoms.length - 1].waypoints;
-      const ed = lastWp[lastWp.length - 1];
-      const dp = this.goalDrawPos(ed.x, ed.y);
-      this.drawGoalCave(g, dp.x, dp.y);
-    }
+    /* 终点城堡大门不在道路 Graphics 上画——由 drawCastleGates() 统一构建
+       （门体精灵 + 点击热区 + 门旁血量牌），此处仅保留道路本身。 */
   }
 
   /** 终点洞穴绘制位置：钳进画面内（留洞穴半径余量），逻辑终点坐标不变 */
@@ -510,11 +498,236 @@ class GameScene extends Phaser.Scene {
     };
   }
 
-  /** 终点洞穴视觉（红色洞穴圆标） */
-  drawGoalCave(g, x, y) {
-    g.lineStyle(5, 0x7a2a2a, 1); g.fillStyle(0x5d3328, 1);
-    g.fillCircle(x, y, 26); g.strokeCircle(x, y, 26);
-    g.fillStyle(0x2e1812, 1); g.fillCircle(x, y, 16);
+  /* ============================================================
+   * 终点城堡大门（终点标记 + 怪物进门 + 点击弹公主窗 + 门旁血量牌）
+   *
+   * 每个【不同终点位置】一座门（多路线同一坐标自动去重），位置沿用
+   * goalDrawPos 钳制（逻辑终点坐标与漏怪判定完全不变）。routeGateMap
+   * 记录每条路线 → 门，供怪物进门时选门与触发撞击反馈。
+   * ============================================================ */
+  drawCastleGates() {
+    const cfg = TD_CONFIG.castleGate;
+    this.castleGates = [];
+    this.routeGateMap = {};
+    if (!cfg || !this.textures.exists('castle_gate')) return;
+
+    /* 收集每条路线终点（含 goals 配置关卡），坐标去重 */
+    const goals = this.levelCfg.goals;
+    const entries = [];
+    if (goals && goals.length) {
+      for (const gl of goals) {
+        const rg = this.routeGeoms[gl.route];
+        if (!rg) continue;
+        const wp = rg.waypoints[rg.waypoints.length - 1];
+        entries.push({ route: gl.route, dp: this.goalDrawPos(wp.x, wp.y) });
+      }
+    } else {
+      const ri = this.routeGeoms.length - 1;
+      const lastWp = this.routeGeoms[ri].waypoints;
+      entries.push({ route: ri, dp: this.goalDrawPos(lastWp[lastWp.length - 1].x, lastWp[lastWp.length - 1].y) });
+    }
+    const seen = {};
+    for (const en of entries) {
+      const key = en.dp.x + '_' + en.dp.y;
+      let gate = seen[key];
+      if (!gate) {
+        gate = this._buildCastleGate(en.dp.x, en.dp.y, cfg);
+        seen[key] = gate;
+        this.castleGates.push(gate);
+      }
+      this.routeGateMap[en.route] = gate;
+    }
+  }
+
+  /** 建一座门：门体 + 白闪层 + 点击热区 + 门旁血量牌 */
+  _buildCastleGate(dx, dy, cfg) {
+    const tex = this.textures.get('castle_gate').getSourceImage();
+    const gw = cfg.width;
+    const gh = gw * tex.height / tex.width;
+    const bottomY = dy + (cfg.bottomDy != null ? cfg.bottomDy : 14);
+
+    const holder = this.add.container(dx, 0).setDepth((cfg.depth != null) ? cfg.depth : 10);
+
+    /* 门体（origin 底中，钉在门底）；白闪副本（同尺寸白色 tint，恒透明） */
+    const img = this.add.image(0, bottomY, 'castle_gate').setOrigin(0.5, 1).setDisplaySize(gw, gh);
+    const flash = this.add.image(0, bottomY, 'castle_gate').setOrigin(0.5, 1).setDisplaySize(gw, gh)
+      .setTintFill(0xffffff).setAlpha(0).setBlendMode(Phaser.BlendModes.ADD);
+    holder.add([img, flash]);
+
+    /* 点击热区（略大于门体，方便手指）：点击打开公主窗口 */
+    const pad = cfg.hitPad != null ? cfg.hitPad : 10;
+    const zone = this.add.zone(0, bottomY - gh / 2, gw + pad * 2, gh + pad * 2)
+      .setInteractive({ useHandCursor: true });
+    zone.on('pointerdown', (p) => {
+      /* 仅备战/战斗中可点（结算后大门不再弹窗）；暂停时也不弹 */
+      if (this.paused || this.state === 'won' || this.state === 'lost') return;
+      this.openPrincessPanel();
+      /* 阻止冒泡到场景级 onPointerDown（否则会被当作"点道路"关掉浮框等，
+         虽然无实质影响，这里显式拦掉保持语义干净） */
+      if (p && p.event && p.event.stopPropagation) p.event.stopPropagation();
+    });
+    holder.add(zone);
+
+    /* 门扇中心（怪物缩入点）：纹理上门扇中心约 (0.5, 0.71) 高 */
+    const doorX = dx;
+    const doorY = bottomY - gh * 0.36;
+
+    /* 门旁血量牌：门在左半屏放右侧、右半屏放左侧；纵向避开顶/底 HUD */
+    const badge = this._buildGateLivesBadge(dx, dy, gw, gh);
+
+    return { x: dx, y: dy, gw, gh, bottomY, doorX, doorY, holder, img, flash, badge };
+  }
+
+  /** 门旁血量牌（❤️ 图标 + 数字，紧凑药丸形）；返回数字 Text 便于实时刷新 */
+  _buildGateLivesBadge(dx, dy, gw, gh) {
+    const side = (dx <= this.W / 2) ? 1 : -1;
+    const bx = dx + side * (gw / 2 + 8 + 31);            // 31=药丸半宽
+    const by = Phaser.Math.Clamp(dy - 12, 118, this.H - 20);
+    const c = this.add.container(bx, by).setDepth(11);
+    const PW = 62, PH = 27;
+    const bg = this.add.graphics();
+    bg.fillStyle(0xfffcf2, 0.92);
+    bg.fillRoundedRect(-PW / 2, -PH / 2, PW, PH, 13);
+    bg.lineStyle(2.5, 0xe36b7a, 0.9);
+    bg.strokeRoundedRect(-PW / 2, -PH / 2, PW, PH, 13);
+    const heart = this.add.image(-17, 0, 'heart_icon').setDisplaySize(19, 17);
+    const num = this.add.text(6, 0, String(this.lives), {
+      fontFamily: TD_FONT_STACK, fontSize: '17px', fontStyle: 'bold',
+      color: '#d23b4e', resolution: TD_TEXT_RES
+    }).setOrigin(0.5);
+    c.add([bg, heart, num]);
+    return num;
+  }
+
+  /** 大门被撞：水平短促抖动 + 白闪（tween 可重入，连续撞门不叠加错位） */
+  hitCastleGate(gate) {
+    if (!gate) return;
+    const cfg = TD_CONFIG.castleGate;
+    try { this.tweens.killTweensOf(gate.holder); } catch (e) {}
+    gate.holder.x = gate.x;
+    const dx = cfg.shakeDx || 3, ms = cfg.shakeMs || 42, rep = cfg.shakeRepeat != null ? cfg.shakeRepeat : 2;
+    this.tweens.add({
+      targets: gate.holder, x: gate.x + dx, duration: ms,
+      yoyo: true, repeat: rep, ease: 'Sine.easeInOut',
+      onComplete: () => { gate.holder.x = gate.x; }
+    });
+    const peak = cfg.flashAlpha != null ? cfg.flashAlpha : 0.55;
+    gate.flash.setAlpha(peak);
+    this.tweens.add({ targets: gate.flash, alpha: 0, duration: 240, ease: 'Sine.easeOut' });
+  }
+
+  /** 怪物进门：抬到大门图层之上，缩入门扇中心并淡出，完成后回调结算/销毁 */
+  playEnterGate(e, gate, onDone) {
+    const finish = () => { if (onDone) onDone(); };
+    if (!gate) { if (!e.removed) e.destroyImmediately(); finish(); return; }
+    try { if (e.barBg) e.barBg.setVisible(false); } catch (err) {}
+    e.setDepth(30);
+    const ms = (TD_CONFIG.castleGate && TD_CONFIG.castleGate.enterMs) || 220;
+    this.tweens.add({
+      targets: e, x: gate.doorX, y: gate.doorY,
+      scaleX: 0.2, scaleY: 0.2, alpha: 0, duration: ms, ease: 'Quad.easeIn',
+      onComplete: finish
+    });
+  }
+
+  /* ============================================================
+   * 公主窗口（点击大门弹出）：半透明压暗层 + 卡通悬浮面板，
+   * 游戏继续运行（不暂停），点窗口外或右上 ✕ 关闭。
+   * ============================================================ */
+  openPrincessPanel() {
+    if (this.princessPanel) return;                 // 已打开：不重复构建
+    const cfg = TD_CONFIG.princess || {};
+    const PW = cfg.panelW || 292, PH = cfg.panelH || 336;
+    const layer = this.add.container(0, 0).setDepth(660);
+
+    /* 半透明压暗层：点击窗口外关闭 */
+    const backdrop = this.add.rectangle(0, 0, this.W, this.H, 0x2b1b30,
+      cfg.backdropAlpha != null ? cfg.backdropAlpha : 0.42)
+      .setOrigin(0, 0).setInteractive({ useHandCursor: true });
+    backdrop.on('pointerdown', () => this.closePrincessPanel());
+    layer.add(backdrop);
+
+    /* 悬浮面板（奶油底 + 深棕描边，与选塔/升级面板同一套风格） */
+    const panel = this.add.container(this.W / 2, this.H / 2);
+
+    /* 面板自身吞掉点击，不透到压暗层/地图（最先加入，关闭按钮在其后可优先命中） */
+    const pz = this.add.zone(0, 0, PW, PH).setInteractive();
+    panel.add(pz);
+    const pg = this.add.graphics();
+    pg.fillStyle(0xfffcf2, 0.97);
+    pg.fillRoundedRect(-PW / 2, -PH / 2, PW, PH, 18);
+    pg.lineStyle(3, 0x4a3313, 0.85);
+    pg.strokeRoundedRect(-PW / 2, -PH / 2, PW, PH, 18);
+    /* 顶部粉色标题条 */
+    pg.fillStyle(0xffd3e2, 0.95);
+    pg.fillRoundedRect(-PW / 2, -PH / 2, PW, 44, { tl: 18, tr: 18, bl: 0, br: 0 });
+    pg.fillRect(-PW / 2, -PH / 2 + 22, PW, 22);
+    panel.add(pg);
+
+    const title = this.add.text(0, -PH / 2 + 22, '🏰 公主殿下', {
+      fontFamily: TD_FONT_STACK, fontSize: '18px', fontStyle: 'bold',
+      color: '#8a3a5c', resolution: TD_TEXT_RES
+    }).setOrigin(0.5);
+    panel.add(title);
+
+    /* 关闭按钮（右上红圆 ✕，热区放大） */
+    const cbg = this.add.graphics();
+    cbg.fillStyle(0xff7d8d, 1); cbg.fillCircle(PW / 2 - 16, -PH / 2 + 16, 12);
+    cbg.lineStyle(2, 0xc04055, 0.9); cbg.strokeCircle(PW / 2 - 16, -PH / 2 + 16, 12);
+    const ctxt = this.add.text(PW / 2 - 16, -PH / 2 + 16, '✕', {
+      fontFamily: TD_FONT_STACK, fontSize: '14px', fontStyle: 'bold',
+      color: '#ffffff', resolution: TD_TEXT_RES
+    }).setOrigin(0.5);
+    const czone = this.add.zone(PW / 2 - 16, -PH / 2 + 16, 34, 34)
+      .setInteractive({ useHandCursor: true });
+    czone.on('pointerdown', () => this.closePrincessPanel());
+    panel.add([cbg, ctxt, czone]);
+
+    /* 公主图片：完整居中（浅粉底框衬边）；无贴图时用文字占位，绝不报错 */
+    const imgSize = cfg.imgSize || 240;
+    const imgY = -PH / 2 + 64 + imgSize / 2;
+    const frame = this.add.graphics();
+    frame.fillStyle(0xffe9f1, 1);
+    frame.fillRoundedRect(-imgSize / 2 - 7, imgY - imgSize / 2 - 7, imgSize + 14, imgSize + 14, 12);
+    frame.lineStyle(2.5, 0xf0a7c0, 0.95);
+    frame.strokeRoundedRect(-imgSize / 2 - 7, imgY - imgSize / 2 - 7, imgSize + 14, imgSize + 14, 12);
+    panel.add(frame);
+    if (this.textures.exists('princess')) {
+      const pimg = this.add.image(0, imgY, 'princess').setDisplaySize(imgSize, imgSize);
+      /* 圆角遮罩：独立 Graphics 不进渲染列表，仅作几何蒙板，世界坐标绘制；
+         面板居中于世界中心且不缩放，pimg 世界位置 = (W/2, H/2+imgY) 恰对齐 */
+      const mask = this.make.graphics({ x: 0, y: 0, add: false });
+      mask.fillStyle(0xffffff, 1);
+      mask.fillRoundedRect(this.W / 2 - imgSize / 2, this.H / 2 + imgY - imgSize / 2, imgSize, imgSize, 8);
+      pimg.setMask(mask.createGeometryMask());
+      panel.add(pimg);
+    } else {
+      panel.add(this.add.text(0, imgY, '（公主图片未就绪）', {
+        fontFamily: TD_FONT_STACK, fontSize: '14px', color: '#a07088', resolution: TD_TEXT_RES
+      }).setOrigin(0.5));
+    }
+
+    const hint = this.add.text(0, PH / 2 - 18, '点击窗口外关闭', {
+      fontFamily: TD_FONT_STACK, fontSize: '12px', color: '#9a8266', resolution: TD_TEXT_RES
+    }).setOrigin(0.5);
+    panel.add(hint);
+
+    /* 弹出小动画：纯淡入（无缩放，保证圆角蒙板始终对齐） */
+    layer.setAlpha(0);
+    this.tweens.add({ targets: layer, alpha: 1, duration: 160, ease: 'Sine.easeOut' });
+
+    layer.add(panel);
+    this.princessPanel = layer;
+  }
+
+  closePrincessPanel() {
+    if (!this.princessPanel) return;
+    const layer = this.princessPanel;
+    this.princessPanel = null;
+    this.tweens.add({
+      targets: layer, alpha: 0, duration: 120, ease: 'Sine.easeIn',
+      onComplete: () => { try { layer.destroy(); } catch (e) {} }
+    });
   }
 
   /* ============================================================
@@ -1289,15 +1502,30 @@ class GameScene extends Phaser.Scene {
   }
 
   onEnemyLeak(e) {
+    /* 防重入：进门动画期间若再次触发（理论上 update 已被 dead 拦截），直接忽略 */
+    if (e._gateEntered) return;
+    e._gateEntered = true;
     this.lives = Math.max(0, this.lives - e.leakDamage);
     this.floatText(Math.max(40, e.x), Math.min(this.H - 60, e.y), '-' + e.leakDamage + ' ❤️', 0xff8a8a);
-    /* 三阶段 BOSS 分身漏到终点同样计入合体计数（第 5 关）：
-       分身先正常扣生命，再走分身消灭流程（含全灭合体判定）；
-       合体后若出生点已在终点（全灭发生在洞口），强化 BOSS 下一帧
-       自然漏掉，不再触发合体逻辑（bossPhase=3 无分支） */
-    if (e.bossPhase === 2) { this.onMiniBossKilled(e); return; }
-    e.destroyImmediately();
-    if (this.lives <= 0) this.endGame(false);
+    /* 同步门旁血量牌（多终点共享同一生命数） */
+    if (this.castleGates) for (const g2 of this.castleGates) {
+      if (g2.badge) g2.badge.setText(String(this.lives));
+    }
+
+    /* 选门：敌人当前路线对应的大门（传送可能切换 routeId），缺省第一扇 */
+    const gate = (this.routeGateMap && this.routeGateMap[e.routeId]) ||
+                 (this.castleGates && this.castleGates[0]) || null;
+    /* 大门撞击反馈：抖动 + 白闪 */
+    this.hitCastleGate(gate);
+
+    /* 怪物进门：缩入门扇中心淡出，然后再走后续结算
+       （三阶段 BOSS 分身沿用原合体逻辑，不改动其计数/聚合时机语义，
+       仅把销毁点放在进门动画结束后） */
+    this.playEnterGate(e, gate, () => {
+      if (e.bossPhase === 2) { this.onMiniBossKilled(e); }
+      else if (!e.removed) { e.destroyImmediately(); }
+      if (this.lives <= 0) this.endGame(false);
+    });
   }
 
   endGame(win) {
@@ -1305,6 +1533,7 @@ class GameScene extends Phaser.Scene {
     this.ghost.clear();
     this.hidePanel();
     this.closeTowerPicker(true);
+    this.closePrincessPanel();
     if (this.tutorialOverlay) this.tutorialOverlay.setVisible(false);
 
     /* 胜利 → 保存关卡进度 */
