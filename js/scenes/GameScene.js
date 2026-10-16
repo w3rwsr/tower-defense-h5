@@ -2015,8 +2015,10 @@ class GameScene extends Phaser.Scene {
     const colors = cfg.iconColors || {};
     const glyphs = cfg.iconGlyph || {};
 
-    /* 只列本关已解锁的塔（塔D/E/F 按通关进度），固定 A→F 顺序 */
-    const types = ['towerA', 'towerB', 'towerC', 'towerD', 'towerE', 'towerF']
+    /* 塔位列表直接取自 TD_CONFIG.towers（新增塔无需再改这里），按 A→F 配置顺序，
+       逐个过滤本关可用性（塔D/E/F 按解锁规则；第 7 关 config.allTowersAvailable
+       开放全部塔，不再受历史通关记录限制）——保证「本关已解锁的塔一座不漏」 */
+    const types = Object.keys(TD_CONFIG.towers)
       .filter((k) => TD_CONFIG.towers[k] && TDStorage.isTowerUnlocked(k, this.levelId));
     if (!types.length) return;
 
@@ -3579,9 +3581,13 @@ class GameScene extends Phaser.Scene {
   syncHud() {
     /* 当前关卡编号实时反映选关界面的选择（levelId 由场景启动参数传入，
        重玩沿用同一关卡；通关进度与解锁状态在返回选关时由 TDStorage
-       统一读取，选关↔游戏两处始终一致）。 */
+       统一读取，选关↔游戏两处始终一致）。
+       手机端顶部信息栏为「图标 + 数字」紧凑格式（去掉文字标签，见
+       style.css 的 html.is-mobile 规则），电脑端保持原「第 N 关」文案。 */
     const hudLevel = document.getElementById('hud-level');
-    if (hudLevel) hudLevel.textContent = '第 ' + this.levelId + ' 关';
+    if (hudLevel) {
+      hudLevel.textContent = window.__isMobile ? String(this.levelId) : '第 ' + this.levelId + ' 关';
+    }
     document.getElementById('hud-gold').textContent = this.gold;
     document.getElementById('hud-lives').textContent = this.lives;
     document.getElementById('hud-wave').textContent =

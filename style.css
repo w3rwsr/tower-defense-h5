@@ -470,6 +470,51 @@ html.is-mobile.is-portrait #app {
   html.is-landscape .btn-ctrl { min-height: 40px; padding: 6px 10px; }
 }
 
+/* ======================================================================
+   手机端顶部信息栏：紧凑单行（电脑端完全不受影响——全部规则以
+   html.is-mobile 为前提，桌面无 is-mobile class 时一条都不命中）
+   · 关卡/金币/生命/波次 合并成一行「图标 + 数字」，去掉文字标签
+     （关卡号的「第 N 关」文案由 GameScene.syncHud 按 __isMobile 切换）；
+   · 胶囊背景半透明、贴顶居中，宽度随内容收缩，不占满整行、不挡画面；
+   · 图标随字号缩小、间距收紧，整行高度大幅降低（≈26px，原 ≈50px）；
+   · 倍速/暂停按钮贴右上角，缩小但仍保留 ≥36px 触控热区，触摸准确。
+   ====================================================================== */
+html.is-mobile #hud-top {
+  justify-content: center;
+  padding: calc(3px + env(safe-area-inset-top)) 6px 0;
+}
+html.is-mobile .stats {
+  gap: 3px;
+  flex-wrap: nowrap;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 252, 240, .58);   /* 半透明：不遮挡游戏画面 */
+}
+html.is-mobile .chip {
+  gap: 3px;
+  padding: 1px 4px;
+  font-size: 12px;
+  background: transparent;
+  box-shadow: none;
+}
+html.is-mobile .chip b { font-size: 12px; }
+html.is-mobile .chip-level,
+html.is-mobile .chip-level b { background: transparent; }
+html.is-mobile .chip-level b { color: #0d2c4d; }
+html.is-mobile .controls {
+  position: absolute;
+  top: calc(3px + env(safe-area-inset-top));
+  right: 6px;
+  gap: 4px;
+}
+html.is-mobile .btn-ctrl {
+  min-width: 42px;
+  min-height: 36px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+
 /* ---------------- 方向检测诊断面板（URL 追加 #dbg 时显示） ----------------
    面板位于 #app 外部，不跟随视觉横屏旋转：竖持时横向显示在屏幕顶部，
    内容完整不截断；横放手机时头部微侧即可读数（仅调试用途）。 */

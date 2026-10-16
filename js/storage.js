@@ -99,12 +99,22 @@
       return cfg && cfg.unlock ? (cfg.unlock.unlockLevel || 0) : 0;
     },
 
+    /** 某关是否声明「全部塔可选」：读关卡配置 levelCfg.allTowersAvailable。
+     *  目前仅第 7 关「双途重围」开启（BOSS 元素/血量护盾需多元素协同），
+     *  该关不再要求「历史通关记录」，只要关卡编号 ≥ 塔解锁关卡即可选用。 */
+    levelAllowsAllTowers(levelId) {
+      const lv = (window.TD_CONFIG && TD_CONFIG.levels) ? TD_CONFIG.levels[levelId] : null;
+      return !!(lv && lv.allTowersAvailable === true);
+    },
+
     /**
      * 某塔在指定关卡中是否可选用。
      * @param typeKey 塔类型（towerA/B/C/D）
      * @param levelId 当前进行中的关卡编号
      * 规则：无解锁要求 → 恒可用；
      *       当前关卡 < 解锁关卡（如第 1 关用塔D）→ 锁定；
+     *       关卡声明 allTowersAvailable（第 7 关）→ 只看关卡编号够不够，
+     *       不要求永久解锁记录（关卡已自由进入，避免「跳过前面关卡就无塔可用」）；
      *       否则要求已永久解锁（unlockedTowers 记录），
      *       旧档无记录时回退按「解锁关卡的前一关已通关」推导。
      */
@@ -112,6 +122,7 @@
       if (this.__debugAllUnlocked) return true; // 调试态：全部塔放行（含第1关用塔D）
       const need = this.towerUnlockLevel(typeKey);
       if (!need) return true;
+      if (this.levelAllowsAllTowers(levelId)) return levelId == null || levelId >= need;
       if (levelId != null && levelId < need) return false;
       const data = this.load();
       if (data.unlockedTowers.indexOf(typeKey) !== -1) return true;
