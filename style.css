@@ -476,30 +476,27 @@ html.is-mobile.is-portrait #app {
    手机端 HUD 重排（电脑端完全不受影响——全部规则以 html.is-mobile
    为前提，桌面没有 is-mobile class 时一条都不命中）：
 
-   【布局结论】视觉横屏旋转 90° 下，#app 左边缘 = 物理屏幕顶部边缘
-   = 横屏视野左边缘。所有关卡道路的进/出口都贴世界顶部(y≈80~135)
-   与左右两缘，唯独 #app 左边缘在 FIT 缩放后对应世界 x<0 的黑边或
-   极左草地（世界 y>150 起各关左缘均无路段），是唯一保证不压路的
-   区域。因此：
-   · 关卡/金币/生命/波次 信息栏改为【纵向胶囊列】，fixed 相对 #app
-     定位，贴在 app 左边缘上段（top:30% ≈ 世界 y 150~300，避开左缘
-     进路口 y 55~135）；「图标 + 数字」紧凑排列，半透明背景，整条
-     点击穿透（pointer-events:none），不影响火力点操作；
-   · 暂停 + 倍速合并为一个 ⚙ 图标按钮，跟在信息栏正下方（同一左
-     边缘，与信息栏相邻），点击向【右】展开半透明悬浮面板
-     （暂停/继续 + 1x/2x，热区 ≥40px）——向右展开避免盖住左下角
-     「开始波次」按钮；面板为 2 行紧凑布局，临时出现、尽量少挡路。
+   【布局规则】信息栏与设置按钮分置顶边两端，互不重叠、均避开道路：
+   · 信息栏（关卡/金币/生命/波次）：一行横向排列，贴 app 顶边、
+     左起 22%（顶部左侧偏中）——避开左上角各关进路口（路心 y≈80~135、
+     路面 y≥55），胶囊行高换算世界坐标仅占 y≈0~35，下方到路面(y≥55)
+     留有草地间隔，任何关卡都不压路；「图标 + 数字」紧凑胶囊、半透明
+     背景、整条点击穿透（pointer-events:none），不影响火力点操作；
+   · 设置按钮（暂停 + 倍速合并为一个 ⚙ 小图标）：单独在【右上角】，
+     与信息栏分开展示；点击向下展开半透明悬浮面板（暂停/继续 + 1x/2x，
+     热区 ≥40px），面板右对齐收入屏幕内，临时出现、半透明可透见路面；
+     收起时只占一个小齿轮位。
    ====================================================================== */
 html.is-mobile #hud-top {
-  justify-content: flex-start;   /* 信息栏/控制区均已 fixed 脱离流，本条仅作兜底 */
+  justify-content: flex-start;   /* 信息栏/控制区均脱离流定位，本条仅作兜底 */
   padding: calc(3px + env(safe-area-inset-top)) 6px 0;
 }
 html.is-mobile .stats {
-  position: fixed;               /* 相对旋转容器 #app 定位（#app 是 fixed 后代的包含块） */
-  left: calc(4px + env(safe-area-inset-left));
-  top: 30%;                      /* ≈ 世界 y 150 起：避开各关左缘进路口(y 55~135) */
-  flex-direction: column;        /* 纵向胶囊列：沿 app 左边缘排列 = 物理屏幕顶部边缘 */
-  align-items: flex-start;
+  position: absolute;            /* 相对 #hud-top（整宽、贴 app 顶边） */
+  left: 22%;                     /* 顶部左侧偏中：避开左上角各关进路口 */
+  top: calc(3px + env(safe-area-inset-top));
+  flex-direction: row;           /* 一行横向排列：关卡/金币/生命/波次 */
+  align-items: center;
   gap: 3px;
   flex-wrap: nowrap;
   padding: 2px 7px;
@@ -519,12 +516,11 @@ html.is-mobile .chip-level,
 html.is-mobile .chip-level b { background: transparent; }
 html.is-mobile .chip-level b { color: #0d2c4d; }
 
-/* ---- 左边缘：暂停 + 倍速合并菜单（信息栏正下方，与信息栏相邻） ---- */
+/* ---- 右上角：暂停 + 倍速合并菜单（与信息栏分置顶边两端，不重叠） ---- */
 html.is-mobile .controls {
-  position: fixed;               /* 相对旋转容器 #app 定位，同 .stats */
-  left: calc(4px + env(safe-area-inset-left));
-  top: calc(30% + 100px);        /* 信息栏 4 枚胶囊(≈93px)下方，留 7px 间隙 */
-  right: auto;
+  position: absolute;            /* 相对 #hud-top（贴 app 顶边） */
+  top: calc(3px + env(safe-area-inset-top));
+  right: 6px;
   gap: 4px;
 }
 /* 手机端隐藏原并排按钮，改由合并菜单接管（DOM 保留：syncHud 仍会更新其状态） */
@@ -546,14 +542,14 @@ html.is-mobile #btn-mobile-menu {
   border-radius: 999px;
   background: rgba(255, 224, 130, .92);
 }
-/* 展开面板：默认隐藏，.open 时以 2 行紧凑悬浮卡片出现在图标【右侧】
-   （⚙ 在 app 左边缘，向右展开进入草地上空；避免向下展开盖住左下角
-   「开始波次」按钮。#mobile-menu 桌面端 display:none，本规则桌面无效） */
+/* 展开面板：默认隐藏，.open 时以 2 行紧凑悬浮卡片出现在图标下方，
+   右对齐收入屏幕内（⚙ 在右上角，向左下展开；半透明可透见路面。
+   #mobile-menu 桌面端 display:none，本规则桌面无效） */
 #mobile-menu-panel {
   display: none;
   position: absolute;
-  top: 0;
-  left: calc(100% + 5px);
+  top: calc(100% + 5px);
+  right: 0;
   width: 112px;
   flex-direction: column;
   gap: 6px;
