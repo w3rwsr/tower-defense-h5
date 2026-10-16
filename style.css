@@ -522,7 +522,7 @@ html.is-mobile .stats {
                世界 x ≈ left% 经 FIT 等比缩放居中后换算，跨机型基本一致。 */
 html.is-mobile.is-portrait .stats {
   position: fixed;                                   /* #app 带 transform，fixed 以其为包含块 */
-  left: 25%;                                         /* 游戏画面左上角：世界 x≈190 起 */
+  left: 125px;                                       /* 贴游戏画面最左边缘（让开浏览器标题栏） */
   top: calc(4px + env(safe-area-inset-right));       /* 贴游戏画面上边缘（世界 y≈5） */
   bottom: auto;
   flex-direction: row;                               /* 一字形横排：关卡→金币→生命→波次 */
@@ -550,12 +550,12 @@ html.is-mobile .controls {
   top: calc(2px + env(safe-area-inset-top));
   gap: 4px;
 }
-/* 视觉横屏：齿轮按【手机横屏方向】贴游戏画面最右边缘、画面上部空白草地
-   （世界 x≈884~931 / y≈5~52；config 的 uiSafeZones 顶右禁区 674,0,286,104
+/* 视觉横屏：齿轮贴游戏画面最右边缘、画面上部空白草地
+   （世界 x≈912~959 / y≈5~52；config 的 uiSafeZones 顶右禁区 674,0,286,104
    覆盖此处 → 无道路、无火力点、无障碍物） */
 html.is-mobile.is-portrait .controls {
   position: fixed;
-  left: 85%;                                      /* 游戏画面最右边缘：世界 x≈890 */
+  left: 87%;                                      /* 贴游戏画面最右边缘（世界 x≈912~959） */
   top: calc(4px + env(safe-area-inset-right));    /* 贴游戏画面上边缘（世界 y≈5） */
   right: auto;
 }
@@ -578,14 +578,15 @@ html.is-mobile #btn-mobile-menu {
   border-radius: 999px;
   background: rgba(255, 224, 130, .92);
 }
-/* 展开面板：默认隐藏，.open 时以紧凑悬浮卡片从齿轮向屏幕内侧（左）展开，
-   半透明可透见路面；收起时只剩一个小齿轮。
+/* 展开面板：默认隐藏，.open 时以紧凑悬浮卡片展开。
+   右对齐（right:0）→ 面板在齿轮左边，绝不超出屏幕右边缘；
+   纵向往下展开（app 纵轴 = 游戏画面/屏幕横向视角的竖直方向）。
    #mobile-menu 桌面端 display:none，本规则桌面无效 */
 #mobile-menu-panel {
   display: none;
   position: absolute;
   top: calc(100% + 5px);
-  left: 0;                        /* 视觉横屏：app 下移 = 屏幕上向左展开，且整体落在标题栏下方 */
+  right: 0;                       /* 面板左扩、贴右边缘内侧，不跑出屏幕 */
   width: 100px;
   flex-direction: column;
   gap: 5px;
