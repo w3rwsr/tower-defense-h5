@@ -476,58 +476,79 @@ html.is-mobile.is-portrait #app {
    手机端 HUD 重排（电脑端完全不受影响——全部规则以 html.is-mobile
    为前提，桌面没有 is-mobile class 时一条都不命中）：
 
-   【布局规则】信息栏与设置按钮都贴 app 顶边（= 视觉横屏后的屏幕右边缘），
-   上下分开、互不重叠、均避开道路：
-   · 信息栏（关卡/金币/生命/波次）：app 空间单列 = 屏幕上一行横排，
-     屏幕左→右顺序为 关卡、金币、生命、波次（column-reverse 保证阅读
-     顺序）；只显示「图标 + 数字」，紧凑、半透明背景、整条点击穿透
-     （pointer-events:none），不影响火力点操作；位于屏幕右侧偏上
-     （app 顶边 left:10%）。
-     ——已知妥协（用户确认接受）：app 经 rotate(90deg) 视觉横屏后，
-     单排 4 胶囊在 app 空间是 ~69px 高的列，换算世界坐标纵深 0~95px，
-     超出全关卡顶缘无路安全带（y≤50），在第 2/4/6/7 关会轻微压到
-     顶缘道路边缘；以半透明背景透见路面，不遮挡判定与操作。
-   · 设置按钮（暂停 + 倍速合并为一个 ⚙ 小图标）：单独在【屏幕右下角】
-     草地（app 顶边右端，世界坐标 x≥905、y≤44 的无路角），与信息栏
-     分开展示；点击向屏幕左侧展开半透明悬浮面板（暂停/继续 + 1x/2x，
-     热区 ≥40px），面板半透明可透见路面；收起时只占一个小齿轮位。
+   【屏幕坐标 ↔ app 空间坐标】竖屏手机经 rotate(90deg) 视觉横屏后，
+   app 空间被旋转 90°，映射关系为：
+       app 左边 → 屏幕上方    app 右边 → 屏幕下方
+       app 上边 → 屏幕右方    app 下边 → 屏幕左方
+   （推导：app 点 (x,y) → 屏幕 (屏宽 − y, x)，屏宽=视口宽）
+   因此「屏幕左上角」= app 左下角，「屏幕右上角」= app 左上角。
+   未旋转（真·横屏手机）时直接用普通坐标，两条路径分别设置。
+
+   【布局】信息栏在【屏幕左上角】、齿轮在【屏幕右上角】，分开不重叠：
+   · 信息栏：一行横排「图标 + 数字」（旋转态下用 app 竖列实现），
+     超紧凑、半透明、整条点击穿透（火力点照常可点）；位置取世界坐标
+     y∈[327,433] 的无路空白带（x 20~80 区间全 7 关无道路经过，
+     第 3 关 y=460 进路 / 第 5 关 y=300 路 / 第 7 关 x=70 竖路均在带外）。
+   · 齿轮：全关卡无路角（世界 x 20~80 / y 0~46，config 的 uiSafeZones
+     顶左禁区 0,0,500,104 也覆盖此处，无火力点无障碍物）；
+     点击展开半透明悬浮面板（暂停 / 继续 / 1x / 2x）。
    ====================================================================== */
 html.is-mobile #hud-top {
   justify-content: flex-start;   /* 信息栏/控制区均脱离流定位，本条仅作兜底 */
   padding: calc(3px + env(safe-area-inset-top)) 6px 0;
 }
+/* —— 未旋转（真横屏手机）：信息栏贴屏幕左上角，一行横排 —— */
 html.is-mobile .stats {
-  position: absolute;            /* 相对 #hud-top（整宽、贴 app 顶边） */
-  left: 10%;                     /* 屏幕右侧偏上：避开左上角各关进路口 */
+  position: absolute;
+  left: calc(8px + env(safe-area-inset-left));
   top: calc(2px + env(safe-area-inset-top));
   display: flex;
-  flex-direction: column-reverse; /* app 列 = 屏幕横排；reverse 使屏幕左→右 = DOM 顺序 */
+  flex-direction: row;           /* 未旋转：直接横排 */
+  flex-wrap: nowrap;             /* 强制单排，不换行 */
   align-items: center;
-  gap: 2px;
-  padding: 2px 5px;
-  border-radius: 999px;
-  background: rgba(255, 252, 240, .55);   /* 半透明：不遮挡游戏画面 */
+  gap: 0;
+  padding: 1px 3px;
+  border-radius: 8px;
+  background: rgba(255, 252, 240, .5);     /* 半透明：不遮挡游戏画面 */
   pointer-events: none;                    /* 整条信息栏点击穿透，火力点可正常点 */
 }
+/* —— 视觉横屏（rotate 90°，坐标须按上面的映射换算）——
+   屏幕左上角 = app 左下角：left 贴 app 左边（屏幕上方），bottom 贴 app 下边（屏幕左方） */
+html.is-mobile.is-portrait .stats {
+  position: fixed;                                /* #app 带 transform，fixed 以其为包含块 */
+  left: calc(126px + env(safe-area-inset-top));   /* 距屏幕上方：让开浏览器标题栏/刘海 */
+  top: auto;
+  bottom: calc(20% + env(safe-area-inset-left));  /* 20% → 世界 y≈432 起，落在无路空白带 */
+  flex-direction: column-reverse;                 /* app 竖列 = 屏幕上一行横排 */
+}
 html.is-mobile .chip {
-  gap: 2px;
-  padding: 1px 4px;
-  font-size: 11px;
-  line-height: 1.15;             /* 压低行高：两行总高 ≤37px，保证世界纵深 ≤48 不压路 */
+  gap: 0;
+  padding: 1px 2px;
+  font-size: 9px;                /* 图标与数字缩小、间距收紧，整体尽量小 */
+  line-height: 1.1;
+  white-space: nowrap;
   background: transparent;
   box-shadow: none;
 }
-html.is-mobile .chip b { font-size: 11px; }
+html.is-mobile .chip b { font-size: 9px; }
 html.is-mobile .chip-level,
 html.is-mobile .chip-level b { background: transparent; }
 html.is-mobile .chip-level b { color: #0d2c4d; }
 
-/* ---- 屏幕右下角：暂停 + 倍速合并菜单（与信息栏上下分开，不重叠） ---- */
+/* ---- 屏幕右上角：暂停 + 倍速合并菜单（与信息栏分开，不重叠） ---- */
 html.is-mobile .controls {
-  position: absolute;            /* 相对 #hud-top（贴 app 顶边 = 屏幕右缘） */
+  position: absolute;
+  right: calc(8px + env(safe-area-inset-right));
+  left: auto;
   top: calc(2px + env(safe-area-inset-top));
-  right: 8px;                    /* 右下角无路草地角：世界 x≥905/y≤44，全关不压路 */
   gap: 4px;
+}
+/* 视觉横屏：屏幕右上角 = app 左上角（left 贴 app 左边=屏幕上方，top 贴 app 上边=屏幕右方） */
+html.is-mobile.is-portrait .controls {
+  position: fixed;
+  left: calc(116px + env(safe-area-inset-top));
+  top: calc(6px + env(safe-area-inset-right));
+  right: auto;
 }
 /* 手机端隐藏原并排按钮，改由合并菜单接管（DOM 保留：syncHud 仍会更新其状态） */
 html.is-mobile #btn-speed,
@@ -539,28 +560,28 @@ html.is-mobile #mobile-menu {
   pointer-events: auto;
 }
 html.is-mobile #btn-mobile-menu {
-  min-width: 38px;
-  width: 38px;
-  min-height: 36px;
-  padding: 4px 0;
-  font-size: 16px;
+  min-width: 34px;
+  width: 34px;
+  min-height: 32px;              /* 只显示小齿轮，尽量少占空间 */
+  padding: 2px 0;
+  font-size: 15px;
   line-height: 1;
   border-radius: 999px;
   background: rgba(255, 224, 130, .92);
 }
-/* 展开面板：默认隐藏，.open 时以 2 行紧凑悬浮卡片出现在图标下方，
-   右对齐收入屏幕内（⚙ 在右上角，向左下展开；半透明可透见路面。
-   #mobile-menu 桌面端 display:none，本规则桌面无效） */
+/* 展开面板：默认隐藏，.open 时以紧凑悬浮卡片从齿轮向屏幕内侧（左）展开，
+   半透明可透见路面；收起时只剩一个小齿轮。
+   #mobile-menu 桌面端 display:none，本规则桌面无效 */
 #mobile-menu-panel {
   display: none;
   position: absolute;
   top: calc(100% + 5px);
-  right: 0;
-  width: 112px;
+  left: 0;                        /* 视觉横屏：app 下移 = 屏幕上向左展开，且整体落在标题栏下方 */
+  width: 100px;
   flex-direction: column;
-  gap: 6px;
-  padding: 7px;
-  border-radius: 14px;
+  gap: 5px;
+  padding: 6px;
+  border-radius: 12px;
   background: rgba(28, 40, 22, .72);     /* 半透明悬浮：仍可透见路面 */
   backdrop-filter: blur(2px);
   box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
@@ -568,10 +589,10 @@ html.is-mobile #btn-mobile-menu {
 }
 #mobile-menu.open #mobile-menu-panel { display: flex; }
 #mobile-menu-panel .m-item {
-  min-height: 40px;                      /* 手机触控热区 ≥40px */
+  min-height: 36px;                      /* 手机触控热区：36px 高度 + 宽度足 */
   border: none;
-  border-radius: 10px;
-  font-size: 13px;
+  border-radius: 9px;
+  font-size: 12px;
   font-weight: 800;
   color: #4a3313;
   background: rgba(255, 248, 231, .95);
