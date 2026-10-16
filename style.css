@@ -193,6 +193,8 @@ html, body {
 }
 .stats { display: flex; gap: 8px; flex-wrap: wrap; }
 .controls { display: flex; gap: 8px; pointer-events: auto; }
+/* 移动端「暂停 + 倍速」合并菜单：电脑端不显示（电脑仍用并排两个按钮） */
+#mobile-menu { display: none; }
 
 .chip {
   display: inline-flex;
@@ -471,16 +473,19 @@ html.is-mobile.is-portrait #app {
 }
 
 /* ======================================================================
-   手机端顶部信息栏：紧凑单行（电脑端完全不受影响——全部规则以
-   html.is-mobile 为前提，桌面无 is-mobile class 时一条都不命中）
-   · 关卡/金币/生命/波次 合并成一行「图标 + 数字」，去掉文字标签
-     （关卡号的「第 N 关」文案由 GameScene.syncHud 按 __isMobile 切换）；
-   · 胶囊背景半透明、贴顶居中，宽度随内容收缩，不占满整行、不挡画面；
-   · 图标随字号缩小、间距收紧，整行高度大幅降低（≈26px，原 ≈50px）；
-   · 倍速/暂停按钮贴右上角，缩小但仍保留 ≥36px 触控热区，触摸准确。
+   手机端 HUD 重排（电脑端完全不受影响——全部规则以 html.is-mobile
+   为前提，桌面没有 is-mobile class 时一条都不命中）：
+   · 关卡/金币/生命/波次 移到【左上角】，单行「图标 + 数字」胶囊，
+     去掉文字标签（关卡号文案由 GameScene.syncHud 按 __isMobile 切换），
+     半透明背景、高度 ≈24px，不挡顶部道路（第 7 关道路中心线 y=80，
+     胶囊在 FIT 缩放后仅占世界坐标约 0~36px），且 .stats 不接管触摸，
+     点击穿透到画布，不影响左上角火力点；
+   · 暂停 + 倍速在【右上角】合并为一个 ⚙ 图标按钮（收起只占一个
+     图标位）；点击向下展开半透明悬浮面板：暂停/继续 + 1x/2x，
+     按钮触控热区 ≥40px；面板为 2 行紧凑布局，临时出现、尽量少挡路。
    ====================================================================== */
 html.is-mobile #hud-top {
-  justify-content: center;
+  justify-content: flex-start;   /* 信息栏贴左，控制区由 .controls 绝对定位到右上角 */
   padding: calc(3px + env(safe-area-inset-top)) 6px 0;
 }
 html.is-mobile .stats {
@@ -488,7 +493,8 @@ html.is-mobile .stats {
   flex-wrap: nowrap;
   padding: 2px 7px;
   border-radius: 999px;
-  background: rgba(255, 252, 240, .58);   /* 半透明：不遮挡游戏画面 */
+  background: rgba(255, 252, 240, .55);   /* 半透明：不遮挡游戏画面 */
+  pointer-events: none;                    /* 整条信息栏点击穿透，左上角火力点可正常点 */
 }
 html.is-mobile .chip {
   gap: 3px;
@@ -501,18 +507,70 @@ html.is-mobile .chip b { font-size: 12px; }
 html.is-mobile .chip-level,
 html.is-mobile .chip-level b { background: transparent; }
 html.is-mobile .chip-level b { color: #0d2c4d; }
+
+/* ---- 右上角：暂停 + 倍速合并菜单 ---- */
 html.is-mobile .controls {
   position: absolute;
   top: calc(3px + env(safe-area-inset-top));
   right: 6px;
   gap: 4px;
 }
-html.is-mobile .btn-ctrl {
-  min-width: 42px;
+/* 手机端隐藏原并排按钮，改由合并菜单接管（DOM 保留：syncHud 仍会更新其状态） */
+html.is-mobile #btn-speed,
+html.is-mobile #btn-pause { display: none; }
+
+html.is-mobile #mobile-menu {
+  display: block;
+  position: relative;
+  pointer-events: auto;
+}
+html.is-mobile #btn-mobile-menu {
+  min-width: 38px;
+  width: 38px;
   min-height: 36px;
-  padding: 4px 8px;
-  font-size: 12px;
+  padding: 4px 0;
+  font-size: 16px;
+  line-height: 1;
   border-radius: 999px;
+  background: rgba(255, 224, 130, .92);
+}
+/* 展开面板：默认隐藏，.open 时以 2 行紧凑悬浮卡片出现在图标下方 */
+#mobile-menu-panel {
+  display: none;
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  width: 112px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px;
+  border-radius: 14px;
+  background: rgba(28, 40, 22, .72);     /* 半透明悬浮：仍可透见路面 */
+  backdrop-filter: blur(2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
+  z-index: 30;
+}
+#mobile-menu.open #mobile-menu-panel { display: flex; }
+#mobile-menu-panel .m-item {
+  min-height: 40px;                      /* 手机触控热区 ≥40px */
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #4a3313;
+  background: rgba(255, 248, 231, .95);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, .20);
+}
+#mobile-menu-panel .m-item:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0,0,0,.2); }
+#mobile-menu-panel .m-speed-row {
+  display: flex;
+  gap: 6px;
+}
+#mobile-menu-panel .m-speed-row .m-item { flex: 1; }
+/* 当前倍速高亮 */
+#mobile-menu-panel .m-item.active {
+  background: #ff9f68;
+  color: #4a2200;
 }
 
 /* ---------------- 方向检测诊断面板（URL 追加 #dbg 时显示） ----------------

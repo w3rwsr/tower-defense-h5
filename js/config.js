@@ -1567,27 +1567,47 @@ window.TD_CONFIG = {
           "mergeHpRatio": 0.10,       // 聚合血量 = 原大 BOSS 最大血量 ×10%
           "mergeKeepParentStats": true// 聚合 BOSS 沿用父代变体移速/漏血/金币
         },
+        /* 第 7 关「波内追加批次」（仅本关；波次数不变，仍是 5 波）：
+           第 1 波不追加；第 2/3/4/5 波在原出怪基础上分别额外追加 1/2/3/4
+           批小怪。追加批次与原有小怪同配置（类型/速度/金币/护甲一致），
+           血量自动按“当前波次”规则计算（每波 +80% 复合），
+           计入本波清场条件；追加批次均排在 BOSS 组之前，
+           BOSS 仍按原设定波次与出场顺序出现（不受影响）。 */
         "list": [
-          /* 第 1 波：左右各 8 只，共 16 只（无 BOSS） */
+          /* 第 1 波：左右各 8 只，共 16 只（无 BOSS）——保持原样，不追加 */
           [ { "type": "enemyX", "count": 8,  "interval": 0.70, "delay": 0 } ],
-          /* 第 2 波：左右各 10 只共 20 只 + 金色 BOSS 左右各 1（共 2，×20 血） */
+          /* 第 2 波：左右各 10 只共 20 只 + 金色 BOSS 左右各 1（共 2，×20 血）
+             +【追加 1 批】enemyX ×10 */
           [ { "type": "enemyX", "count": 10, "interval": 0.55, "delay": 0 },
+            { "type": "enemyX", "count": 10, "interval": 0.55, "delay": 6 },
             { "type": "enemyBoss", "count": 1, "interval": 0, "delay": 12, "bossHpFactor": 20 } ],
           /* 第 3 波：左右各 12 快兵 + 3 胖子（共 30）+ 蓝色 BOSS 左右各 2
-             （共 4，×50 血，雷元素护盾：免疫雷、计 40 次有效攻击破盾） */
+             （共 4，×50 血，雷元素护盾：免疫雷、计 40 次有效攻击破盾）
+             +【追加 2 批】enemyX ×12 / enemyY ×3 */
           [ { "type": "enemyX", "count": 12, "interval": 0.45, "delay": 0 },
             { "type": "enemyY", "count": 3,  "interval": 1.20, "delay": 6 },
+            { "type": "enemyX", "count": 12, "interval": 0.45, "delay": 7 },
+            { "type": "enemyY", "count": 3,  "interval": 1.20, "delay": 9 },
             { "type": "enemyBoss", "count": 2, "interval": 3, "delay": 14, "bossHpFactor": 50 } ],
           /* 第 4 波：左右各 14 快兵 + 4 胖子（共 36）+ 灰色 BOSS 左右各 2
-             （共 4，×80 血，冰元素护盾：免疫冰伤与冰减速、40 次有效攻击破盾） */
+             （共 4，×80 血，冰元素护盾：免疫冰伤与冰减速、40 次有效攻击破盾）
+             +【追加 3 批】enemyX ×14 / enemyY ×4 / enemyX ×14 */
           [ { "type": "enemyX", "count": 14, "interval": 0.40, "delay": 0 },
             { "type": "enemyY", "count": 4,  "interval": 1.00, "delay": 7 },
+            { "type": "enemyX", "count": 14, "interval": 0.40, "delay": 8 },
+            { "type": "enemyY", "count": 4,  "interval": 1.00, "delay": 9 },
+            { "type": "enemyX", "count": 14, "interval": 0.40, "delay": 10 },
             { "type": "enemyBoss", "count": 2, "interval": 3, "delay": 15, "bossHpFactor": 80 } ],
           /* 第 5 波：左右各 6 胖子 + 16 快兵（共 44）+ BOSS 左右各 3（共 6，
              ×100 血）；每边按 金→蓝→灰 顺序出场，全部 5000 血量护盾 +
-             30% 分裂 3 绿色小 BOSS → 全灭聚合（10% 血） */
+             30% 分裂 3 绿色小 BOSS → 全灭聚合（10% 血）
+             +【追加 4 批】enemyY ×6 / enemyX ×16 / enemyY ×6 / enemyX ×16 */
           [ { "type": "enemyY", "count": 6,  "interval": 0.90, "delay": 0 },
             { "type": "enemyX", "count": 16, "interval": 0.32, "delay": 4 },
+            { "type": "enemyY", "count": 6,  "interval": 0.90, "delay": 7 },
+            { "type": "enemyX", "count": 16, "interval": 0.32, "delay": 9 },
+            { "type": "enemyY", "count": 6,  "interval": 0.90, "delay": 11 },
+            { "type": "enemyX", "count": 16, "interval": 0.32, "delay": 13 },
             { "type": "enemyBoss", "count": 3, "interval": 3, "delay": 16,
               "bossHpFactor": 100,
               "bossVariantPattern": ["gold", "blue", "gray"] } ]

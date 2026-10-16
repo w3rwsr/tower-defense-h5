@@ -2738,6 +2738,41 @@ class GameScene extends Phaser.Scene {
     /* 暂停菜单「返回选关」：退出当前关卡回选关页（进度不保存，goToLevelSelect 统一处理） */
     bindOnce('btn-pause-levels', 'click', () => window.__tdScene && window.__tdScene.goToLevelSelect());
     bindOnce('btn-speed', 'click', () => window.__tdScene && window.__tdScene.toggleSpeed());
+    /* ---- 移动端「暂停 + 倍速」合并菜单（电脑端 #mobile-menu 隐藏，绑定无副作用） ---- */
+    bindOnce('btn-mobile-menu', 'click', (ev) => {
+      ev.stopPropagation();
+      const menu = document.getElementById('mobile-menu');
+      if (menu) menu.classList.toggle('open');
+    });
+    bindOnce('m-menu-pause', 'click', () => {
+      const s = window.__tdScene;
+      if (s) s.togglePause();
+      const menu = document.getElementById('mobile-menu');
+      if (menu) menu.classList.remove('open');
+    });
+    /* 1x/2x：仅在与当前倍速不同时切换（toggleSpeed 在 1↔2 间翻转），随后收起面板 */
+    bindOnce('m-menu-speed1', 'click', () => {
+      const s = window.__tdScene;
+      if (s && s.speedMul !== 1) s.toggleSpeed();
+      const menu = document.getElementById('mobile-menu');
+      if (menu) menu.classList.remove('open');
+    });
+    bindOnce('m-menu-speed2', 'click', () => {
+      const s = window.__tdScene;
+      if (s && s.speedMul !== 2) s.toggleSpeed();
+      const menu = document.getElementById('mobile-menu');
+      if (menu) menu.classList.remove('open');
+    });
+    /* 点击菜单外部任意区域自动收起（文档级只绑一次，场景重开不重复绑定） */
+    if (!document.body.dataset.mobileMenuBound) {
+      document.body.dataset.mobileMenuBound = '1';
+      document.addEventListener('pointerdown', (ev) => {
+        const menu = document.getElementById('mobile-menu');
+        if (menu && menu.classList.contains('open') && !menu.contains(ev.target)) {
+          menu.classList.remove('open');
+        }
+      });
+    }
     bindOnce('btn-wave', 'click', () => {
       const s = window.__tdScene;
       if (s && s.state === 'ready') s.startWave();
@@ -3608,6 +3643,14 @@ class GameScene extends Phaser.Scene {
     const speedBtn = document.getElementById('btn-speed');
     speedBtn.textContent = this.speedMul + 'x';
     speedBtn.classList.toggle('on', this.speedMul === 2);
+
+    // 移动端合并菜单：暂停/继续文案 + 1x/2x 当前档高亮（元素不存在于旧 DOM 时跳过）
+    const mPause = document.getElementById('m-menu-pause');
+    if (mPause) mPause.textContent = this.paused ? '▶ 继续' : '⏸ 暂停';
+    const mSp1 = document.getElementById('m-menu-speed1');
+    const mSp2 = document.getElementById('m-menu-speed2');
+    if (mSp1) mSp1.classList.toggle('active', this.speedMul === 1);
+    if (mSp2) mSp2.classList.toggle('active', this.speedMul === 2);
 
     // 波次控制区
     const info = document.getElementById('wave-info');
