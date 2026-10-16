@@ -513,20 +513,20 @@ html.is-mobile .stats {
   pointer-events: none;                    /* 整条信息栏点击穿透，火力点可正常点 */
 }
 /* —— 视觉横屏（rotate 90°，坐标须按上面的映射换算）——
-   注意：屏幕上的物理方向 ≠ 游戏画面自身方向。竖屏手机里 #app 被 rotate(90deg)，
-   所以「游戏画面的左上角」在屏幕上其实位于右侧偏上；用户是按游戏画面自身视角
-   描述「左上角/右上角」的，这里两个锚点都按【游戏画面坐标系】取：
-   · 信息栏 → 游戏画面左上角空白草地（世界 x≈260~320 / y≈0~64）
-   · 齿轮   → 游戏画面右上角空白草地（世界 x≈850 / y≈5~53）
-   世界 x 对应 app 空间的横轴（CSS left），世界 y 对应 app 空间的纵轴（CSS top/bottom），
-   且 世界 y = (1 − bottom%) × 540、世界 x ≈ left% 经 FIT 缩放居中换算后 ≈ 同值，
-   故下面用百分比表达，跨机型基本一致。 */
+   注意：屏幕物理方向 ≠ 游戏画面（横屏）方向。竖屏手机里 #app 被 rotate(90deg)，
+   所以「游戏画面的左上角/最右边缘」在竖屏截图里正好落在右侧，而把手机横过来
+   读游戏时就是正常的左上角/最右边缘。用户是按【手机横屏方向】描述位置的，
+   排列方向同理：游戏横屏方向的「一字形横排」= app 空间 flex-direction:row，
+   DOM 顺序（关卡→金币→生命→波次）即为游戏画面里从左到右的顺序。
+   世界坐标换算：世界 y = (1 − bottom%) × 540 或 = top px ÷ 缩放；
+               世界 x ≈ left% 经 FIT 等比缩放居中后换算，跨机型基本一致。 */
 html.is-mobile.is-portrait .stats {
-  position: fixed;                                /* #app 带 transform，fixed 以其为包含块 */
-  left: 44.5%;                                    /* 游戏画面左上区：世界 x≈417~455 */
-  top: auto;
-  bottom: calc(87% + env(safe-area-inset-left));  /* 世界 y≈9~70（贴画面顶边的无路草带） */
-  flex-direction: column-reverse;                 /* app 竖列 = 屏幕上四个胶囊左右并排 */
+  position: fixed;                                   /* #app 带 transform，fixed 以其为包含块 */
+  left: 25%;                                         /* 游戏画面左上角：世界 x≈190 起 */
+  top: calc(4px + env(safe-area-inset-right));       /* 贴游戏画面上边缘（世界 y≈5） */
+  bottom: auto;
+  flex-direction: row;                               /* 一字形横排：关卡→金币→生命→波次 */
+  flex-wrap: nowrap;                                 /* 强制单排不换行 */
 }
 html.is-mobile .chip {
   gap: 0;
@@ -550,13 +550,13 @@ html.is-mobile .controls {
   top: calc(2px + env(safe-area-inset-top));
   gap: 4px;
 }
-/* 视觉横屏：齿轮按【游戏画面坐标系】放在画面右上角空白草地
-   （世界 x≈850 / y≈5~53；config 的 uiSafeZones 顶右禁区 674,0,286,104 覆盖此处，
-   无道路、无火力点、无障碍物；屏幕上它落在右下角草地，不压任何道路） */
+/* 视觉横屏：齿轮按【手机横屏方向】贴游戏画面最右边缘、画面上部空白草地
+   （世界 x≈884~931 / y≈5~52；config 的 uiSafeZones 顶右禁区 674,0,286,104
+   覆盖此处 → 无道路、无火力点、无障碍物） */
 html.is-mobile.is-portrait .controls {
   position: fixed;
-  left: 82%;                                      /* 游戏画面右上角：世界 x≈850 */
-  top: calc(4px + env(safe-area-inset-right));    /* 世界 y≈5~53（画面顶部贴边草带） */
+  left: 85%;                                      /* 游戏画面最右边缘：世界 x≈890 */
+  top: calc(4px + env(safe-area-inset-right));    /* 贴游戏画面上边缘（世界 y≈5） */
   right: auto;
 }
 /* 手机端隐藏原并排按钮，改由合并菜单接管（DOM 保留：syncHud 仍会更新其状态） */

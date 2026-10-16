@@ -2750,13 +2750,6 @@ class GameScene extends Phaser.Scene {
       const menu = document.getElementById('mobile-menu');
       if (menu) menu.classList.remove('open');
     });
-    /* 继续：仅在暂停中才恢复（避免未暂停时误触发暂停），随后收起面板 */
-    bindOnce('m-menu-resume', 'click', () => {
-      const s = window.__tdScene;
-      if (s && s.paused) s.setPaused(false);
-      const menu = document.getElementById('mobile-menu');
-      if (menu) menu.classList.remove('open');
-    });
     /* 1x/2x：仅在与当前倍速不同时切换（toggleSpeed 在 1↔2 间翻转），随后收起面板 */
     bindOnce('m-menu-speed1', 'click', () => {
       const s = window.__tdScene;
