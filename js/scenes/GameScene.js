@@ -85,6 +85,11 @@ class GameScene extends Phaser.Scene {
     this.selectedTower = null;
     this.paused = false;
     this.speedMul = 1;
+    /* 集火目标（点击道路上的怪物设置）：射程覆盖它的伤害型塔优先攻击；
+       null=未集火。_focusMarker=跟随怪物的脉冲光圈，_focusTween=呼吸动画。 */
+    this.focusEnemy = null;
+    this._focusMarker = null;
+    this._focusTween = null;
 
     /* 火塔燃烧视频：新一局重置引用计数并暂停全部解码器（塔放置时重新注册） */
     try { FIRE_BURN.enterScene(); } catch (e) {}
@@ -164,7 +169,31 @@ class GameScene extends Phaser.Scene {
     const routeWpLists = this.levelCfg.paths
       ? this.levelCfg.paths
       : [this.levelCfg.path.waypoints];
-    this.routeGeoms = routeWpLists.map((wp) => {
+    /* 终点封闭边距（与 goalDrawPos 一致）：末路径点若落在画面外（如 y=580），
+       沿最后一段回收到画面内，使道路到大门口即终止、不再延伸出地图；
+       敌人走到该点（=大门门扇处）即触发进门，不会走出画面。 */
+    const m = 34;
+    this.routeGeoms = routeWpLists.map((rawWp) => {
+      /* 复制路径点，避免直接改动关卡配置里的原数组 */
+      const wp = rawWp.map((w) => ({ x: w.x, y: w.y }));
+      const n = wp.length;
+      if (n >= 2) {
+        const q = wp[n - 2], p = wp[n - 1];
+        const cx = Phaser.Math.Clamp(p.x, m, this.W - m);
+        const cy = Phaser.Math.Clamp(p.y, m, this.H - m);
+        if (cx !== p.x || cy !== p.y) {
+          const dx = p.x - q.x, dy = p.y - q.y;
+          const len2 = dx * dx + dy * dy;
+          const t = len2 > 0 ? ((cx - q.x) * dx + (cy - q.y) * dy) / len2 : 0;
+          /* 仅当回收点仍落在最后一段线段上（方向不反向、不偏离）时生效，
+             保证多路线共享同一终点时各路线落点完全一致 */
+          if (t > 0 && t < 1 &&
+              Math.abs(q.x + dx * t - cx) < 0.5 &&
+              Math.abs(q.y + dy * t - cy) < 0.5) {
+            p.x = cx; p.y = cy;
+          }
+        }
+      }
       const segments = [];
       let totalLength = 0;
       for (let i = 0; i < wp.length - 1; i++) {
@@ -616,17 +645,54 @@ class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: gate.flash, alpha: 0, duration: 240, ease: 'Sine.easeOut' });
   }
 
-  /** 怪物进门：抬到大门图层之上，缩入门扇中心并淡出，完成后回调结算/销毁 */
+  /** 怪物进门：抬到大门图层之上，被门扇“吸入”——缩小+移向门扇中心+淡出，
+   *  同时播放少量光点吸入粒子与门扇闪光（0.3~0.5s，castleGate.enterMs），
+   *  完成后回调结算/销毁。大门抖动/白闪由 hitCastleGate 另行触发。 */
   playEnterGate(e, gate, onDone) {
     const finish = () => { if (onDone) onDone(); };
     if (!gate) { if (!e.removed) e.destroyImmediately(); finish(); return; }
     try { if (e.barBg) e.barBg.setVisible(false); } catch (err) {}
     e.setDepth(30);
-    const ms = (TD_CONFIG.castleGate && TD_CONFIG.castleGate.enterMs) || 220;
+    const ccfg = TD_CONFIG.castleGate || {};
+    const ms = ccfg.enterMs || 380;
+    /* 进门瞬间：少量金/白/浅蓝光点从怪物四周被吸向门扇中心 + 门扇闪光 */
+    this.spawnGateEnterFx(gate, e.x, e.y);
     this.tweens.add({
       targets: e, x: gate.doorX, y: gate.doorY,
-      scaleX: 0.2, scaleY: 0.2, alpha: 0, duration: ms, ease: 'Quad.easeIn',
+      scaleX: 0.12, scaleY: 0.12, alpha: 0, duration: ms, ease: 'Cubic.easeIn',
       onComplete: finish
+    });
+  }
+
+  /** 进门特效：≤12 个光点（数量 JSON 驱动，手机端零压力）从敌人周围生成，
+   *  各自向门扇中心飘移、缩小、淡出（被门“吸入”）；另放一次短促门扇柔光闪。
+   *  光点 ADD 混合，金/白/浅蓝与大门、地图同色系。 */
+  spawnGateEnterFx(gate, sx, sy) {
+    const ccfg = TD_CONFIG.castleGate || {};
+    const n = ccfg.enterParticles != null ? ccfg.enterParticles : 9;
+    const ms = ccfg.particleMs || 340;
+    const cx = gate ? gate.doorX : sx;
+    const cy = gate ? gate.doorY : sy;
+    const colors = [0xffe9a8, 0xffffff, 0x9fdcff];
+    for (let i = 0; i < n; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const r = 16 + Math.random() * 18;
+      const dot = this.add.circle(
+        sx + Math.cos(ang) * r, sy + Math.sin(ang) * r,
+        2 + Math.random() * 2.5, colors[i % colors.length], 0.95)
+        .setDepth(31).setBlendMode(Phaser.BlendModes.ADD);
+      this.tweens.add({
+        targets: dot, x: cx, y: cy, scale: 0.25, alpha: 0,
+        duration: ms * (0.8 + Math.random() * 0.3), ease: 'Cubic.easeIn',
+        onComplete: () => dot.destroy()
+      });
+    }
+    /* 门扇中心短促柔光闪（扩散+淡出，~0.28s） */
+    const fl = this.add.circle(cx, cy, 8, 0xfff3c4, 0.85)
+      .setDepth(31).setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({
+      targets: fl, scale: 4.2, alpha: 0, duration: 280,
+      ease: 'Quad.easeOut', onComplete: () => fl.destroy()
     });
   }
 
@@ -1000,6 +1066,14 @@ class GameScene extends Phaser.Scene {
 
       for (const e of this.enemies) e.update(dt);
       this.enemies = this.enemies.filter((e) => !e.removed);
+
+      /* 集火目标维护：已死亡/进门/被移除 → 自动取消（塔下帧恢复默认索敌）；
+         仍存活 → 光圈每帧钉在怪物身上跟随移动 */
+      if (this.focusEnemy) {
+        const fe = this.focusEnemy;
+        if (fe.dead || fe.removed) this.clearFocusEnemy();
+        else if (this._focusMarker) this._focusMarker.setPosition(fe.x, fe.y);
+      }
 
       /* 障碍物：被摧毁的从场上下排在销毁动画结束后移除（本体已 dead） */
       this.obstacles = this.obstacles.filter((o) => !o.dead);
@@ -1534,6 +1608,8 @@ class GameScene extends Phaser.Scene {
     this.hidePanel();
     this.closeTowerPicker(true);
     this.closePrincessPanel();
+    this.clearFocusEnemy();    // 结算：移除集火光圈，避免残留在结算画面
+    this.cancelAllObstacleAttacks();
     if (this.tutorialOverlay) this.tutorialOverlay.setVisible(false);
 
     /* 胜利 → 保存关卡进度 */
@@ -1636,11 +1712,32 @@ class GameScene extends Phaser.Scene {
       this.setPlacement(null);
       this.closeTowerPicker(true);
       this.cancelAllObstacleAttacks();  // 点塔时取消所有障碍物攻击
+      this.clearFocusEnemy();      // 点塔时取消集火标记
       this.selectTower(tower);
       return;
     }
 
-    // 2) 障碍物：不可放塔；放置模式点击仅提示，普通模式点击=指派最近的塔攻击
+    // 1.5) 集火：非放置模式下点中道路上的怪物 → 切换集火目标
+    //      （怪物在道路、障碍物在草地，热区不重叠；再点同怪/点空白取消）
+    if (!this.selectedType) {
+      const fe = this.getEnemyAt(x, y);
+      if (fe) {
+        this.closeTowerPicker(true);
+        this.hidePanel();
+        this.selectedTower = null;
+        this.rangeGfx.clear();
+        if (this.focusEnemy === fe) {
+          this.clearFocusEnemy();           // 再次点击同一只怪 → 取消集火
+        } else {
+          /* 点击意图切换为集火：停止障碍物转火（互斥），标记集火目标 */
+          this.cancelAllObstacleAttacks();
+          this.setFocusEnemy(fe);
+        }
+        return;
+      }
+    }
+
+    // 2) 障碍物：不可放塔；放置模式点击仅提示，普通模式点击=指派全部覆盖塔齐射
     const ob = this.getObstacleAt(x, y);
     if (ob) {
       this.closeTowerPicker(true);
@@ -1674,6 +1771,7 @@ class GameScene extends Phaser.Scene {
         this.hidePanel();
         this.selectedTower = null;
         this.rangeGfx.clear();
+        this.clearFocusEnemy();   // 打开选塔浮框：切换操作意图，取消集火
         this.openTowerPicker(h);
         return;
       }
@@ -1688,6 +1786,7 @@ class GameScene extends Phaser.Scene {
       this.selectedTower = null;
       this.rangeGfx.clear();
       this.cancelAllObstacleAttacks();  // 点道路时取消所有障碍物攻击
+      this.clearFocusEnemy();      // 点道路空白处取消集火
       return;
     }
 
@@ -1697,6 +1796,7 @@ class GameScene extends Phaser.Scene {
     if (this._spotHint) {
       this.closeTowerPicker(true);
       this.cancelAllObstacleAttacks();  // 再次点空白取消障碍物攻击
+      this.clearFocusEnemy();      // 再次点空白取消集火
       return;
     }
     this.closeTowerPicker(true, true);   // 关浮框但保留高亮层，随后重绘为纯提示态
@@ -1706,6 +1806,7 @@ class GameScene extends Phaser.Scene {
     this._spotHint = true;
     this.highlightPlacementPoints(null);
     this.cancelAllObstacleAttacks();  // 点空白时取消所有障碍物攻击
+    this.clearFocusEnemy();      // 点空白时取消集火
   }
 
   /** 放置模式下的热区吸附 + 校验 + 落子（供左键点击与拖动共用） */
@@ -1725,11 +1826,8 @@ class GameScene extends Phaser.Scene {
     if (!tower) return;
     this.gold += tower.getSellValue();
     this.occupied.delete(tower.hotspotKey);
-    /* 塔被卖掉时解除其障碍物转火锁定 */
-    if (tower.obstacleTarget) {
-      tower.obstacleTarget.assignedTower = null;
-      tower.obstacleTarget = null;
-    }
+    /* 塔被卖掉时：从障碍物齐射集合摘除（该障碍物无人攻击时自动关高亮环） */
+    if (tower.obstacleTarget) this._removeTowerAssignment(tower);
     this.towers = this.towers.filter((v) => v !== tower);
     tower.destroy();
     if (this.selectedTower === tower) {
@@ -1748,6 +1846,67 @@ class GameScene extends Phaser.Scene {
       if (d2 <= bestD) { best = t; bestD = d2; }
     }
     return best;
+  }
+
+  /* ============================================================
+   * 集火系统（点击怪物）：命中半径 = 怪物半径 + focusFire.hitPad
+   * （外扩触控容差，手机触摸/电脑鼠标同样好点）。点中即标记为
+   * this.focusEnemy，所有射程覆盖它的伤害型塔在 attackModule 中
+   * 优先攻击；目标死亡/进门/再次点击/点空白时清除。
+   * ============================================================ */
+  getEnemyAt(x, y) {
+    const pad = (TD_CONFIG.focusFire && TD_CONFIG.focusFire.hitPad != null)
+      ? TD_CONFIG.focusFire.hitPad : 12;
+    let best = null, bestD2 = Infinity;
+    for (const e of this.enemies) {
+      /* 已死亡/已移除/正在进门的怪不再响应点击 */
+      if (e.dead || e.removed) continue;
+      const r = (e.radius || 15) + pad;
+      const d2 = (e.x - x) * (e.x - x) + (e.y - y) * (e.y - y);
+      if (d2 <= r * r && d2 < bestD2) { best = e; bestD2 = d2; }
+    }
+    return best;
+  }
+
+  /** 标记集火目标：清除旧标记，在怪物头顶挂一个红色向下三角标（脉冲）。
+   *  仅三角标，无光圈；为场景级 Graphics（depth 590，在敌人 20+ 与塔面板
+   *  600 之间），每帧由 update 跟随怪物坐标；怪物死亡/进门时自动清除。 */
+  setFocusEnemy(e) {
+    if (!e || this.focusEnemy === e) return;
+    this.clearFocusEnemy();
+    this.focusEnemy = e;
+
+    const fcfg = TD_CONFIG.focusFire || {};
+    const color = fcfg.ringColor != null ? fcfg.ringColor : 0xff4d5d;
+    const r = (e.radius || 15) + (fcfg.ringPad != null ? fcfg.ringPad : 7);
+    const period = fcfg.period || 380;
+
+    const g = this.add.graphics().setDepth(590);
+    /* 仅保留：怪物头顶居中的红色倒三角，箭头向下指向怪物，无任何圆环 */
+    g.fillStyle(color, 1);
+    g.fillTriangle(-6, -r - 20, 6, -r - 20, 0, -r - 9);
+    g.setPosition(e.x, e.y);
+
+    const st = { s: 0.92 };
+    this._focusTween = this.tweens.add({
+      targets: st, s: 1.12, duration: period,
+      yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+      onUpdate: () => g.setScale(st.s)
+    });
+    this._focusMarker = g;
+  }
+
+  /** 取消集火：销毁三角标与脉冲 tween、清空 focusEnemy（不再弹出任何提示 UI）。 */
+  clearFocusEnemy() {
+    if (this._focusTween) {
+      try { this._focusTween.stop(); } catch (_) {}
+      this._focusTween = null;
+    }
+    if (this._focusMarker) {
+      this._focusMarker.destroy();
+      this._focusMarker = null;
+    }
+    this.focusEnemy = null;
   }
 
   /** 点是否落在 HUD 安全禁区（顶部金币/生命/波次/控制按钮、左下波次按钮）。
@@ -1851,7 +2010,9 @@ class GameScene extends Phaser.Scene {
       img, bar, ring, ringTween: null,
       baseScale: 1,
       barY: -(img.height / 2) - 10,       // 血条挂在顶上方
-      assignedTower: null, dead: false
+      /* 正在转火攻击本障碍物的【全部】塔（火/冰/水/雷/风等所有伤害型塔，
+         只要射程覆盖到就齐射；塔D 无伤害的吸引塔不计入）。点击障碍物切换。 */
+      assignedTowers: [], dead: false
     };
     ob.takeDamage = (dmg) => this.damageObstacle(ob, dmg);
     this.redrawObstacleBar(ob);
@@ -1889,14 +2050,15 @@ class GameScene extends Phaser.Scene {
     if (ob.hp <= 0) this.destroyObstacle(ob);
   }
 
-  /** 障碍物被摧毁：奖励金币、解除塔的转火锁定、播放消散动画 */
+  /** 障碍物被摧毁：奖励金币、解除所有塔的转火锁定、播放消散动画 */
   destroyObstacle(ob) {
     if (ob.dead) return;
     ob.dead = true;
-    if (ob.assignedTower) {
-      ob.assignedTower.obstacleTarget = null;
-      ob.assignedTower = null;
+    /* 解除全部参与塔的锁定，它们下帧自动恢复常规索敌 */
+    for (const t of ob.assignedTowers) {
+      if (t && t.obstacleTarget === ob) t.obstacleTarget = null;
     }
+    ob.assignedTowers.length = 0;
     const reward = TD_CONFIG.obstacles.reward;
     this.gold += reward;
     this.syncHud();
@@ -1928,51 +2090,70 @@ class GameScene extends Phaser.Scene {
    *  覆盖口径：塔心到障碍物中心 ≤ tower.range + ob.radius（射程擦到障碍物
    *  实体即可打，与 AttackBehavior 的开火判定同口径，杜绝指派了却打不到）。 */
   clickObstacle(ob) {
-    /* 再次点击已攻击中的障碍物 → 取消 */
-    if (ob.assignedTower) {
+    /* 点击意图切换为障碍物 → 取消可能存在的集火标记 */
+    this.clearFocusEnemy();
+    /* 再次点击已攻击中的障碍物 → 取消全部参与塔 */
+    if (ob.assignedTowers.length) {
       this.cancelObstacleAttack(ob);
       this.floatText(ob.x, ob.y - 30, '停止攻击', 0xffe27a);
       return;
     }
-    let best = null, bestD2 = Infinity;
-    for (const t of this.towers) {
-      if (!t.stats.damage) continue;                       // 无伤害塔（塔D）跳过
-      const eff = t.cfg.effect;
-      if (eff && eff.type === 'pull') continue;            // 吸引塔无弹道，跳过
-      const dx = t.x - ob.x, dy = t.y - ob.y;
-      const d2 = dx * dx + dy * dy;
-      const reach = t.stats.range + ob.radius;             // 覆盖到障碍物本体即可
-      if (d2 <= reach * reach && d2 < bestD2) { best = t; bestD2 = d2; }
-    }
-    if (!best) {
+    /* 遍历【所有】伤害型塔（火/冰/水/雷/风…，塔D 吸引塔除外）：只要射程
+       覆盖到该障碍物就加入齐射——不再只派最近的一座。 */
+    const towers = this._towersCoveringObstacle(ob);
+    if (!towers.length) {
       // 无塔覆盖：不攻击、不转火（浮字仅为点击反馈，不改变任何塔的目标）
       this.floatText(ob.x, ob.y - 30, '附近没有塔够得到', 0xff9d9d);
       return;
     }
-    /* 一座塔只锁定一个障碍物、一个障碍物只有一座塔在打：互斥切换 */
-    if (best.obstacleTarget && best.obstacleTarget !== ob) {
-      this.cancelObstacleAttack(best.obstacleTarget);
+    /* 一座塔同一时刻只锁定一个障碍物：原先锁着别的障碍物的塔，先从旧障碍物
+       的参与集合摘除（旧障碍物若因此无人攻击则自动关闭高亮环）。 */
+    for (const t of towers) {
+      if (t.obstacleTarget && t.obstacleTarget !== ob) this._removeTowerAssignment(t);
+      t.obstacleTarget = ob;
+      ob.assignedTowers.push(t);
     }
-    if (ob.assignedTower && ob.assignedTower !== best) {
-      ob.assignedTower.obstacleTarget = null;
-    }
-    best.obstacleTarget = ob;
-    ob.assignedTower = best;
     this.showObstacleRing(ob);
-    this.floatText(ob.x, ob.y - 30, best.cfg.name + ' 开火！', 0xffe27a);
+    this.floatText(ob.x, ob.y - 30, towers.length + ' 座塔开火！', 0xffe27a);
     this.tweens.add({
       targets: ob.img, scaleX: ob.baseScale * 1.12, scaleY: ob.baseScale * 0.9,
       duration: 90, yoyo: true
     });
   }
 
-  /** 取消障碍物攻击：解除塔锁定 + 关闭高亮环 */
+  /** 返回当前【所有】射程覆盖到该障碍物、可立即参与齐射的伤害型塔
+   *  （不区分元素：火/冰/水/雷/风一视同仁；塔D 无伤害吸引塔跳过）。 */
+  _towersCoveringObstacle(ob) {
+    const out = [];
+    for (const t of this.towers) {
+      if (!t.stats.damage) continue;                       // 无伤害塔（塔D）跳过
+      const eff = t.cfg.effect;
+      if (eff && eff.type === 'pull') continue;            // 吸引塔无弹道，跳过
+      const dx = t.x - ob.x, dy = t.y - ob.y;
+      const reach = t.stats.range + ob.radius;             // 覆盖到障碍物本体即可
+      if (dx * dx + dy * dy <= reach * reach) out.push(t);
+    }
+    return out;
+  }
+
+  /** 把一座塔从其当前障碍物的参与集合摘除并解除锁定；
+   *  该障碍物因此再无塔攻击时，顺手关闭高亮环。 */
+  _removeTowerAssignment(t) {
+    const o = t.obstacleTarget;
+    if (!o) return;
+    const i = o.assignedTowers.indexOf(t);
+    if (i >= 0) o.assignedTowers.splice(i, 1);
+    t.obstacleTarget = null;
+    if (!o.assignedTowers.length) this.hideObstacleRing(o);
+  }
+
+  /** 取消障碍物攻击：解除【全部】参与塔的锁定 + 关闭高亮环 */
   cancelObstacleAttack(ob) {
     if (!ob) return;
-    if (ob.assignedTower) {
-      ob.assignedTower.obstacleTarget = null;
-      ob.assignedTower = null;
+    for (const t of ob.assignedTowers) {
+      if (t) t.obstacleTarget = null;
     }
+    ob.assignedTowers.length = 0;
     this.hideObstacleRing(ob);
   }
 
@@ -2004,7 +2185,7 @@ class GameScene extends Phaser.Scene {
   /** 取消所有障碍物攻击（点击其他位置时调用） */
   cancelAllObstacleAttacks() {
     for (const o of this.obstacles) {
-      if (o.assignedTower) this.cancelObstacleAttack(o);
+      if (o.assignedTowers && o.assignedTowers.length) this.cancelObstacleAttack(o);
     }
   }
 
@@ -2059,7 +2240,28 @@ class GameScene extends Phaser.Scene {
     if (this.selectedType) this.drawPlacementGrid();
     // 放置模式下金币不够再放一座时自动退出；选塔浮框每次点击只放一座
     if (this.selectedType && !typeKey && this.gold < cfg.cost) this.setPlacement(null);
+    /* 新塔若射程覆盖【正在被攻击】的障碍物：自动加入齐射，保证“所有
+       攻击范围能覆盖到该障碍物的塔都参与攻击”，无需玩家重新点一次。 */
+    this._assignNewTowerToObstacles(tower, cfg);
     return true;
+  }
+
+  /** 新建塔自动加入齐射：遍历正在被攻击（assignedTowers 非空）的障碍物，
+   *  新塔为伤害型（非塔D 吸引）且射程覆盖到该障碍物本体时，立即锁定加入。
+   *  塔升级射程变大无需重新调用——升级后仍在原集合中，开火判定按新射程。 */
+  _assignNewTowerToObstacles(tower, cfg) {
+    if (!tower.stats.damage) return;
+    const eff = cfg && cfg.effect;
+    if (eff && eff.type === 'pull') return;
+    for (const o of this.obstacles) {
+      if (o.dead || !o.assignedTowers.length) continue;
+      const dx = tower.x - o.x, dy = tower.y - o.y;
+      const reach = tower.stats.range + o.radius;
+      if (dx * dx + dy * dy <= reach * reach && tower.obstacleTarget !== o) {
+        tower.obstacleTarget = o;
+        o.assignedTowers.push(tower);
+      }
+    }
   }
 
   /* ============================================================

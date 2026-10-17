@@ -528,7 +528,11 @@ class Enemy extends Phaser.GameObjects.Container {
   }
 
   update(dt) {
-    if (this.dead) return;
+    /* dead=正常死亡/进门流程；removed=已从场景销毁（销毁后到数组过滤前
+       可能残留一帧，this.scene 已失效，直接跳过避免空引用）；
+      !this.scene=场景切换/销毁瞬间的残留帧（如旧场景 shutdown 与 RAF
+       交叠），此时路由几何已不存在，跳过本帧即可（会被所在场景数组过滤） */
+    if (this.dead || this.removed || !this.scene) return;
 
     /* 传送后无敌计时：期间本体半透明提示，结束恢复不透明 */
     if (this.invulnTimer > 0) {

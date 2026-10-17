@@ -112,6 +112,26 @@
         }
       }
 
+      /* 【集火优先】玩家点击指定怪物后（GameScene.focusEnemy），本塔若射程
+         覆盖到它（含存活/非无敌校验），放弃常规索敌、立即集火该目标；
+         不在射程内的塔保持默认索敌（最近/最远策略）。目标被消灭、进门或
+         取消集火（focusEnemy 置空）后，下帧自动恢复默认攻击逻辑。
+         口径：塔心到目标中心 ≤ tower.stats.range（与常规索敌同一射程圈）。 */
+      const scene = this.tower.scene;
+      const fe = scene && scene.focusEnemy;
+      if (fe && !fe.dead && !fe.removed && !(fe.invulnTimer > 0)) {
+        const fdx = fe.x - this.tower.x, fdy = fe.y - this.tower.y;
+        const fr = this.tower.stats.range;
+        if (fdx * fdx + fdy * fdy <= fr * fr) {
+          this.tower.setTarget(fe);
+          if (this.cooldown <= 0) {
+            ctx.fire(this.tower, fe);
+            this.cooldown = this.tower.stats.cooldown;
+          }
+          return;                              // 集火期间跳过策略索敌
+        }
+      }
+
       // 2) 索敌
       const strategy = Targeting[this.strategyName] || Targeting.furthest;
       const target = strategy(this.tower, ctx.enemies);
@@ -318,16 +338,44 @@
           const ddx = ob.x - this.tower.x, ddy = ob.y - this.tower.y;
           const reach = this.tower.stats.range + (ob.radius || 0);
           if (ddx * ddx + ddy * ddy <= reach * reach && this.cooldown <= 0) {
-            ctx.fire(this.tower, ob);
+            /* 电链塔没有 projectile 配置（对怪走瞬发闪电，不走弹道）：
+               攻击障碍物时直接瞬发一次雷击伤害，并画一段塔尖→障碍物的
+               闪电特效（障碍物不是小怪，不弹跳、不附着元素），伤害口径
+               与对怪主跳一致（tower.stats.damage + ob.takeDamage）。 */
+            if (!ob.dead && typeof ob.takeDamage === 'function') {
+              ob.takeDamage(this.tower.stats.damage);
+            }
+            if (typeof ctx.spawnChainFx === 'function') {
+              const startPoint = this.tower.isThunder
+                ? this.tower.getMuzzlePos()
+                : { x: this.tower.x, y: this.tower.y - 4 };
+              ctx.spawnChainFx(
+                [startPoint, { x: ob.x, y: ob.y }],
+                this.tower.cfg.color,
+                (this.eff.visualDuration || 0.25)
+              );
+            }
             this.cooldown = this.tower.stats.cooldown;
           }
           return;
         }
       }
 
-      /* 索敌：选射程内走得最远的敌人作为电链起点 */
-      const strategy = Targeting[this.strategyName] || Targeting.furthest;
-      const target = strategy(this.tower, ctx.enemies);
+      /* 索敌：默认选射程内走得最远的敌人作为电链起点；
+         【集火优先】若玩家标记的集火怪在本塔射程内（存活/非无敌），电链
+         起点强制改为集火怪（后续弹跳仍就近寻找其他小怪，为雷塔固有机制）。 */
+      const scene = this.tower.scene;
+      const fe = scene && scene.focusEnemy;
+      let target = null;
+      if (fe && !fe.dead && !fe.removed && !(fe.invulnTimer > 0)) {
+        const fdx = fe.x - this.tower.x, fdy = fe.y - this.tower.y;
+        const fr = this.tower.stats.range;
+        if (fdx * fdx + fdy * fdy <= fr * fr) target = fe;
+      }
+      if (!target) {
+        const strategy = Targeting[this.strategyName] || Targeting.furthest;
+        target = strategy(this.tower, ctx.enemies);
+      }
       this.tower.setTarget(target);
 
       if (!target || this.cooldown > 0) return;
