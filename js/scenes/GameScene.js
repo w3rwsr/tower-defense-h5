@@ -42,6 +42,18 @@ class GameScene extends Phaser.Scene {
     /* ---- 路径几何预计算 ---- */
     this.buildPathGeometry();
 
+    /* ---- 波次按钮与终点大门避让：本关终点大门若落在左下角波次按钮区内
+       （如第 1 关大门在左下角），则给底部 HUD 加类让波次按钮上移避开大门，
+       并把上移后的按钮占位并入本关放塔禁区（避免按钮压住火力点）。
+       地图、关卡数值、其它关卡 HUD 均不变。 ---- */
+    this.waveHudClearGate = this._detectGateHudClash();
+    if (this.waveHudClearGate) {
+      const _av = TD_CONFIG.castleGate.hudAvoid || {};
+      const _mv = _av.movedZone || { x: 0, y: 300, w: 300, h: 45 };
+      /* 复制后再并入，避免改动全局 TD_CONFIG.build.uiSafeZones */
+      this.buildCfg.uiSafeZones = (this.buildCfg.uiSafeZones || []).concat([_mv]);
+    }
+
     /* ---- 传送门预计算（第 4 关等含 portals 配置的关卡）：
        把 JSON 的「路线号+路径点索引」解析为沿路里程与坐标 ---- */
     this.buildPortals();
@@ -73,6 +85,9 @@ class GameScene extends Phaser.Scene {
        （仅游戏中隐藏，不破坏选关场景对整个 hud-top 的 display 控制） */
     const _livesChip = document.querySelector('.chip-lives');
     if (_livesChip) _livesChip.classList.add('hidden-by-gate');
+    /* 波次按钮避让大门：冲突时给底部 HUD 加类上移（见 style.css .wave-clear-gate） */
+    const _hudBottom = document.getElementById('hud-bottom');
+    if (_hudBottom) _hudBottom.classList.toggle('wave-clear-gate', !!this.waveHudClearGate);
     this.towers = [];
     this.enemies = [];
     this.projectiles = [];
@@ -525,6 +540,49 @@ class GameScene extends Phaser.Scene {
       x: Phaser.Math.Clamp(x, m, this.W - m),
       y: Phaser.Math.Clamp(y, m, this.H - m)
     };
+  }
+
+  /** 本关全部终点大门的世界矩形（坐标去重，位置口径与 drawCastleGates 一致） */
+  _gateWorldRects() {
+    const cfg = TD_CONFIG.castleGate;
+    if (!cfg || !this.routeGeoms || !this.routeGeoms.length) return [];
+    const gw = cfg.width || 78;
+    const tex = this.textures.exists('castle_gate')
+      ? this.textures.get('castle_gate').getSourceImage() : null;
+    const gh = tex ? gw * tex.height / tex.width : gw * 128 / 120;   // 贴图 120:128
+    const bottomDy = cfg.bottomDy != null ? cfg.bottomDy : 14;
+
+    const dps = [];
+    const goals = this.levelCfg.goals;
+    if (goals && goals.length) {
+      for (const gl of goals) {
+        const rg = this.routeGeoms[gl.route];
+        if (!rg) continue;
+        const wp = rg.waypoints[rg.waypoints.length - 1];
+        dps.push(this.goalDrawPos(wp.x, wp.y));
+      }
+    } else {
+      const rg = this.routeGeoms[this.routeGeoms.length - 1];
+      const wp = rg.waypoints[rg.waypoints.length - 1];
+      dps.push(this.goalDrawPos(wp.x, wp.y));
+    }
+    const out = [], seen = {};
+    for (const dp of dps) {
+      const k = dp.x + '_' + dp.y;
+      if (seen[k]) continue;
+      seen[k] = 1;
+      out.push({ x: dp.x - gw / 2, y: dp.y + bottomDy - gh, w: gw, h: gh });
+    }
+    return out;
+  }
+
+  /** 终点大门是否与左下角波次按钮区（保守矩形）重叠：重叠则需让按钮上移 */
+  _detectGateHudClash() {
+    const z = (TD_CONFIG.castleGate.hudAvoid || {}).btnZone || { x: 0, y: 400, w: 300, h: 140 };
+    for (const g of this._gateWorldRects()) {
+      if (g.x < z.x + z.w && g.x + g.w > z.x && g.y < z.y + z.h && g.y + g.h > z.y) return true;
+    }
+    return false;
   }
 
   /* ============================================================

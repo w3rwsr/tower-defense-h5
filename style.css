@@ -270,6 +270,12 @@ html, body {
 }
 .btn-wave:disabled { background: #d9d2c0; }
 
+/* 波次按钮与终点大门避让：本关终点大门落在左下角按钮区时（如第 1 关），
+   GameScene 给 #hud-bottom 加 .wave-clear-gate，令波次按钮上移避开大门。
+   bottom 取 #app 高度的百分比：按钮底边上移到世界 y≈(1−0.37)×540≈340，
+   高于道路(y=420)、火力点带与大门(顶部 y≈455)，地图与其它关卡不受影响。 */
+#hud-bottom.wave-clear-gate { bottom: 37%; }
+
 #shop { display: flex; gap: 8px; pointer-events: auto; }
 .btn-tower {
   display: flex;
