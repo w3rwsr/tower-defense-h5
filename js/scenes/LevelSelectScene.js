@@ -35,6 +35,9 @@ class LevelSelectScene extends Phaser.Scene {
 
     this.buildLayout();
 
+    /* 移动端：HUD 锚定（选关页 HUD 隐藏，但保持位置正确，返回游戏即生效） */
+    if (window.__tdLayoutMobileHud) window.__tdLayoutMobileHud();
+
     /* 选关界面不做任何摄像机翻转：canvas 与游戏内 DOM（HUD/商店/
        按钮）同在 #app 内共享同一套 CSS 视觉横屏旋转，方向基准必须
        统一。历史上曾仅移动端 setRotation(π)，导致选关画面相对

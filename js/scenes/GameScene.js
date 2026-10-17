@@ -166,6 +166,8 @@ class GameScene extends Phaser.Scene {
 
     this.initDom();
     this.syncHud();
+    /* 移动端：按地图画面重新锚定信息栏/齿轮（桌面端不执行） */
+    if (window.__tdLayoutMobileHud) window.__tdLayoutMobileHud();
 
     /* 第 1 关 = 新手教程关，启动引导提示 */
     if (this.levelId === 1) this.startTutorial();

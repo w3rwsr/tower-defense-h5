@@ -508,17 +508,16 @@ html.is-mobile #hud-top {
 }
 /* —— 未旋转（真横屏手机）：信息栏贴屏幕左上角，一行横排 —— */
 html.is-mobile .stats {
-  position: absolute;
-  left: calc(8px + env(safe-area-inset-left));
-  top: calc(2px + env(safe-area-inset-top));
+  position: fixed;               /* 位置由 main.js 按「地图画面」世界坐标锚定（layoutMobileHud） */
+  left: 12px; top: 4px;          /* 仅作 JS 执行前的回退值 */
   display: flex;
   flex-direction: row;           /* 未旋转：直接横排 */
   flex-wrap: nowrap;             /* 强制单排，不换行 */
   align-items: center;
-  gap: 0;
-  padding: 1px 3px;
-  border-radius: 8px;
-  background: rgba(255, 252, 240, .5);     /* 半透明：不遮挡游戏画面 */
+  gap: 3px;                      /* 各项之间留缝，不再挤在一起 */
+  padding: 2px 6px;
+  border-radius: 9px;
+  background: rgba(255, 252, 240, .44);    /* 半透明：不遮挡游戏画面 */
   pointer-events: none;                    /* 整条信息栏点击穿透，火力点可正常点 */
 }
 /* —— 视觉横屏（rotate 90°，坐标须按上面的映射换算）——
@@ -531,32 +530,32 @@ html.is-mobile .stats {
                世界 x ≈ left% 经 FIT 等比缩放居中后换算，跨机型基本一致。 */
 html.is-mobile.is-portrait .stats {
   position: fixed;                                   /* #app 带 transform，fixed 以其为包含块 */
-  left: 125px;                                       /* 贴游戏画面最左边缘（让开浏览器标题栏） */
-  top: calc(4px + env(safe-area-inset-right));       /* 贴游戏画面上边缘（世界 y≈5） */
+  left: 12px;                                        /* 回退值；main.js 按地图左边缘锚定 */
+  top: 4px;                                          /* 回退值；main.js 按地图上边缘锚定 */
   bottom: auto;
   flex-direction: row;                               /* 一字形横排：关卡→金币→生命→波次 */
   flex-wrap: nowrap;                                 /* 强制单排不换行 */
 }
 html.is-mobile .chip {
-  gap: 0;
-  padding: 1px 2px;
-  font-size: 9px;                /* 图标与数字缩小、间距收紧，整体尽量小 */
-  line-height: 1.1;
+  gap: 2px;                      /* 图标与数字之间留缝 */
+  padding: 0 1px;
+  font-size: 14px;               /* 由 9px 放大：顶部 y0~50 带全关卡无道路、无火力点(uiSafeZone 排除) */
+  line-height: 1.18;
   white-space: nowrap;
   background: transparent;
   box-shadow: none;
 }
-html.is-mobile .chip b { font-size: 9px; }
+html.is-mobile .chip b { font-size: 14px; }
 html.is-mobile .chip-level,
 html.is-mobile .chip-level b { background: transparent; }
 html.is-mobile .chip-level b { color: #0d2c4d; }
 
 /* ---- 屏幕右上角：暂停 + 倍速合并菜单（与信息栏分开，不重叠） ---- */
 html.is-mobile .controls {
-  position: absolute;
-  right: calc(8px + env(safe-area-inset-right));
+  position: fixed;               /* 位置由 main.js 按地图右边缘锚定 */
+  right: 12px;                   /* 仅作 JS 执行前的回退值 */
   left: auto;
-  top: calc(2px + env(safe-area-inset-top));
+  top: 4px;
   gap: 4px;
 }
 /* 视觉横屏：齿轮贴游戏画面最右边缘、画面上部空白草地
@@ -564,9 +563,9 @@ html.is-mobile .controls {
    覆盖此处 → 无道路、无火力点、无障碍物） */
 html.is-mobile.is-portrait .controls {
   position: fixed;
-  left: 87%;                                      /* 贴游戏画面最右边缘（世界 x≈912~959） */
-  top: calc(4px + env(safe-area-inset-right));    /* 贴游戏画面上边缘（世界 y≈5） */
-  right: auto;
+  left: auto;
+  right: 12px;                                    /* 回退值；main.js 按地图右边缘锚定 */
+  top: 4px;
 }
 /* 手机端隐藏原并排按钮，改由合并菜单接管（DOM 保留：syncHud 仍会更新其状态） */
 html.is-mobile #btn-speed,
@@ -578,11 +577,11 @@ html.is-mobile #mobile-menu {
   pointer-events: auto;
 }
 html.is-mobile #btn-mobile-menu {
-  min-width: 34px;
-  width: 34px;
-  min-height: 32px;              /* 只显示小齿轮，尽量少占空间 */
+  min-width: 40px;
+  width: 40px;
+  min-height: 40px;              /* 放大齿轮（原 34×32）。右上角无路带高度有限：再大就会压到第4/7关 y=80 道路 */
   padding: 2px 0;
-  font-size: 15px;
+  font-size: 19px;
   line-height: 1;
   border-radius: 999px;
   background: rgba(255, 224, 130, .92);
@@ -596,10 +595,10 @@ html.is-mobile #btn-mobile-menu {
   position: absolute;
   top: calc(100% + 5px);
   right: 0;                       /* 面板左扩、贴右边缘内侧，不跑出屏幕 */
-  width: 100px;
+  width: 108px;
   flex-direction: column;
-  gap: 5px;
-  padding: 6px;
+  gap: 6px;
+  padding: 7px;
   border-radius: 12px;
   background: rgba(28, 40, 22, .72);     /* 半透明悬浮：仍可透见路面 */
   backdrop-filter: blur(2px);
@@ -608,10 +607,10 @@ html.is-mobile #btn-mobile-menu {
 }
 #mobile-menu.open #mobile-menu-panel { display: flex; }
 #mobile-menu-panel .m-item {
-  min-height: 36px;                      /* 手机触控热区：36px 高度 + 宽度足 */
+  min-height: 42px;                      /* 手机触控热区：42px 高度 + 宽度足 */
   border: none;
-  border-radius: 9px;
-  font-size: 12px;
+  border-radius: 10px;
+  font-size: 13px;
   font-weight: 800;
   color: #4a3313;
   background: rgba(255, 248, 231, .95);

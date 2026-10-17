@@ -474,6 +474,40 @@
     } catch (e) { /* 忽略 */ }
   };
 
+  /* ============================================================
+   * 移动端 HUD 锚定（仅移动端；桌面端不执行、UI 保持原样）
+   *   把「关卡/金币/生命/波次」信息栏贴到【地图画面】左上角内侧、
+   *   齿轮贴到右上角内侧：用 canvas 在 #app 内的实际布局位置，把
+   *   960×540 世界坐标换算成 app 布局 px。原 CSS 用固定 px / 百分比
+   *   （left:125px、left:87%），不同宽高比机型会偏移，甚至跑到地图
+   *   边缘外的黑边上；这里按画布实测换算，各机型都严格贴地图边缘内侧。
+   *   锚点取全 7 关都无道路/火力点/障碍物的顶部空白带：
+   *   左内侧 世界 x≥22、y≥4；右内侧 世界 x≤938（脚本对全关卡校验过）。
+   * ============================================================ */
+  const layoutMobileHud = () => {
+    if (!window.__isMobile) return;
+    const app = document.getElementById('app');
+    const holder = document.getElementById('game-container');
+    const canvas = holder && holder.querySelector('canvas');
+    const stats = document.querySelector('#hud-top .stats');
+    const ctrls = document.querySelector('#hud-top .controls');
+    if (!app || !canvas || !stats || !ctrls) return;
+    if (!canvas.offsetWidth || !canvas.offsetHeight) return;
+    /* canvas 在 #app 内的布局位置（本地坐标，未受 CSS 旋转影响） */
+    let ox = 0, oy = 0, n = canvas;
+    while (n && n !== app) { ox += n.offsetLeft || 0; oy += n.offsetTop || 0; n = n.offsetParent; }
+    const S = canvas.offsetHeight / 540;      // 世界→app 布局 px（等比）
+    const dx = 22, dy = 4;                     // 距地图左/上边缘的内缩（世界 px）
+    stats.style.left = (ox + dx * S) + 'px';
+    stats.style.top = (oy + dy * S) + 'px';
+    stats.style.right = 'auto';
+    stats.style.bottom = 'auto';
+    ctrls.style.left = 'auto';
+    ctrls.style.right = (app.offsetWidth - (ox + (960 - dx) * S)) + 'px';
+    ctrls.style.top = (oy + dy * S) + 'px';
+  };
+  window.__tdLayoutMobileHud = layoutMobileHud;
+
   /* 画面方向【永久固定】为 rotate(90deg)（听筒朝左正向，真机确认），
      不依赖任何传感器/方向 API。移动端「请横屏放置」提示层及相关的
      deviceorientation 监听、setInterval、新鲜度判定已彻底移除——方向
@@ -493,10 +527,16 @@
   const initialLandscapeRefresh = () => {
     refreshPhaserUnrotated();
     applyVisualLandscapeInput();
+    layoutMobileHud();
   };
   if (document.readyState === 'complete') { initialLandscapeRefresh(); }
   else { window.addEventListener('load', initialLandscapeRefresh); }
   setTimeout(initialLandscapeRefresh, 400);
+  /* 画布尺寸稳定后再校准两次；窗口变化/方向变化也重算（仅移动端生效） */
+  setTimeout(layoutMobileHud, 500);
+  setTimeout(layoutMobileHud, 1500);
+  window.addEventListener('resize', layoutMobileHud);
+  window.addEventListener('orientationchange', layoutMobileHud);
 
   /* ============================================================
    * 强制横屏：尝试通过 Screen Orientation API 锁定横屏。
