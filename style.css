@@ -577,11 +577,11 @@ html.is-mobile #mobile-menu {
   pointer-events: auto;
 }
 html.is-mobile #btn-mobile-menu {
-  min-width: 40px;
-  width: 40px;
-  min-height: 40px;              /* 放大齿轮（原 34×32）。右上角无路带高度有限：再大就会压到第4/7关 y=80 道路 */
-  padding: 2px 0;
-  font-size: 19px;
+  min-width: 24px;
+  width: 24px;
+  min-height: 24px;              /* 缩小：顶部无路带仅 y<50（世界），齿轮必须完全落在其中才不压第4/7关 y=80 道路 */
+  padding: 0;
+  font-size: 12px;
   line-height: 1;
   border-radius: 999px;
   background: rgba(255, 224, 130, .92);

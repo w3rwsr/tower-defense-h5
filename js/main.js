@@ -498,13 +498,14 @@
     while (n && n !== app) { ox += n.offsetLeft || 0; oy += n.offsetTop || 0; n = n.offsetParent; }
     const S = canvas.offsetHeight / 540;      // 世界→app 布局 px（等比）
     const dx = 22, dy = 4;                     // 距地图左/上边缘的内缩（世界 px）
+    const dyGear = 0;                          // 齿轮顶部贴地图上边缘：让它完全落在顶部无路带(y<50)内
     stats.style.left = (ox + dx * S) + 'px';
-    stats.style.top = (oy + dy * S) + 'px';
+    stats.style.top  = (oy + dy * S) + 'px';
     stats.style.right = 'auto';
     stats.style.bottom = 'auto';
     ctrls.style.left = 'auto';
     ctrls.style.right = (app.offsetWidth - (ox + (960 - dx) * S)) + 'px';
-    ctrls.style.top = (oy + dy * S) + 'px';
+    ctrls.style.top = (oy + dyGear * S) + 'px';
   };
   window.__tdLayoutMobileHud = layoutMobileHud;
 
