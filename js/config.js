@@ -338,9 +338,9 @@ window.TD_CONFIG = {
       "darkColor": 0x2f6bb3,
       "targeting": "furthest",
       "stats": {
-        "damage": 42,
+        "damage": 80,         // 一级火塔：80 伤害
         "range": 155,
-        "cooldown": 1.35      // 攻击间隔（秒）
+        "cooldown": 1.0       // 攻击间隔（秒）→ 1 次/秒
       },
       "projectile": {
         "speed": 460,         // 弹道速度 px/s
@@ -348,7 +348,7 @@ window.TD_CONFIG = {
         "color": 0x9fd0ff,
         "element": "fire",        // 火元素印记（纯视觉标记，伤害不变；供风元素塔扩散）
         "elementDuration": 4,     // 印记持续秒数
-        "effect": { "type": "damage", "value": 42 },
+        "effect": { "type": "damage", "value": 80 },
         /* 熔岩弹弹幕贴图（assets/lava_bullets.png 离线裁切，见
            build_lava_bullets.py；data URI 模块 LavaBulletData.js）。
            三颗贴图按球径等比烘焙（球纹素 = ballDisplay×superSample=45px），
@@ -375,9 +375,12 @@ window.TD_CONFIG = {
       "upgrade": {
         "maxLevel": 3,
         "costFactor": 0.80,   // 升级费 = 造价 * costFactor * 当前等级
-        "damage": 1.65,
+        /* 火塔成长：显式数组（下标 = 等级-1），伤害与攻击间隔双重递增。
+           二级 130/0.80s（1.25 次每秒）、三级 200/0.65s（约 1.54 次每秒）。
+           range 仍用成长系数（数值写法）。 */
+        "damage": [80, 130, 200],
         "range": 1.10,
-        "cooldown": 0.85
+        "cooldown": [1.0, 0.8, 0.65]
       },
 
       /* 燃烧视频：lv1/lv3 已由 process_green_videos.py 离线把绿幕物理

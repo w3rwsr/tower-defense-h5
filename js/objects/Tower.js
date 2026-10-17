@@ -498,23 +498,29 @@ class Tower extends Phaser.GameObjects.Container {
     if (this._sparks) { this._sparks.destroy(); this._sparks = null; }
   }
 
-  /* 根据等级 + JSON 成长系数重算属性（伤害写回弹道 effect） */
+  /* 根据等级 + JSON 成长项重算属性（伤害写回弹道 effect）
+     成长项支持两种写法（都纯 JSON 配置驱动）：
+       ① 数值（成长系数，逐级相乘，如 damage 1.65）
+       ② 数组（每一级的显式数值，下标 = 等级-1，如 [80,130,200]）
+     火塔 towerA 用数组写法，把每级伤害/攻击间隔直接写在 config 里。 */
   recalcStats() {
     const base = this.cfg.stats;
     const up = this.cfg.upgrade;
+    const isArr = Array.isArray;
     let dmgMul = 1, rangeMul = 1, cdMul = 1, jumpsAdd = 0;
     for (let i = 1; i < this.level; i++) {
-      dmgMul *= up.damage;
-      rangeMul *= up.range;
-      cdMul *= up.cooldown;
+      if (!isArr(up.damage)) dmgMul *= up.damage;
+      if (!isArr(up.range)) rangeMul *= up.range;
+      if (!isArr(up.cooldown)) cdMul *= up.cooldown;
       if (up.jumps) jumpsAdd += up.jumps; // 塔E：每升 1 级弹跳 +1
     }
     const eff = this.cfg.effect || {};
     const baseJumps = (eff.jumps != null) ? eff.jumps : 0;
+    const k = this.level - 1;              // 数组下标 = 等级-1
     this.stats = {
-      damage: Math.round(base.damage * dmgMul),
-      range: Math.round(base.range * rangeMul),
-      cooldown: +(base.cooldown * cdMul).toFixed(3),
+      damage: Math.round(isArr(up.damage) ? up.damage[k] : base.damage * dmgMul),
+      range: Math.round(isArr(up.range) ? up.range[k] : base.range * rangeMul),
+      cooldown: +(isArr(up.cooldown) ? up.cooldown[k] : base.cooldown * cdMul).toFixed(3),
       jumps: baseJumps + jumpsAdd // 当前弹跳次数（塔E 专用，其他塔为 0）
     };
   }
