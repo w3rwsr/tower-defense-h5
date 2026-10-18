@@ -180,7 +180,8 @@ class LevelSelectScene extends Phaser.Scene {
       { name: '交错迷域', desc: '交叉汇合·岔路奇兵', emoji: '🌀' },
       { name: '迷域回廊', desc: '传送穿梭·三阶BOSS', emoji: '🔮' },
       { name: '三路会师', desc: '三线交叉·共享终点', emoji: '⚔️' },
-      { name: '双途重围', desc: '双线汇合·护盾BOSS', emoji: '🛡️' }
+      { name: '双途重围', desc: '双线汇合·护盾BOSS', emoji: '🛡️' },
+      { name: '风蚀荒原', desc: '双路S廊·风眼增伤·熔岩巨兽', emoji: '🌋' }
     ];
 
     const positions = this.computeCardPositions(vl);
@@ -218,7 +219,7 @@ class LevelSelectScene extends Phaser.Scene {
     const W = this.W;
     const out = [];
     const cardH = vl.cardH;
-    const count = TDStorage.total;              // 关卡总数（当前 7）
+    const count = TDStorage.total;              // 关卡总数（当前 8）
     const perRow = this.maxPerRow;              // 每排上限（5~6 张）
     const cardW = 132;
     const gap = 16;
@@ -298,13 +299,7 @@ class LevelSelectScene extends Phaser.Scene {
       card.add([badge, check]);
     }
 
-    if (!unlocked) {
-      const lock = this.add.text(0, emojiY, '🔒', {
-        fontSize: 36 + 'px', resolution: TD_TEXT_RES
-      })
-        .setOrigin(0.5).setAlpha(0.85);
-      card.add(lock);
-    }
+    /* 锁定图标与拦截逻辑已彻底移除：第 1~8 关全部直接开放，自由进入 */
 
     /* 触控热区略大于卡片（>=44px 规范由卡片尺寸保证）。
        手势状态机（按下/抬起/滑出）：
@@ -346,10 +341,7 @@ class LevelSelectScene extends Phaser.Scene {
       this.showToast('敬请期待', x, y);
       return;
     }
-    if (!unlocked) {
-      this.showToast('此关卡暂未开放', x, y);
-      return;
-    }
+    /* 第 1~8 关全部直接开放：不再有任何解锁拦截 */
     this.scene.start('GameScene', { levelId: level });
   }
 
@@ -523,10 +515,13 @@ class LevelSelectScene extends Phaser.Scene {
     dragZone.on('pointerdown', (p) => { dragStartY = p.y; dragScroll0 = scrollState.y; });
     dragZone.on('drag', (p) => { applyScroll(dragScroll0 - (p.y - dragStartY)); });
 
-    /* ---- 滚轮滚动（电脑端）：场景级监听，关闭时移除 ---- */
+    /* ---- 滚轮滚动（电脑端）：场景级监听，关闭时移除 ----
+       方向修正：delta 取反 —— 顺时针（向下滚，dy>0）内容向下移动
+       （视口回看顶部的卡）；逆时针（向上滚）内容向上（看后面的卡）。
+       乘 0.5 为缓动手感 */
     const wheelHandler = (pointer, objs, dx, dy) => {
       if (!this.codexPanel) return;
-      applyScroll(scrollState.y - dy * 0.5);
+      applyScroll(scrollState.y + dy * 0.5);
     };
     this.input.on('wheel', wheelHandler);
     this._codexWheel = wheelHandler;
@@ -576,7 +571,9 @@ class LevelSelectScene extends Phaser.Scene {
     const picker = (TD_CONFIG.build && TD_CONFIG.build.picker) || {};
     const colors = picker.iconColors || {};
     const glyphs = picker.iconGlyph || {};
-    const entryH = 142, gap = 10;
+    /* 卡高按 Lv1~Lv4 四行数值行加高（142→186），间距 10→12，
+       保证 Lv4 行完整落在卡片内、不与下一张卡重叠 */
+    const entryH = 186, gap = 12;
     const keys = Object.keys(TD_CONFIG.towers).filter((k) => TD_CONFIG.towers[k]);
     let y = 0;
 
@@ -643,9 +640,10 @@ class LevelSelectScene extends Phaser.Scene {
       }).setOrigin(0, 0.5);
       row.add([role, note]);
 
-      /* Lv1 / Lv2 / Lv3 具体数值（与战斗内实际数值同口径） */
+      /* Lv1~Lv4 具体数值（与战斗内实际数值同口径）；行距 26、起始 84，
+         末行（i=3）底边 ≈170 < entryH 186，完整收在卡片内 */
       this.codexLines(key, cfg).forEach((t, i) => {
-        const lt = this.add.text(70, 82 + i * 22, t, {
+        const lt = this.add.text(70, 84 + i * 26, t, {
           fontFamily: TD_FONT_STACK, fontSize: '13px', color: '#2f4a1c',
           resolution: TD_TEXT_RES
         }).setOrigin(0, 0.5);
@@ -675,12 +673,22 @@ class LevelSelectScene extends Phaser.Scene {
       if (up.jumps) jumpsAdd += up.jumps;
     }
     const baseJumps = (cfg.effect && cfg.effect.jumps != null) ? cfg.effect.jumps : 0;
-    const k = level - 1;
+    /* 4 级进化：数组成长项只写到 3 级（如火塔 [80,130,200]），Lv4 沿用末级
+       显式数值（与 Tower.recalcStats 口径一致）；Lv4 专属覆盖读 TowerConfig
+       （cfg.lv4，由 TowerConfigData.js 注入）：雷塔弹跳 10 次、引力塔 BOSS 减速、
+       火/水塔伤害与攻速（lv4.stats，与 Tower.recalcStats 同口径）。 */
+    const ai = (a) => Math.min(level, a.length) - 1;
+    const lv4 = (level >= 4 && cfg.lv4) || null;
+    let jumps = baseJumps + jumpsAdd;
+    if (lv4 && lv4.chain && lv4.chain.jumps != null) jumps = lv4.chain.jumps;
+    const lv4s = lv4 && lv4.stats;
     return {
-      damage: Math.round(isArr(up.damage) ? up.damage[k] : base.damage * dmgMul),
-      range: Math.round(isArr(up.range) ? up.range[k] : base.range * rangeMul),
-      cooldown: +(isArr(up.cooldown) ? up.cooldown[k] : base.cooldown * cdMul).toFixed(3),
-      jumps: baseJumps + jumpsAdd
+      damage: Math.round(lv4s && lv4s.damage != null ? lv4s.damage
+        : (isArr(up.damage) ? up.damage[ai(up.damage)] : base.damage * dmgMul)),
+      range: Math.round(isArr(up.range) ? up.range[ai(up.range)] : base.range * rangeMul),
+      cooldown: +(lv4s && lv4s.cooldown != null ? lv4s.cooldown
+        : (isArr(up.cooldown) ? up.cooldown[ai(up.cooldown)] : base.cooldown * cdMul)).toFixed(3),
+      jumps
     };
   }
 
@@ -740,8 +748,11 @@ class LevelSelectScene extends Phaser.Scene {
       const rate = st.cooldown > 0 ? (1 / st.cooldown).toFixed(2) + ' 次/秒' : '—';
       let txt;
       if (type === 'pull') {
+        /* 4 级黑洞引力（TowerConfig lv4.bossSlow）：Lv4 行显示 15% 减速 */
+        const bossSlow = (lv >= 4 && cfg.lv4 && cfg.lv4.bossSlow != null)
+          ? cfg.lv4.bossSlow : (eff.bossSlow || 0);
         txt = '牵引范围 ' + st.range + ' · 无伤害 · 对 BOSS 减速 ' +
-          Math.round((eff.bossSlow || 0) * 100) + '%';
+          Math.round(bossSlow * 100) + '%';
       } else if (type === 'chain') {
         txt = '伤害 ' + st.damage + ' · 弹跳 ' + st.jumps + ' 次 · 攻速 ' + rate + ' · 射程 ' + st.range;
       } else if (type === 'windSpread') {

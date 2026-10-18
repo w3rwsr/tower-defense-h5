@@ -73,6 +73,30 @@ class Enemy extends Phaser.GameObjects.Container {
     this.vulnText = null;       // 易伤层数文字
     this._vulnTween = null;
 
+    /* ---- 状态接口（第 8 关起供 4 级塔挂载异常状态；旧关卡无人写入，零影响） ----
+       burnStacks   灼烧层 [{dps, timer}]：applyBurnStack(dps, dur) 写入，
+                    update() 按层结算持续伤害（血量护盾存续时由盾吸收）
+       armorBreaks  降防层 [{amount, timer}]：applyArmorBreak(降减伤量, dur)
+                    写入；takeDamage 统一读取 armorReduction（基础减伤 -
+                    Σ降防，下限 0），无降防层时与旧公式完全等价
+       paralysis    麻痹值 0~100（雷系积累）：addParalysis(v) 写入，update()
+                    内带 0.5s 保活窗口快速消退；水晶史莱姆减伤对其敏感 */
+    this.burnStacks = [];
+    this.armorBreaks = [];
+    this.paralysis = 0;
+    /* 4 级塔状态（StatusEffects.js 经 applyStatus(type, data) 鸭子调用）：
+       降防合计（寒冷 -defReduce / 麻痹每层 -defReducePerStack）、
+       受伤增幅合计（潮湿每层 +perStackAmp / 风蚀 +dmgAmp），
+       DOT 伤害本体由塔侧按秒 takeDamage 结算（同样走 armorReduction 口径） */
+    this.statusDefReduce = 0;     // 寒冷状态降防（0~1）
+    this.statusParaReduce = 0;    // 麻痹值降防（0~1）
+    this.statusWetAmp = 0;        // 潮湿增幅（0~n×perStackAmp）
+    this.statusWindAmp = 0;       // 风蚀增幅（0~dmgAmp）
+    this.statusAmpExclude = 'water'; // 潮湿增幅的排除元素（非该元素才生效）
+    this._chillTimer = 0;         // 寒冷状态剩余时长（水晶史莱姆减伤敏感）
+    this._windTimer = 0;          // 风蚀剩余时长
+    this._paraHold = 0;           // 麻痹值保活窗口（层未到期不衰减）
+
     /* ---- 三阶段 BOSS（第 5 关，JSON 驱动） ---- */
     this.bossPhase = 0;       // 0=普通怪/无阶段；1=一阶段（阈值分裂）；2=分身；3=合体强化
     this.bossPhaseLink = 0;   // 同一次分裂的分身共享的组号（合体时机按组判定）
@@ -495,8 +519,19 @@ class Enemy extends Phaser.GameObjects.Container {
         ? TD_CONFIG.elementSystem.vuln.perStack : 0.1;
       vulnMul = 1 + per * this.vulnStacks.length;
     }
-    /* 伤害减免：dmgReduction > 0 时受击实际伤害 = 原伤害 × (1 - 减免) */
-    const dmg = value * vulnMul * (1 - (this.dmgReduction || 0));
+    /* 风蚀增伤（第 8 关）：风眼全局窗口（scene.windErosionTimer）与
+       风塔4怪物侧窗口（statusWindAmp）【不叠加，取两者较大值】；
+       任一方触发都会刷新自己的窗口时长 → 效果上互为续时。
+       非第 8 关场景 windErosionTimer 恒 undefined → sceneWind=0，零影响 */
+    const sceneWind = (this.scene && this.scene.windErosionTimer > 0)
+      ? ((this.scene.windErosionMul != null) ? this.scene.windErosionMul : 0.2) : 0;
+    const statusWind = ((this.statusWindAmp || 0) && element !== this.statusAmpExclude)
+      ? this.statusWindAmp : 0;
+    const windMul = 1 + Math.max(sceneWind, statusWind);
+    /* 4 级塔状态增幅剩余部分：潮湿每层 +4%（水塔4，排除元素不生效） */
+    const statusAmp = 1 + ((this.statusWetAmp && element !== this.statusAmpExclude)
+      ? this.statusWetAmp : 0);
+    const dmg = value * vulnMul * windMul * statusAmp * (1 - this.armorReduction);
 
     /* 血量护盾（第 7 关）：护盾血量优先吸收，盾存期间本体不掉血；
        击破当帧的溢出伤害继续结算到本体 */
@@ -532,6 +567,111 @@ class Enemy extends Phaser.GameObjects.Container {
     if (this.hp <= 0) this.scene.onEnemyKilled(this);
   }
 
+  /* ============================================================
+   * 状态接口（第 8 关起，供 4 级塔挂载异常状态；旧关卡无人调用）
+   * ============================================================ */
+
+  /* 是否处于冰冻定身（freezeTimer > 0，供 4 级塔/水晶史莱姆判定「寒冷」） */
+  get isFrozen() { return this.freezeTimer > 0; }
+
+  /* 当前有效伤害减免 = 基础减伤 - Σ状态降防（寒冷/麻痹值） - Σ降防层，下限 0。
+     takeDamage 统一读取此接口；无任何降防时返回值与旧 dmgReduction 完全一致 */
+  get armorReduction() {
+    let a = (this.dmgReduction || 0) - (this.statusDefReduce || 0) - (this.statusParaReduce || 0);
+    for (let i = 0; i < this.armorBreaks.length; i++) a -= this.armorBreaks[i].amount;
+    return Math.max(0, a);
+  }
+
+  /* 挂载灼烧层：dps = 每秒伤害，duration = 持续秒数（可叠层，独立倒计时） */
+  applyBurnStack(dps, duration) {
+    if (dps > 0 && duration > 0) this.burnStacks.push({ dps, timer: duration });
+  }
+
+  /* 挂载降防层：amount = 降低的减伤比例（0~1），duration = 持续秒数（可叠层） */
+  applyArmorBreak(amount, duration) {
+    if (amount > 0 && duration > 0) this.armorBreaks.push({ amount, timer: duration });
+  }
+
+  /* 增加麻痹值（雷系积累，0~100 封顶；水晶史莱姆减伤对其敏感） */
+  addParalysis(v) {
+    this.paralysis = Math.min(100, (this.paralysis || 0) + Math.max(0, v));
+    this._paraHold = 0.5;
+  }
+
+  /* ============================================================
+   * 4 级塔状态挂载接口（StatusEffects.js 塔侧鸭子调用，模块隔离约定）
+   * 职责划分：DOT 扣血由塔侧按秒 takeDamage 结算；本接口只负责怪物侧
+   * 的降防 / 受伤增幅 / 定身结算与寒冷、麻痹值等标记（供水晶史莱姆等
+   * 特性怪判定）。未实现的状态类型安全忽略。
+   * ============================================================ */
+  applyStatus(type, data) {
+    data = data || {};
+    switch (type) {
+      /* 冰塔4 寒冷状态：降防 + 寒冷标记（DOT 塔侧结算） */
+      case 'chill': {
+        this._chillTimer = Math.max(this._chillTimer || 0, data.duration || 0);
+        this.statusDefReduce = Math.max(this.statusDefReduce || 0, data.defReduce || 0);
+        break;
+      }
+      /* 水塔4 潮湿：每层受伤 +perStackAmp（层数变化时由塔侧通知重算） */
+      case 'wet': {
+        this.statusAmpExclude = data.excludeElement || 'water';
+        this.statusWetAmp = (data.stacks || 0) * (data.perStackAmp || 0);
+        break;
+      }
+      /* 雷塔4 麻痹值：每层降防 + 麻痹值按层映射（25/层，0~100） */
+      case 'paralysisStack': {
+        const stacks = data.stacks || 0;
+        this.statusParaReduce = stacks * (data.perStackDefReduce || 0);
+        this.paralysis = stacks > 0 ? Math.min(100, stacks * 25) : 0;
+        this._paraHold = stacks > 0 ? 0.5 : 0;
+        break;
+      }
+      /* 风塔4 风蚀增伤：怪物侧计时窗口（与塔侧计时同长对齐） */
+      case 'windErosion': {
+        this._windTimer = Math.max(this._windTimer || 0, data.duration || 0);
+        this.statusWindAmp = data.dmgAmp || 0;
+        break;
+      }
+      /* 雷塔4 麻痹定身 / 引力塔4 眩晕：复用减速通道实现定身（factor 0） */
+      case 'paralyzed':
+      case 'stun': {
+        if (data.duration > 0) this.applySlow(0, data.duration, null, true);
+        break;
+      }
+      /* 火塔4 灼烧：DOT 由塔侧结算，怪物侧无需处理（预留） */
+      case 'burn':
+      default:
+        break;
+    }
+  }
+
+  /* 持续伤害（灼烧 DoT 等）结算：与 takeDamage 同规则尊重血量护盾
+     （盾存续时由盾吸收，击破溢出到本体），但不吃易伤/风蚀乘区；
+     旧关卡无人调用（burnStacks 恒空），零影响 */
+  applyDot(amount) {
+    if (this.dead || this.invulnTimer > 0) return;
+    const hpShield = (this.shield && this.shield.type === 'hp' && this.shield.hp > 0)
+      ? this.shield : null;
+    if (hpShield) {
+      const absorbed = Math.min(hpShield.hp, amount);
+      hpShield.hp -= absorbed;
+      this.refreshShieldView(false);
+      if (hpShield.hp > 1e-6) return; // 本跳被护盾完全吸收
+      this.breakShield();
+      const rest = amount - absorbed;
+      if (rest <= 0) return;
+      this.hp -= rest;
+    } else {
+      this.hp -= amount;
+    }
+    this.drawHpBar(Math.max(0, this.hp / this.maxHp));
+    if (this.hp <= 0) {
+      if (this.bossPhase === 1 && this.scene.checkBossSplit(this)) return;
+      this.scene.onEnemyKilled(this);
+    }
+  }
+
   update(dt) {
     /* dead=正常死亡/进门流程；removed=已从场景销毁（销毁后到数组过滤前
        可能残留一帧，this.scene 已失效，直接跳过避免空引用）；
@@ -555,6 +695,49 @@ class Enemy extends Phaser.GameObjects.Container {
         this.slowTimer = 0;
         this.slowFactor = 1;
         this.body.clearTint();
+      }
+    }
+
+    /* ---- 状态接口结算（第 8 关起；数组/数值恒空时零开销，旧关卡无影响） ---- */
+    /* 灼烧：按层求和的每秒伤害，逐层独立倒计时 */
+    if (this.burnStacks.length) {
+      let dps = 0;
+      for (let i = this.burnStacks.length - 1; i >= 0; i--) {
+        const s = this.burnStacks[i];
+        s.timer -= dt;
+        if (s.timer <= 0) this.burnStacks.splice(i, 1);
+        else dps += s.dps;
+      }
+      if (dps > 0) this.applyDot(dps * dt);
+    }
+    /* 降防层独立倒计时，到期解除 */
+    if (this.armorBreaks.length) {
+      for (let i = this.armorBreaks.length - 1; i >= 0; i--) {
+        const s = this.armorBreaks[i];
+        s.timer -= dt;
+        if (s.timer <= 0) this.armorBreaks.splice(i, 1);
+      }
+    }
+    /* 麻痹值消退：0.5s 保活窗口内不衰减（等待塔侧层刷新），随后快速消退
+       （40/秒 ≈ 满 100 值 2.5s 清空，与麻痹层 2.5s 存续时长对齐） */
+    if (this._paraHold > 0) {
+      this._paraHold -= dt;
+    } else if (this.paralysis > 0) {
+      this.paralysis = Math.max(0, this.paralysis - 40 * dt);
+    }
+    /* 4 级塔状态计时（与塔侧 DOT/增伤时长对齐，塔侧到期不回调故怪物侧自计） */
+    if (this._chillTimer > 0) {
+      this._chillTimer -= dt;
+      if (this._chillTimer <= 0) {
+        this._chillTimer = 0;
+        this.statusDefReduce = 0;
+      }
+    }
+    if (this._windTimer > 0) {
+      this._windTimer -= dt;
+      if (this._windTimer <= 0) {
+        this._windTimer = 0;
+        this.statusWindAmp = 0;
       }
     }
 

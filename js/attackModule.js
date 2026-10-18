@@ -196,6 +196,11 @@
       this.bossSlowDur = (this.eff.bossSlowDuration != null ? this.eff.bossSlowDuration : 750) / 1000;
       this.bossSlowCdMax = (this.eff.bossSlowCooldown != null ? this.eff.bossSlowCooldown : 2000) / 1000;
       this.bossSlowCd = 0;         // 剩余触发冷却（秒），<=0 可触发
+      /* 4 级黑洞引力（TowerConfig.json lv4.stun）：牵引窗口结束 → 范围内
+         小怪眩晕 1 秒（BOSS 免疫）；每塔 stunCooldown（5 秒）内最多触发一次。
+         _prevActive 用于检测「active 由 >0 跨到 <=0」的窗口闭合瞬间。 */
+      this.stunCd = 0;
+      this._prevActive = this.active;
     }
 
     /** 塔在敌人所属路线【整条路径】上的沿路投影（最近点里程）。
@@ -223,8 +228,11 @@
     update(dt, ctx) {
       /* ---- 脉冲计时：每 interval 秒开窗一次，窗内持续 duration 秒 ---- */
       this.timer -= dt;
+      const wasActive = this._prevActive > 0;
       if (this.active > 0) this.active -= dt;
+      this._prevActive = this.active;
       if (this.bossSlowCd > 0) this.bossSlowCd -= dt;   // 本塔对 BOSS 的触发冷却
+      if (this.stunCd > 0) this.stunCd -= dt;           // 本塔 4 级眩晕触发冷却
       let windowJustOpened = false;
       if (!this.primed) {
         /* 构造时已开首个窗口（建塔即生效），首帧补记一次开窗事件 */
@@ -238,6 +246,10 @@
         windowJustOpened = true;
         this.windowId++;
       }
+
+      /* 4 级黑洞引力：牵引窗口闭合瞬间（未因开新窗而重置 active）→ 眩晕。
+         须在下方 `active<=0 return` 之前判定。 */
+      if (wasActive && this.active <= 0) this._lv4PostPullStun(ctx);
 
       this.targets = [];
 
@@ -277,7 +289,11 @@
            倒计时挂在行为实例上 → 每座塔独立计时、互不影响。 */
         if (this.smallOnly && ((e.cfg && e.cfg.boss) || e.bossMini)) {
           if (d2 <= r2 && this.bossSlowCd <= 0 && typeof e.applySlow === 'function') {
-            const amt = this.eff.bossSlow != null ? this.eff.bossSlow : 0.10;
+            /* 4 级黑洞引力（TowerConfig.json lv4.bossSlow=0.15）：
+               对 BOSS 的减速从基础 10% 提升至 15% */
+            const lv4g = t.level >= 4 && t.cfg.lv4;
+            const amt = (lv4g && lv4g.bossSlow != null) ? lv4g.bossSlow
+              : (this.eff.bossSlow != null ? this.eff.bossSlow : 0.10);
             if (amt > 0) {
               /* 不做减速上限截断，仅保"移速不为负"的安全下限 0 */
               e.applySlow(Math.max(0, 1 - amt), this.bossSlowDur, 'gravity', true);
@@ -326,6 +342,31 @@
         ctx.pullPulse(t, range, this.targets);
         this.pulseCount++;
       }
+    }
+
+    /* 4 级黑洞引力：牵引窗口结束瞬间，对射程内小怪施加 1 秒眩晕。
+       - BOSS 免疫（cfg.boss / bossMini），由 StatusEffects.applyStun 过滤；
+       - 冰冻中的小怪跳过（避免与冰冻定身视觉/判定冲突）；
+       - 每塔 stun.cooldown（5 秒）内最多触发一次：至少眩晕到 1 只才进冷却。 */
+    _lv4PostPullStun(ctx) {
+      const t = this.tower;
+      const lv4 = (t.level >= 4 && t.cfg && t.cfg.lv4) || null;
+      const stunCfg = lv4 && lv4.stun;
+      if (!stunCfg || this.stunCd > 0) return;
+      if (typeof TDStatusEffects === 'undefined') return;
+      const mgr = TDStatusEffects.ensure(t.scene);
+      if (!mgr) return;
+      const range = t.stats.range;
+      const r2 = range * range;
+      let any = false;
+      for (const e of ctx.enemies) {
+        if (e.dead || e.removed || e.invulnTimer > 0) continue;
+        const dx = e.x - t.x, dy = e.y - t.y;
+        if (dx * dx + dy * dy > r2) continue;
+        mgr.applyStun(e, stunCfg);
+        any = true;
+      }
+      if (any) this.stunCd = stunCfg.cooldown;
     }
   }
 
@@ -405,8 +446,14 @@
       if (!target || this.cooldown > 0) return;
 
       /* ---- 电链弹跳 ---- */
-      const jumps = this.tower.stats.jumps || 0;
-      const decay = this.eff.jumpDecay != null ? this.eff.jumpDecay : 0.90;
+      const jumps = this.tower.stats.jumps || 0; // 4 级时已被 recalcStats 覆盖为 10（lv4.chain.jumps）
+      /* 4 级雷霆万钧（TowerConfig.json lv4.chain.jumpDecay）：每跳衰减降至 5% */
+      const lv4 = (this.tower.level >= 4 && this.tower.cfg.lv4) || null;
+      const lv4chain = lv4 && lv4.chain;
+      const lv4para = lv4 && lv4.paralyze;
+      const decay = (lv4chain && lv4chain.jumpDecay != null)
+        ? lv4chain.jumpDecay
+        : (this.eff.jumpDecay != null ? this.eff.jumpDecay : 0.90);
       const chainRange = this.eff.chainRange || 130;
       const visualDuration = this.eff.visualDuration || 0.25;
       const baseDmg = this.tower.stats.damage;
@@ -444,7 +491,17 @@
           }
           /* 造成伤害（鸭子类型：小怪 / 障碍物通用 takeDamage；障碍物无
              护盾概念，多收一个元素参数不影响其实现） */
-          if (!current.dead) current.takeDamage(Math.round(dmg * mul), chainEl);
+          if (!current.dead) {
+            current.takeDamage(Math.round(dmg * mul), chainEl);
+            /* 4 级雷霆万钧：每个被电链命中的怪判定麻痹（50%×0.5 秒定身）
+               并叠 1 层麻痹值。同一只怪单次电链最多命中 1 次——上方
+               hit 集合已保证，绝无无限弹射/重复叠层。 */
+            if (lv4para && !current.dead && !current.isObstacle &&
+                typeof TDStatusEffects !== 'undefined') {
+              const mgr = TDStatusEffects.ensure(this.tower.scene);
+              if (mgr) mgr.onThunderHit(current, lv4para);
+            }
+          }
         }
         chainPoints.push({ x: current.x, y: current.y });
 
@@ -462,7 +519,7 @@
         }
         if (!next) break; // 没有可弹跳的目标，电链提前结束
         current = next;
-        dmg *= decay; // 每跳伤害递减 10%
+        dmg *= decay; // 每跳伤害按 decay 衰减（基础 10%，4 级雷霆万钧 5%）
       }
 
       /* 闪电视觉：折线闪电连线 + 被击中怪短暂高亮 */

@@ -4,7 +4,7 @@
  * 数据结构：{ completed: [1, 2, ...], unlockedTowers: ['towerD', ...] }
  *   completed：玩家已通关的关卡编号数组
  *   unlockedTowers：已永久解锁的塔类型 key（通关对应关卡时自动写入）
- *   关卡解锁：已设计关卡（第 1~7 关）全部开放，可自由进入（isUnlocked）；
+ *   关卡解锁：第 1~8 关已设计关卡全部开放，可自由进入（isUnlocked）；
  *           通关进度仅作记录与塔解锁依据，不再限制进关
  *   塔解锁：读 TD_CONFIG.towers[key].unlock.unlockLevel（缺省默认可用）；
  *           塔D = 通关第 1 关后解锁，第 2 关及之后关卡可选用。
@@ -15,10 +15,10 @@
   'use strict';
 
   const KEY = 'td_levels_progress_v1';
-  const TOTAL_LEVELS = 7;
-  /* 当前已设计完成的关卡数：第 1～7 关可游玩（第 7 关=双途重围·高难关）。
-     所有关卡开放自由进入，无需逐关解锁。 */
-  const TOTAL_DESIGNED = 7;
+  const TOTAL_LEVELS = 8;
+  /* 当前已设计完成的关卡数：第 1～8 关可游玩（第 8 关=风蚀荒原·熔岩巨兽）。
+     第 1～8 关全部开放自由进入（见 isUnlocked）。 */
+  const TOTAL_DESIGNED = 8;
 
   const storage = {
     /**
@@ -81,14 +81,14 @@
       this.refreshTowerUnlocks();
     },
 
-    /** 某关是否可进入：已设计关卡（第 1~7 关）全部开放、自由进入，
-     *  不再依赖上一关是否通关；未设计关卡恒不可进入（敬请期待）。
-     *  通关进度 completed 仍正常记录并用于塔解锁，但不再限制进关。 */
+    /** 某关是否可进入：第 1~8 关全部开放、自由进入，不依赖上一关
+     *  是否通关；未设计关卡恒不可进入（敬请期待）。
+     *  通关进度 completed 仍正常记录并用于塔解锁。 */
     isUnlocked(level) {
       if (level < 1 || level > TOTAL_LEVELS) return false;
       if (this.__debugAllUnlocked) return true; // 调试态：全关卡放行（不落盘）
       if (level > TOTAL_DESIGNED) return false; // 未设计关卡：敬请期待，不可进入
-      return true; // 已设计关卡全部开放
+      return true; // 已设计关卡（第 1~8 关）全部开放
     },
 
     /* ---------------- 塔解锁 ---------------- */

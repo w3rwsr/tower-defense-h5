@@ -206,8 +206,8 @@ class Tower extends Phaser.GameObjects.Container {
   _thunderApplyArt() {
     this._thunderBody.setTexture(this._thunderTexKey());
     const art = (this.cfg && this.cfg.art) || { baseHeight: 54, scale: {} };
-    const lvScale = (art.scale && art.scale[this.level] != null)
-      ? art.scale[this.level] : 1;
+    const lvScale = (art.scale && art.scale[this.artLv] != null)
+      ? art.scale[this.artLv] : 1;
     const h = (art.baseHeight || 54) * lvScale;
     const fr = this._thunderBody.frame;
     const k = (fr && fr.height) ? h / fr.height : 0.25;
@@ -224,10 +224,10 @@ class Tower extends Phaser.GameObjects.Container {
      始终与贴图一致——发射点 = 塔心 + 旋转矩阵 × 显示缩放 × tip。 */
   _thunderTipOffset() {
     const det = window.__thunderTipOffset &&
-      window.__thunderTipOffset[this.level];
+      window.__thunderTipOffset[this.artLv];
     if (det && typeof det.x === 'number') return { x: det.x, y: det.y };
     const art = (this.cfg && this.cfg.art) || {};
-    const tip = art.tip && art.tip[this.level];
+    const tip = art.tip && art.tip[this.artLv];
     if (tip && tip.length === 2) return { x: tip[0], y: tip[1] };
     const fr = this._thunderBody && this._thunderBody.frame;
     return fr ? { x: 0, y: -fr.height * 0.4 } : { x: 0, y: -24 };
@@ -247,8 +247,8 @@ class Tower extends Phaser.GameObjects.Container {
   _iceApplyArt() {
     this.turret.setTexture(this._iceTexKey());
     const art = (this.cfg && this.cfg.art) || { baseHeight: 48, scale: {} };
-    const lvScale = (art.scale && art.scale[this.level] != null)
-      ? art.scale[this.level] : 1;
+    const lvScale = (art.scale && art.scale[this.artLv] != null)
+      ? art.scale[this.artLv] : 1;
     const h = (art.baseHeight || 48) * lvScale;
     const fr = this.turret.frame;
     const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
@@ -270,8 +270,8 @@ class Tower extends Phaser.GameObjects.Container {
   _waterApplyArt() {
     this.turret.setTexture(this._waterTexKey());
     const art = (this.cfg && this.cfg.art) || {};
-    const dh = (art.displayHeight && art.displayHeight[this.level] != null)
-      ? art.displayHeight[this.level] : 47;
+    const dh = (art.displayHeight && art.displayHeight[this.artLv] != null)
+      ? art.displayHeight[this.artLv] : 47;
     const fr = this.turret.frame;
     const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
     this.turret.setDisplaySize(dh * aspect, dh);
@@ -291,8 +291,8 @@ class Tower extends Phaser.GameObjects.Container {
   _gravityApplyArt() {
     this.turret.setTexture(this._gravityTexKey());
     const art = (this.cfg && this.cfg.art) || { baseHeight: 50, scale: {} };
-    const lvScale = (art.scale && art.scale[this.level] != null)
-      ? art.scale[this.level] : 1;
+    const lvScale = (art.scale && art.scale[this.artLv] != null)
+      ? art.scale[this.artLv] : 1;
     const h = (art.baseHeight || 50) * lvScale;
     const fr = this.turret.frame;
     const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
@@ -318,8 +318,8 @@ class Tower extends Phaser.GameObjects.Container {
     }
     this.turret.setTexture(this._windTexKey());
     const art = (this.cfg && this.cfg.art) || { baseHeight: 54, scale: {} };
-    const lvScale = (art.scale && art.scale[this.level] != null)
-      ? art.scale[this.level] : 1;
+    const lvScale = (art.scale && art.scale[this.artLv] != null)
+      ? art.scale[this.artLv] : 1;
     const h = (art.baseHeight || 54) * lvScale;
     const fr = this.turret.frame;
     const aspect = (fr && fr.height) ? fr.width / fr.height : 1;
@@ -343,10 +343,10 @@ class Tower extends Phaser.GameObjects.Container {
     try {
       /* setTexture 带子帧 frameKey，比 setCrop 可靠（setCrop 在 setDisplaySize
          后偶发不更新 cutX/cutWidth，会把整张 640x640 视频都显示出来） */
-      this.windImg.setTexture('wind_video_full', WIND_VIDEO.frameKeyForLevel(this.level));
+      this.windImg.setTexture('wind_video_full', WIND_VIDEO.frameKeyForLevel(this.artLv));
       this.windImg.setPipeline('WindVideoGK');
       this.windImg.setBlendMode(Phaser.BlendModes.NORMAL);
-      const d = WIND_VIDEO.displaySize(this.level);
+      const d = WIND_VIDEO.displaySize(this.artLv);
       this.windImg.setDisplaySize(d.w, d.h);
       this.windImg.setOrigin(0.5, 0.5);
       this.windImg.setPosition(0, 0);
@@ -362,8 +362,8 @@ class Tower extends Phaser.GameObjects.Container {
      setDisplaySize 按段宽高比缩放保持龙卷风形状不拉伸。 */
   _applyWindVideoCrop() {
     if (!this.windImg) return;
-    this.windImg.setTexture('wind_video_full', WIND_VIDEO.frameKeyForLevel(this.level));
-    const d = WIND_VIDEO.displaySize(this.level);
+    this.windImg.setTexture('wind_video_full', WIND_VIDEO.frameKeyForLevel(this.artLv));
+    const d = WIND_VIDEO.displaySize(this.artLv);
     this.windImg.setDisplaySize(d.w, d.h);
     this.windImg.setOrigin(0.5, 0.5);
     this.windImg.setPosition(0, 0);
@@ -374,7 +374,7 @@ class Tower extends Phaser.GameObjects.Container {
   _windSpinSpeed() {
     const art = (this.cfg && this.cfg.art) || {};
     const spin = art.spin || {};
-    return (spin[this.level] != null) ? spin[this.level] : 2;
+    return (spin[this.artLv] != null) ? spin[this.artLv] : 2;
   }
 
   /* 火塔当前等级的美术贴图 key（缺失时回退到最低可用等级） */
@@ -394,7 +394,7 @@ class Tower extends Phaser.GameObjects.Container {
   /* 燃烧视频显示尺寸：静态贴图尺寸 × 匹配系数（视频画面内火焰占比小于
      静态贴图纹理，容器需放大才能与静态火焰等大，系数按包围盒实测） */
   _burnDisplaySize() {
-    return FIRE_BURN.displaySize(this.level);
+    return FIRE_BURN.displaySize(this._burnLv); // _burnLv 已钳制到 3
   }
 
   /* 按等级素材【自动检测到的】背景类型配置视频层渲染管线。
@@ -517,22 +517,56 @@ class Tower extends Phaser.GameObjects.Container {
     const eff = this.cfg.effect || {};
     const baseJumps = (eff.jumps != null) ? eff.jumps : 0;
     const k = this.level - 1;              // 数组下标 = 等级-1
+    const ai = (arr) => Math.min(k, arr.length - 1); // 4 级沿用末级显式数值（如火塔 [80,130,200]）
     this.stats = {
-      damage: Math.round(isArr(up.damage) ? up.damage[k] : base.damage * dmgMul),
-      range: Math.round(isArr(up.range) ? up.range[k] : base.range * rangeMul),
-      cooldown: +(isArr(up.cooldown) ? up.cooldown[k] : base.cooldown * cdMul).toFixed(3),
+      damage: Math.round(isArr(up.damage) ? up.damage[ai(up.damage)] : base.damage * dmgMul),
+      range: Math.round(isArr(up.range) ? up.range[ai(up.range)] : base.range * rangeMul),
+      cooldown: +(isArr(up.cooldown) ? up.cooldown[ai(up.cooldown)] : base.cooldown * cdMul).toFixed(3),
       jumps: baseJumps + jumpsAdd // 当前弹跳次数（塔E 专用，其他塔为 0）
     };
+    /* 4 级弹射覆盖（TowerConfig.json lv4.chain）：弹跳次数以 4 级专属值为准 */
+    const lv4chain = this.cfg.lv4 && this.cfg.lv4.chain;
+    if (this.level >= 4 && lv4chain && lv4chain.jumps != null) {
+      this.stats.jumps = lv4chain.jumps;
+    }
+    /* 4 级属性覆盖（TowerConfig.json lv4.stats）：伤害/攻击间隔以 4 级专属值
+       为准（火塔 320/0.556s≈1.8次每秒、水塔 135），1~3 级数值不受影响 */
+    const lv4stats = (this.level >= 4 && this.cfg.lv4) ? this.cfg.lv4.stats : null;
+    if (lv4stats) {
+      if (lv4stats.damage != null) this.stats.damage = Math.round(lv4stats.damage);
+      if (lv4stats.cooldown != null) this.stats.cooldown = +lv4stats.cooldown.toFixed(3);
+    }
   }
 
   get maxLevel() { return this.cfg.upgrade.maxLevel; }
   get canUpgrade() { return this.level < this.cfg.upgrade.maxLevel; }
 
+  /* 4 级塔外观沿用 3 级贴图：所有「按等级查美术参数」的查找统一用
+     artLv（钳制到 3），避免 lv4 查表落空（undefined → NaN 尺寸/回退错级）。 */
+  get artLv() { return Math.min(this.level, 3); }
+
+  /* 4 级进化波次门控：当前波次 >= waveGate（TowerConfig.json，默认 4）
+     才允许升级。波次号 = waveIndex + 1（waveIndex 从 0 起）；
+     未进入任何波次（waveIndex=0）时视为第 1 波。返回 null 表示无阻碍。 */
+  upgradeBlockReason() {
+    if (!this.canUpgrade) return null;
+    const gate = this.cfg.upgrade.waveGate;
+    if (gate == null) return null;
+    const curWave = ((this.scene && this.scene.waveIndex) || 0) + 1;
+    return curWave >= gate ? null : '第' + gate + '波解锁';
+  }
+
   /* 升级费用：造价 * costFactor * 当前等级 * 关卡系数。
      关卡级 upgradeCostFactor（JSON 驱动，第 7 关=1.5）只影响升级费，
-     塔造价（this.cfg.cost）不变；未配置的关卡系数缺省 1，零影响。 */
+     塔造价（this.cfg.cost）不变；未配置的关卡系数缺省 1，零影响。
+     4 级进化例外：固定消耗 TowerConfig.json upgrade4.cost（800），
+     不乘关卡系数（lv4Cost 由 TowerConfigData.js 注入所有塔）。
+     波次未达 waveGate 时返回 null（视为不可升级，任何调用方都不会扣款）。 */
   getUpgradeCost() {
     if (!this.canUpgrade) return null;
+    if (this.upgradeBlockReason()) return null;
+    const lv4Cost = this.cfg.upgrade.lv4Cost;
+    if (lv4Cost != null && this.level + 1 >= 4) return lv4Cost;
     const lvlFactor = (this.scene.levelCfg && this.scene.levelCfg.upgradeCostFactor) || 1;
     return Math.round(this.cfg.cost * this.cfg.upgrade.costFactor * this.level * lvlFactor);
   }
@@ -542,6 +576,14 @@ class Tower extends Phaser.GameObjects.Container {
   }
 
   upgrade() {
+    /* 4 级门控：波次未达标时拒绝升级（面板按钮已置灰，此处兜底防绕过） */
+    const block = this.upgradeBlockReason();
+    if (block) {
+      if (typeof this.scene.floatText === 'function') {
+        this.scene.floatText(this.x, this.y - 44, block, 0xffffff);
+      }
+      return false;
+    }
     const cost = this.getUpgradeCost();
     if (cost === null) return false;
     this.level++;
@@ -555,10 +597,11 @@ class Tower extends Phaser.GameObjects.Container {
       this.turret.setDisplaySize(ds, ds);
       if (!this._burnActive) this._buildFireFx();
       /* 燃烧视频：释放旧等级播放引用 → 注册新等级 → 换纹理（已就绪立即换，
-         未就绪则等 whenReady 回调；期间静态贴图始终兜底） */
+         未就绪则等 whenReady 回调；期间静态贴图始终兜底）。
+         4 级沿用 3 级视频素材（_burnLv 钳制到 3，查表不会落空）。 */
       if (this._burnOk) {
         FIRE_BURN.release(this._burnLv);
-        this._burnLv = this.level;
+        this._burnLv = this.artLv;
         FIRE_BURN.use(this._burnLv);
         FIRE_BURN.whenReady(this._burnLv, (key) => this._showBurn(key));
       }
@@ -582,9 +625,42 @@ class Tower extends Phaser.GameObjects.Container {
       this._windApplyArt();
       if (this._windVideoActive) this._applyWindVideoCrop();
     }
+    /* 4 级进化视觉：贴图沿用 3 级，塔底叠加「旋转 + 呼吸」的元素发光光环 */
+    if (this.level >= 4 && this.cfg.lv4) this._buildLv4Halo();
     // 升级小动画
     this.scene.tweens.add({ targets: this, scale: 1.18, duration: 110, yoyo: true });
     return cost;
+  }
+
+  /* 4 级塔发光光环：三段圆弧（旋转可见）+ 外圈淡光，ADD 混合叠在底座上，
+     旋转 + 呼吸双 Tween 循环。颜色取 TowerConfig.json lv4.haloColor（元素色）。 */
+  _buildLv4Halo() {
+    if (this._haloGfx || !this.cfg.lv4) return;
+    const color = (this.cfg.lv4.haloColor != null)
+      ? this.cfg.lv4.haloColor : (this.cfg.color || 0xffffff);
+    const g = this.scene.add.graphics();
+    for (let i = 0; i < 3; i++) {
+      const a0 = i * (Math.PI * 2 / 3);
+      g.lineStyle(3, color, 0.95);
+      g.beginPath();
+      g.arc(0, 0, 21, a0, a0 + Math.PI * 2 / 3 * 0.72);
+      g.strokePath();
+    }
+    g.lineStyle(1.5, color, 0.35);
+    g.strokeCircle(0, 0, 26);
+    g.setBlendMode(Phaser.BlendModes.ADD);
+    g.setPosition(0, 6);   // 光环中心略下沉，贴合底座
+    this.addAt(g, 1);      // 底座之上、炮塔贴图之下
+    this._haloGfx = g;
+    this._haloTweenRot = this.scene.tweens.add({
+      targets: g, rotation: Math.PI * 2, duration: 3600, repeat: -1
+    });
+    this._haloTweenPulse = this.scene.tweens.add({
+      targets: g,
+      alpha: { from: 0.7, to: 1 },
+      scale: { from: 1, to: 1.06 },
+      duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+    });
   }
 
   /* 弹幕发射点（世界坐标）= 旋转后的火焰根部（火焰底部钝端）。
@@ -614,7 +690,7 @@ class Tower extends Phaser.GameObjects.Container {
        k = turret.scaleX（显示高/纹理高 = 1/3，等比缩放）。 */
     if (this.isWater) {
       const m = (window.__waterTowerMuzzle &&
-        window.__waterTowerMuzzle[this.level]) || { x: 0, y: 0 };
+        window.__waterTowerMuzzle[this.artLv]) || { x: 0, y: 0 };
       const mx = m.x || 0, my = m.y || 0;
       const k = this.turret.scaleX;
       const c = Math.cos(this.turret.rotation), s = Math.sin(this.turret.rotation);
@@ -700,6 +776,10 @@ class Tower extends Phaser.GameObjects.Container {
      等全部子对象） */
   destroy(fromScene) {
     this._clearFireFx();
+    /* 4 级光环：先停 Tween 再销毁，避免 Tween 指向已销毁 Graphics */
+    if (this._haloTweenRot) { this._haloTweenRot.stop(); this._haloTweenRot = null; }
+    if (this._haloTweenPulse) { this._haloTweenPulse.stop(); this._haloTweenPulse = null; }
+    if (this._haloGfx) { this._haloGfx.destroy(); this._haloGfx = null; }
     if (this._burnOk) {
       FIRE_BURN.release(this._burnLv);
     }

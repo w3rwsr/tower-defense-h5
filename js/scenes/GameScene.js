@@ -170,6 +170,13 @@ class GameScene extends Phaser.Scene {
 
     /* 第 1 关 = 新手教程关，启动引导提示 */
     if (this.levelId === 1) this.startTutorial();
+
+    /* 第 8 关「风蚀荒原」：风眼装饰 + 风蚀增伤 + 火焰路径容器
+       （仅本关配置 levelCfg.windEyes 时创建；同时预生成三种新怪的
+       代码绘制贴图，供 Enemy 构造器按 enemy_<typeKey> 直接取用） */
+    if (this.levelCfg.windEyes && typeof Level8Controller !== 'undefined') {
+      this.level8 = new Level8Controller(this);
+    }
   }
 
   /* ============================================================
@@ -1227,6 +1234,9 @@ class GameScene extends Phaser.Scene {
     if (dt > 0) {
       this.updateWaves(dt);
 
+      /* 第 8 关：风眼计时 / 风蚀增伤倒计时 / 火焰路径区域结算（暂停即冻结） */
+      if (this.level8) this.level8.tick(dt);
+
       const ctx = {
         enemies: this.enemies,
         fire: (tower, target) => this.fireProjectile(tower, target),
@@ -1353,7 +1363,13 @@ class GameScene extends Phaser.Scene {
             /* 第 7 关：组内序号 + BOSS 变体图案（金/蓝/灰按出怪序号分配，
                左右两路各自独立从 pattern[0] 开始）；旧关卡无此字段恒 null */
             variantIndex: i,
-            bossVariantPattern: grp.bossVariantPattern || null
+            bossVariantPattern: grp.bossVariantPattern || null,
+            /* 第 8 关精英标记（第 7 波大体型高血量基础史莱姆，JSON 驱动）；
+               旧关卡组无这些字段，恒 undefined，零影响 */
+            elite: grp.elite || false,
+            eliteHpMul: grp.eliteHpMul,
+            eliteScale: grp.eliteScale,
+            eliteGoldBonus: grp.eliteGoldBonus
           });
         }
       }
@@ -1500,9 +1516,15 @@ class GameScene extends Phaser.Scene {
     /* 三种 BOSS 按波次接入（JSON 驱动 TD_CONFIG.boss.variants / waveVariant）：
        第 3/4/5 波(索引 2/3/4) = 金/蓝/灰 BOSS，同关内三种依次登场 */
     const isBossType = !!(TD_CONFIG.enemies[typeKey] && TD_CONFIG.enemies[typeKey].boss);
-    /* BOSS 变体：关卡级图案/波次映射优先（第 7 关），旧关卡回退全局波次表 */
-    const bv = isBossType ? this.resolveBossVariant(entry) : null;
-    const e = new Enemy(this, typeKey, routeId, (bv && bv.tex) ? { bossTexKey: bv.tex } : null);
+    /* 第 8 关新增怪物类注册表（Level8Enemies.js）：命中则用专属子类
+       （代码绘制外观 + 专属机制/状态机）；其余关卡与类型通配 Enemy，零影响 */
+    const Cls = (typeof LEVEL8_ENEMY_CLASSES !== 'undefined' && LEVEL8_ENEMY_CLASSES[typeKey])
+      ? LEVEL8_ENEMY_CLASSES[typeKey] : Enemy;
+    /* noVariant=true（熔岩巨兽）：不接入金/蓝/灰 BOSS 变体
+       （贴图/移速/金币走 lavaBoss 自身配置，血量仍按小怪×bossFactor） */
+    const noVariant = !!(TD_CONFIG.enemies[typeKey] && TD_CONFIG.enemies[typeKey].noVariant);
+    const bv = (isBossType && !noVariant) ? this.resolveBossVariant(entry) : null;
+    const e = new Cls(this, typeKey, routeId, (bv && bv.tex) ? { bossTexKey: bv.tex } : null);
     const isBoss = !!e.cfg.boss;
     if (isBoss) {
       const wcfg = this.levelCfg.waves;
@@ -1571,6 +1593,17 @@ class GameScene extends Phaser.Scene {
         }
         if (rbCfg.goldBonus) e.reward += rbCfg.goldBonus;
       }
+      /* 第 8 关精英标记（entry.elite，JSON 驱动）：高血量 ×eliteHpMul、
+         体型 ×eliteScale、金币 +eliteGoldBonus 的大体型基础史莱姆（第 7 波）；
+         旧关卡组无此字段（恒 false），零影响 */
+      if (entry.elite) {
+        const mul = (entry.eliteHpMul != null) ? entry.eliteHpMul : 4;
+        e.maxHp = Math.round(e.maxHp * mul);
+        e.hp = e.maxHp;
+        e.drawHpBar(1);
+        if (entry.eliteScale) e.setScale(entry.eliteScale);
+        if (entry.eliteGoldBonus) e.reward += entry.eliteGoldBonus;
+      }
       /* JSON 驱动：末波按路线免伤（第 4 关 finalWaveRouteDmgReduction[1]=0.10：
          第 5 波右侧小怪受击 ×90%），仅末波非 BOSS 生效，不影响左侧/其他波 */
       if (this.waveIndex === fwcfg.list.length - 1 && fwcfg.finalWaveRouteDmgReduction) {
@@ -1590,6 +1623,7 @@ class GameScene extends Phaser.Scene {
        仅作用于右侧岔路追加怪（entry.speedBonus），主波出怪无此字段不加速 */
     if (entry.speedBonus) e.baseSpeed *= (1 + entry.speedBonus);
     this.enemies.push(e);
+    return e;
   }
 
   onEnemyKilled(e) {
@@ -1601,6 +1635,52 @@ class GameScene extends Phaser.Scene {
     this.gold += e.reward;
     this.floatText(e.x, e.y - e.radius - 6, '+' + e.reward, 0xffe27a);
     e.playDeath();
+  }
+
+  /* ============================================================
+   * 塔「禁言」（第 8 关：自爆泥怪爆炸 / 熔岩巨兽火焰路径）
+   * 实现方式：对塔实例【运行时包装 update】——禁言期内整塔冻结（索敌/
+   * 开火/炮塔动画全部停止），到期自动还原为原型方法。不改动 Tower.js 与
+   * attackModule.js 任何源码，也不影响伤害计算公式；包装仅存在于被禁言
+   * 的塔实例上，出售/场景销毁随实例一并消失。
+   * ============================================================ */
+  silenceTower(tw, duration) {
+    if (!tw || tw.removed || !(duration > 0)) return;
+    if (!tw.__silenceLeft || tw.__silenceLeft <= 0) {
+      /* 首次禁言：换装实例级 update 包装（原型方法备份在 __silenceOrig） */
+      tw.__silenceLeft = duration;
+      tw.__silenceOrig = tw.update;
+      tw.update = function (dt, ctx) {
+        this.__silenceLeft -= dt;
+        if (this.__silenceLeft > 0) return;  // 禁言中：完全停止攻击
+        const orig = this.__silenceOrig;
+        this.update = orig;                  // 到期还原为原型方法
+        this.__silenceOrig = null;
+        if (this.__silenceFx) {
+          try { this.__silenceFx.destroy(); } catch (_) {}
+          this.__silenceFx = null;
+        }
+        if (orig) orig.call(this, dt, ctx);  // 还原当帧立即恢复攻击逻辑
+      };
+      /* 视觉：灰蓝罩圈 + 「禁言」气泡（挂场景层，不进塔容器，
+         避免影响塔自身的缩放/深度管理）；销毁时机与还原逻辑绑定 */
+      const fx = this.add.container(tw.x, tw.y);
+      fx.setDepth(tw.depth != null ? tw.depth + 1 : 40);
+      const g = this.add.graphics();
+      g.fillStyle(0x9fb6cc, 0.22);
+      g.fillCircle(0, 0, 22);
+      g.lineStyle(2, 0x9fb6cc, 0.85);
+      g.strokeCircle(0, 0, 22);
+      const label = this.add.text(0, -30, '🔇 禁言', {
+        fontFamily: TD_FONT_STACK, fontSize: '12px', fontStyle: 'bold',
+        color: '#cfe3f2', resolution: TD_TEXT_RES
+      }).setOrigin(0.5).setStroke('#22303c', 3);
+      fx.add([g, label]);
+      tw.__silenceFx = fx;
+    } else {
+      /* 已在禁言：取更长剩余时间（火焰路径 0.5s 一跳需要持续刷新） */
+      tw.__silenceLeft = Math.max(tw.__silenceLeft, duration);
+    }
   }
 
   /* ============================================================
@@ -2554,7 +2634,13 @@ class GameScene extends Phaser.Scene {
     }
 
     const upCost = tower.getUpgradeCost();
-    if (tower.canUpgrade) {
+    /* 4 级进化门控显示：波次未达 waveGate（默认 4）时按钮置灰并提示解锁波次 */
+    const upBlock = (typeof tower.upgradeBlockReason === 'function')
+      ? tower.upgradeBlockReason() : null;
+    if (tower.canUpgrade && upBlock) {
+      p._up.setEnabled(false);
+      p._up.setLabel(upBlock);
+    } else if (tower.canUpgrade && upCost !== null) {
       p._up.setEnabled(true);
       p._up.setLabel('⬆ 升级 🪙' + upCost);
     } else {
