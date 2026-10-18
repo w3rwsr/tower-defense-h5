@@ -190,6 +190,12 @@
       this.pulseCount = 0;         // 已触发的攻击脉冲数（有目标才计数，供自查）
       this.windowId = 0;           // 牵引窗口序号（破冰去重用，每开一次窗 +1）
       this.smallOnly = this.eff.targetFilter === 'nonBoss';
+      /* BOSS 弥补减速（JSON：bossSlow/bossSlowDuration/bossSlowCooldown）：
+         同一座塔 2 秒内只对 BOSS 触发一次 0.75 秒的减速；冷却【每座塔独立计时】
+         （this 属于单塔行为实例），多座塔互不影响。 */
+      this.bossSlowDur = (this.eff.bossSlowDuration != null ? this.eff.bossSlowDuration : 750) / 1000;
+      this.bossSlowCdMax = (this.eff.bossSlowCooldown != null ? this.eff.bossSlowCooldown : 2000) / 1000;
+      this.bossSlowCd = 0;         // 剩余触发冷却（秒），<=0 可触发
     }
 
     /** 塔在敌人所属路线【整条路径】上的沿路投影（最近点里程）。
@@ -218,6 +224,7 @@
       /* ---- 脉冲计时：每 interval 秒开窗一次，窗内持续 duration 秒 ---- */
       this.timer -= dt;
       if (this.active > 0) this.active -= dt;
+      if (this.bossSlowCd > 0) this.bossSlowCd -= dt;   // 本塔对 BOSS 的触发冷却
       let windowJustOpened = false;
       if (!this.primed) {
         /* 构造时已开首个窗口（建塔即生效），首帧补记一次开窗事件 */
@@ -262,15 +269,20 @@
         /* 小怪过滤：nonBoss 模式下 BOSS（cfg.boss===true）免疫吸引；
            第 7 关绿色史莱姆分身带 bossMini 标记，同样免疫吸引。
            【弥补】BOSS 不能被牵引（位置完全不动），但被引力塔效果命中时挂一层
-           固定减速 debuff：减速量 = JSON effect.bossSlow（缺省 0.30，不随等级变化），
-           持续时间 = 本次牵引时长 attractDuration；每个牵引窗口（windowId）对同一
-           BOSS 只挂一次，既不丢控场也不产生位移。 */
+           减速 debuff：减速量 = JSON effect.bossSlow（固定 0.10 = 10%，不随等级变化），
+           持续时间 = bossSlowDuration（0.75 秒）；
+           【多座引力塔同时作用于同一 BOSS 不叠加】——applySlow 只取最强系数，
+           多塔都施加 0.90，最终仍只按 10% 减速，不会变成 20%/19%。
+           【触发冷却】同一座塔 bossSlowCooldown（2 秒）内只触发一次，
+           倒计时挂在行为实例上 → 每座塔独立计时、互不影响。 */
         if (this.smallOnly && ((e.cfg && e.cfg.boss) || e.bossMini)) {
-          if (d2 <= r2 && typeof e.applySlow === 'function' &&
-              e._gravSlowWindow !== this.windowId) {
-            e._gravSlowWindow = this.windowId;
-            const amt = this.eff.bossSlow != null ? this.eff.bossSlow : 0.30;
-            if (amt > 0) e.applySlow(Math.max(0.1, 1 - amt), this.duration, 'gravity', true);
+          if (d2 <= r2 && this.bossSlowCd <= 0 && typeof e.applySlow === 'function') {
+            const amt = this.eff.bossSlow != null ? this.eff.bossSlow : 0.10;
+            if (amt > 0) {
+              /* 不做减速上限截断，仅保"移速不为负"的安全下限 0 */
+              e.applySlow(Math.max(0, 1 - amt), this.bossSlowDur, 'gravity', true);
+              this.bossSlowCd = this.bossSlowCdMax;
+            }
           }
           continue;                                 // BOSS 永不位移
         }

@@ -121,16 +121,16 @@
   <!-- ===== 脚本按依赖顺序加载（全部 defer：按文档顺序执行，下载并行） =====
        FireBurnData.js（~600KB 内嵌燃烧视频）不在此同步加载——由 main.js 在
        Phaser 启动前后台动态注入，选关页先行进入，视频数据就绪后自动挂接 -->
-  <script defer src="js/config.js?v=20261018d"></script>
+  <script defer src="js/config.js?v=20261018e"></script>
   <script defer src="js/storage.js?v=20261016a"></script>
   <!-- 媒体加载统一调度（串行队列 + 进度条 + 10s 超时跳过 + Cache API 缓存）：
        必须早于各视频模块执行，供其按需排进加载队列 -->
   <script defer src="js/MediaLoader.js?v=20261018b"></script>
   <!-- 开发调试工具：仅 URL 带 #dbg 时激活（全内容解锁 + 应用内浏览器），无 #dbg 的正式环境脚本立即退出，不创建 DOM、不写任何存储 -->
   <script defer src="js/debugTools.js?v=20260921r"></script>
-  <script defer src="js/attackModule.js?v=20261017b"></script>
-  <script defer src="js/objects/Enemy.js?v=20261017b"></script>
-  <script defer src="js/objects/Projectile.js?v=20261015b"></script>
+  <script defer src="js/attackModule.js?v=20261017c"></script>
+  <script defer src="js/objects/Enemy.js?v=20261017c"></script>
+  <script defer src="js/objects/Projectile.js?v=20261015c"></script>
   <script defer src="js/FireTowerArtData.js?v=20261009o"></script>
   <script defer src="js/LavaBulletData.js?v=20261009l"></script>
   <script defer src="js/IceTowerArtData.js?v=20261010a"></script>

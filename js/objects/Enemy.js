@@ -187,12 +187,15 @@ class Enemy extends Phaser.GameObjects.Container {
      element 标注减速来源（'ice'=冰弹/冰反应；第 7 关冰元素护盾存在期间
      免疫一切冰系减速——当前游戏内减速全部来自冰元素，故无元素标注同样拦截）
      noMark=true 时不挂任何元素印记（塔D 对 BOSS 的固定减速：来源是引力而非
-     冰元素，不应在 1~5 关的旧印记模式下误挂"冰"标记） */
+     冰元素，不应在 1~5 关的旧印记模式下误挂"冰"标记）
+     【不设减速上限】减速幅度由调用方决定，本方法不做任何强度截断，只保
+     "移速不为负"的安全下限（系数下限 0 → 移速最低 0，绝不倒退）。 */
   applySlow(factor, duration, element, noMark) {
     if (this.shield && this.shield.type === 'element' && this.shield.element === 'ice' &&
         (!element || element === 'ice')) {
       return;
     }
+    if (!(factor > 0)) factor = 0;   // 只防负移速，不设减速强度上限
     // 多种减速同时存在时：取更强（系数更小）者，持续时间刷新为较长者
     this.slowFactor = this.slowTimer > 0 ? Math.min(this.slowFactor, factor) : factor;
     this.slowTimer = Math.max(this.slowTimer, duration);
@@ -311,7 +314,7 @@ class Enemy extends Phaser.GameObjects.Container {
            第 7 关绿色史莱姆分身（bossMini）同样按 BOSS 处理。 */
         const ratio = ((TD_CONFIG.elementSystem.vuln || {}).bossSlowRatio != null)
           ? TD_CONFIG.elementSystem.vuln.bossSlowRatio : 0.3;
-        this.applySlow(Math.max(0.1, 1 - ratio), fz);
+        this.applySlow(Math.max(0, 1 - ratio), fz);
         if (this.scene && typeof this.scene.floatText === 'function') {
           this.scene.floatText(this.x, this.y - this.radius - 12, 'BOSS 减速', 0x9fd8ff);
         }

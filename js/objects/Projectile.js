@@ -273,18 +273,23 @@ class Projectile extends Phaser.GameObjects.Image {
               mul = e.attachElement(el, null, el).reactionMul || 1;
             }
             e.takeDamage(this.damage * mul, el);
-            /* 减速：BOSS/BossMini 免疫冰冻（不能定身），为弥补，冰元素塔对其
-               减速的【幅度与时长】按 JSON bossSlowMul（缺省 1.75）放大后再施加；
-               小怪数值完全不变（倍率=1 或缺省时不放大）。
-               幅度口径：减速量 = (1-slowFactor) × 倍率，反算系数并钳下限 0.1。 */
-            let sf = this.effect.slowFactor;
-            let sd = this.effect.slowDuration;
-            const bMul = this.effect.bossSlowMul;
-            if (((e.cfg && e.cfg.boss) || e.bossMini) && bMul && bMul !== 1) {
-              sf = Math.max(0.1, 1 - (1 - sf) * bMul);
-              sd = sd * bMul;
+            /* 减速（不设减速上限，只保"移速不为负"的安全下限 0）：
+               小怪按【塔等级】取 slowFactorByLevel（1级 30% / 2级 40% / 3级 50%）；
+               BOSS/BossMini 免疫冰冻（不能定身），仅【达到 bossSlow.minLevel 的冰塔】
+               改用专项固定数值（默认 3 级及以上 = 65%），未达等级仍走普通小怪逻辑。 */
+            const eff = this.effect;
+            const lv = Math.min(3, Math.max(1, (this.sourceTower && this.sourceTower.level) || 1));
+            const byLv = eff.slowFactorByLevel;
+            let sf = (byLv && byLv[lv] != null) ? byLv[lv]
+              : (eff.slowFactor != null ? eff.slowFactor : 1);
+            let sd = eff.slowDuration;
+            const bs = eff.bossSlow;
+            if (((e.cfg && e.cfg.boss) || e.bossMini) && bs && bs.factor != null &&
+                lv >= (bs.minLevel != null ? bs.minLevel : 3)) {
+              sf = bs.factor;
+              if (bs.duration != null) sd = bs.duration;
             }
-            if (!e.dead) e.applySlow(sf, sd, el);
+            if (!e.dead) e.applySlow(Math.max(0, sf), sd, el);
           }
         });
       }

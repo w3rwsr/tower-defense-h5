@@ -450,14 +450,17 @@ window.TD_CONFIG = {
           "type": "splashSlow",
           "value": 9,
           "splashRadius": 68,
-          "slowFactor": 0.50,      // 减速到 50% 移速
-          "slowDuration": 1.6,     // 持续秒数
-          /* BOSS 免疫冰冻（不能定身），用更强减速弥补：冰元素塔命中 BOSS 时，
-             减速【幅度与时长】均按本倍率放大（幅度口径：减速量 = 1-slowFactor，
-             乘倍率后反算系数，并钳下限 0.1）。例：小怪 50% 减速/1.6s → BOSS
-             的减速量 50%×1.75=87.5%（移速降到 12.5%）、时长 1.6×1.75=2.8s。
-             仅对 cfg.boss / bossMini 生效，小怪数值完全不变。1=不加强。 */
-          "bossSlowMul": 1.75
+          "slowFactor": 0.50,      // 兜底值（= 三级口径，减速到 50% 移速）；实际按 slowFactorByLevel 取
+          /* 小怪减速【按塔等级】取值（移速系数，越小越慢；减速% = 1 - 系数）：
+               1 级 0.70 = 减速 30% / 2 级 0.60 = 减速 40% / 3 级 0.50 = 减速 50%。
+             升级只提升伤害/射程/冷却（见 upgrade），减速一律走本表，JSON 可调。 */
+          "slowFactorByLevel": { "1": 0.70, "2": 0.60, "3": 0.50 },
+          "slowDuration": 1.6,     // 小怪减速持续秒数（1/2/3 级相同）
+          /* BOSS 专项减速（BOSS 免疫冰冻、不能定身，用大幅减速弥补）：
+             仅【达到 minLevel 及以上】的冰塔对 BOSS/BossMini 触发本专项固定数值；
+             未达等级的冰塔对 BOSS 仍走上面的普通小怪逻辑（按等级取 slowFactorByLevel）。
+             factor = 移速系数：0.35 = 减速 65%；duration = 持续秒数。不设减速上限。 */
+          "bossSlow": { "minLevel": 3, "factor": 0.35, "duration": 1.6 }
         },
         /* 冰弹贴图（assets/ice_bullets.png 离线裁切，见 build_ice_assets.py；
            data URI 模块 IceBulletData.js，纹理键 proj_ice_lv1/2/3）。
@@ -629,10 +632,16 @@ window.TD_CONFIG = {
         "attractInterval": 2000, // 吸附间隔（毫秒）：每 2 秒触发一次
         "attractDuration": 500,  // 单次吸附持续（毫秒）：收敛窗口，结束后停在新位置继续前进（不弹回）
         /* BOSS 免疫牵引（位置完全不位移），用固定减速弥补：牵引脉冲命中 BOSS
-           时挂一层减速 debuff，减速量固定 0.30（30%），【不随塔等级变化】；
-           持续时间 = attractDuration（本次牵引时长）。仅对 cfg.boss / bossMini
-           生效，小怪仍只被吸引、不额外减速。0=不减速。 */
-        "bossSlow": 0.30
+           时挂一层减速 debuff。以下三项均 JSON 驱动：
+             bossSlow         —— 减速量（固定 0.10 = 减速 10%）；【多座引力塔同时
+                                 作用于同一 BOSS 不叠加】，BOSS 只受这 10%；
+             bossSlowDuration —— 该减速持续时长（毫秒 → 0.75 秒）；
+             bossSlowCooldown —— 同一座塔对 BOSS 的触发冷却（毫秒 → 2 秒），
+                                 每座塔【独立计时】，互不影响。
+           减速量取自本基础配置、不随塔等级变化（升级只影响射程/冷却/伤害）。 */
+        "bossSlow": 0.10,
+        "bossSlowDuration": 750,
+        "bossSlowCooldown": 2000
       },
       "upgrade": {
         "maxLevel": 3,
