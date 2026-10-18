@@ -547,10 +547,13 @@ class Tower extends Phaser.GameObjects.Container {
 
   /* 4 级进化波次门控：当前波次 >= waveGate（TowerConfig.json，默认 4）
      才允许升级。波次号 = waveIndex + 1（waveIndex 从 0 起）；
-     未进入任何波次（waveIndex=0）时视为第 1 波。返回 null 表示无阻碍。 */
+     未进入任何波次（waveIndex=0）时视为第 1 波。返回 null 表示无阻碍。
+     关卡级覆盖：levelCfg.upgradeWaveGate（如第 8 关=1，开局即可升 4 级）。 */
   upgradeBlockReason() {
     if (!this.canUpgrade) return null;
-    const gate = this.cfg.upgrade.waveGate;
+    const levelGate = (this.scene && this.scene.levelCfg && this.scene.levelCfg.upgradeWaveGate != null)
+      ? this.scene.levelCfg.upgradeWaveGate : null;
+    const gate = (levelGate != null) ? levelGate : this.cfg.upgrade.waveGate;
     if (gate == null) return null;
     const curWave = ((this.scene && this.scene.waveIndex) || 0) + 1;
     return curWave >= gate ? null : '第' + gate + '波解锁';

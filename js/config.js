@@ -1804,6 +1804,8 @@ window.TD_CONFIG = {
     "8": {
       "economy": { "startGold": 1000, "startLives": 20 },
       "killRewardAdjust": 5,         // 小怪击杀金币略高于前 7 关（enemyX 9+20+5=34）
+      /* 4 级塔波次门槛覆盖：第 8 关开局即可升级 4 级塔（不再要求第 4 波后） */
+      "upgradeWaveGate": 1,
       /* 风眼（仅本关）：2 个固定装饰点 + 全屏风蚀增伤参数 */
       "windEyes": {
         "interval": 10,              // 触发周期（秒）
@@ -1911,37 +1913,170 @@ window.TD_CONFIG = {
         "finalWaveSpecial": false,   // 末波不额外翻倍，严格 1.8 复合成长
         "finalBossHpFactor": 30,     // 兜底（第 8 波 BOSS 另有 per-group bossHpFactor 显式驱动）
         "clearBonus": [150, 260, 400, 560, 760, 1000, 1300, 2000],
-        /* 8 波节奏（count 对两条路线各生效一份，总数 ×2）：
-           W1 少量基础史莱姆 → W2 数量增加 → W3 基础+水晶史莱姆 →
-           W4 基础+自爆泥怪 → W5 水晶史莱姆混编 → W6 海量大乱斗 →
-           W7 精英（×4 血 1.4 倍体型基础史莱姆）→ W8 熔岩巨兽 + 护卫 */
+        /* 第 8 关强化：单波内追加批次（波次 N 追加 N 批同类型小怪）+
+           多 Boss 多重护盾。bossShields 为数组，按 Boss 出怪顺序逐一分配
+           （lavaBoss 不参与分配，走自身三阶段岩盾机制）。 */
+        "bossVariantHpMul": false,   /* BOSS 血量严格「小怪血 × bossFactor」，不吃金/蓝/灰 hpMul */
+        "bossShields": {
+          "2": [ /* 第 3 波：4 只金史莱姆 Boss —— 2×次数盾60 + 2×血量盾2000 */
+            { "type": "element", "breakHits": 60 },
+            { "type": "element", "breakHits": 60 },
+            { "type": "hp", "hp": 2000 },
+            { "type": "hp", "hp": 2000 }
+          ],
+          "3": [ /* 第 4 波：4 只 —— 2×次数盾70 + 2×血量盾3500 */
+            { "type": "element", "breakHits": 70 },
+            { "type": "element", "breakHits": 70 },
+            { "type": "hp", "hp": 3500 },
+            { "type": "hp", "hp": 3500 }
+          ],
+          "4": [ /* 第 5 波：6 只 —— 2×次数盾80 + 4×血量盾5000 */
+            { "type": "element", "breakHits": 80 },
+            { "type": "element", "breakHits": 80 },
+            { "type": "hp", "hp": 5000 },
+            { "type": "hp", "hp": 5000 },
+            { "type": "hp", "hp": 5000 },
+            { "type": "hp", "hp": 5000 }
+          ],
+          "5": [ /* 第 6 波：8 只 —— 2×火元素盾100 + 2×次数盾80 + 4×血量盾5000 */
+            { "type": "element", "element": "fire", "value": 100 },
+            { "type": "element", "element": "fire", "value": 100 },
+            { "type": "element", "breakHits": 80 },
+            { "type": "element", "breakHits": 80 },
+            { "type": "hp", "hp": 5000 },
+            { "type": "hp", "hp": 5000 },
+            { "type": "hp", "hp": 5000 },
+            { "type": "hp", "hp": 5000 }
+          ],
+          "6": [ /* 第 7 波：8 只 —— 2×雷元素盾150 + 2×次数盾80 + 4×血量盾6000 */
+            { "type": "element", "element": "thunder", "value": 150 },
+            { "type": "element", "element": "thunder", "value": 150 },
+            { "type": "element", "breakHits": 80 },
+            { "type": "element", "breakHits": 80 },
+            { "type": "hp", "hp": 6000 },
+            { "type": "hp", "hp": 6000 },
+            { "type": "hp", "hp": 6000 },
+            { "type": "hp", "hp": 6000 }
+          ],
+          "7": [ /* 第 8 波：8 只金史莱姆 Boss —— 2×冰元素盾200 + 2×次数盾80 + 4×血量盾8000 */
+            { "type": "element", "element": "ice", "value": 200 },
+            { "type": "element", "element": "ice", "value": 200 },
+            { "type": "element", "breakHits": 80 },
+            { "type": "element", "breakHits": 80 },
+            { "type": "hp", "hp": 8000 },
+            { "type": "hp", "hp": 8000 },
+            { "type": "hp", "hp": 8000 },
+            { "type": "hp", "hp": 8000 }
+          ]
+        },
         "list": [
-          /* 第 1 波：左右各 5 只，共 10 只 */
-          [ { "type": "enemyX", "count": 5,  "interval": 0.85, "delay": 0 } ],
-          /* 第 2 波：左右各 9 只，共 18 只 */
-          [ { "type": "enemyX", "count": 9,  "interval": 0.60, "delay": 0 } ],
-          /* 第 3 波：基础史莱姆 ×8 + 水晶史莱姆 ×3（每路，共 6 只水晶） */
+          /* ===== 第 1 波：原 5 只 +【追加 1 批】5 只（每路，共 20 只）===== */
+          [ { "type": "enemyX", "count": 5,  "interval": 0.85, "delay": 0 },
+            { "type": "enemyX", "count": 5,  "interval": 0.85, "delay": 5 } ],
+          /* ===== 第 2 波：原 9 只 +【追加 2 批】各 9 只（每路，共 54 只）===== */
+          [ { "type": "enemyX", "count": 9,  "interval": 0.60, "delay": 0 },
+            { "type": "enemyX", "count": 9,  "interval": 0.60, "delay": 6 },
+            { "type": "enemyX", "count": 9,  "interval": 0.60, "delay": 12 } ],
+          /* ===== 第 3 波：原混编 +【追加 3 批】混编 + 4 只金史莱姆 Boss
+             （上下各 2，bossVariantPattern 强制金色贴图）===== */
           [ { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 0 },
-            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 4 } ],
-          /* 第 4 波：基础史莱姆 ×8 + 一批自爆泥怪 ×5（每路，共 10 只） */
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 4 },
+            { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 8 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 12 },
+            { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 16 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 24 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 28 },
+            { "type": "enemyBoss", "count": 2, "interval": 4, "delay": 32,
+              "bossHpFactor": 30, "bossVariantPattern": ["gold"] } ],
+          /* ===== 第 4 波：原混编 +【追加 4 批】混编 + 4 只金史莱姆 Boss（上下各 2）===== */
           [ { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 0 },
-            { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 3 } ],
-          /* 第 5 波：中等数量水晶史莱姆 ×5 + 基础怪 ×8 混编 */
+            { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 3 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 7 },
+            { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 10 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 14 },
+            { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 17 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 21 },
+            { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 24 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 28 },
+            { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 31 },
+            { "type": "enemyBoss", "count": 2, "interval": 4, "delay": 36,
+              "bossHpFactor": 40, "bossVariantPattern": ["gold"] } ],
+          /* ===== 第 5 波：原混编 +【追加 5 批】混编 + 6 只金史莱姆 Boss（上下各 3）===== */
           [ { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 0 },
-            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 2 } ],
-          /* 第 6 波：海量基础怪 + 自爆泥怪大乱斗（四组交错入场） */
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 2 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 8 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 10 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 16 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 18 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 24 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 26 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 32 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 34 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 40 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 42 },
+            { "type": "enemyBoss", "count": 3, "interval": 3, "delay": 48,
+              "bossHpFactor": 50, "bossVariantPattern": ["gold"] } ],
+          /* ===== 第 6 波：原大乱斗 +【追加 6 批】大乱斗 + 8 只金史莱姆 Boss（上下各 4）===== */
           [ { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 0 },
             { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 2 },
             { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 5 },
-            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 7 } ],
-          /* 第 7 波：精英波——高血量（×4）大体型（1.4x）基础史莱姆 ×4 + 快兵 ×8 */
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 7 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 10 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 12 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 15 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 17 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 20 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 22 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 25 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 27 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 30 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 32 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 35 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 37 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 40 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 42 },
+            { "type": "enemyBoss", "count": 4, "interval": 3, "delay": 48,
+              "bossHpFactor": 60, "bossVariantPattern": ["gold"] } ],
+          /* ===== 第 7 波：原精英+快兵 +【追加 7 批】+ 8 只金史莱姆 Boss（上下各 4）===== */
           [ { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 0,
               "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
-            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 2 } ],
-          /* 第 8 波：终极 BOSS 熔岩巨兽（三阶段）+ 少量基础护卫 */
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 2 },
+            { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 10,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 12 },
+            { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 20,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 22 },
+            { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 30,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 32 },
+            { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 40,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 42 },
+            { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 50,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 52 },
+            { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 60,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 62 },
+            { "type": "enemyBoss", "count": 4, "interval": 3, "delay": 70,
+              "bossHpFactor": 80, "bossVariantPattern": ["gold"] } ],
+          /* ===== 第 8 波：原护卫 +【追加 8 批】护卫 + 8 只金史莱姆 Boss（上下各 4）
+             + 2 只熔岩巨兽（上下各 1，使用灰史莱姆 Boss 贴图）===== */
           [ { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 0 },
-            { "type": "lavaBoss", "count": 1, "interval": 0, "delay": 8,
-              "bossHpFactor": 30 } ]
+            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 5 },
+            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 10 },
+            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 15 },
+            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 20 },
+            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 25 },
+            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 30 },
+            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 35 },
+            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 40 },
+            { "type": "enemyBoss", "count": 4, "interval": 3, "delay": 48,
+              "bossHpFactor": 100, "bossVariantPattern": ["gold"] },
+            { "type": "lavaBoss", "count": 1, "interval": 0, "delay": 64,
+              "bossHpFactor": 30, "bossTex": "boss_gray" } ]
         ]
       }
     }

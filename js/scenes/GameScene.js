@@ -1299,6 +1299,8 @@ class GameScene extends Phaser.Scene {
     this.clearPlacementHighlight();   // 点"开始波次"按钮（DOM UI）时清掉残留高亮
     const wcfg = this.levelCfg.waves;
     const groups = wcfg.list[this.waveIndex];
+    /* 第 8 关：BOSS 护盾数组按出怪顺序分配，每波开始重置计数 */
+    this._bossShieldIdx = 0;
     const routeCount = this.routeGeoms.length;
     /* 出怪路线：JSON 可配 waves.spawnRoutes（如第 4 关双出怪路线 [0,1]，
        route 2/3 为传送后汇合段不出怪）；缺省 = 全部路线（第 1~3 关兼容）。
@@ -1369,7 +1371,9 @@ class GameScene extends Phaser.Scene {
             elite: grp.elite || false,
             eliteHpMul: grp.eliteHpMul,
             eliteScale: grp.eliteScale,
-            eliteGoldBonus: grp.eliteGoldBonus
+            eliteGoldBonus: grp.eliteGoldBonus,
+            /* 第 8 关：组级 BOSS 贴图覆盖（熔岩巨兽强制灰史莱姆 Boss 贴图） */
+            bossTex: grp.bossTex || null
           });
         }
       }
@@ -1524,7 +1528,10 @@ class GameScene extends Phaser.Scene {
        （贴图/移速/金币走 lavaBoss 自身配置，血量仍按小怪×bossFactor） */
     const noVariant = !!(TD_CONFIG.enemies[typeKey] && TD_CONFIG.enemies[typeKey].noVariant);
     const bv = (isBossType && !noVariant) ? this.resolveBossVariant(entry) : null;
-    const e = new Cls(this, typeKey, routeId, (bv && bv.tex) ? { bossTexKey: bv.tex } : null);
+    /* entry.bossTex：组级贴图覆盖（第 8 关熔岩巨兽强制使用灰史莱姆 Boss 贴图，
+       但仍走 lavaBoss 自身的移速/金币/血量公式，不接入变体数值） */
+    const bossTexKey = (bv && bv.tex) || entry.bossTex || null;
+    const e = new Cls(this, typeKey, routeId, bossTexKey ? { bossTexKey } : null);
     const isBoss = !!e.cfg.boss;
     if (isBoss) {
       const wcfg = this.levelCfg.waves;
@@ -1553,10 +1560,24 @@ class GameScene extends Phaser.Scene {
       if (wcfg.bossPhases && this.waveIndex === wcfg.list.length - 1) {
         e.bossPhase = 1;
       }
-      /* 第 7 关：按波次给 BOSS 挂护盾（雷/冰元素盾、血量盾，JSON 驱动
-         waves.bossShields）；无配置的旧关卡拿到 undefined，零影响 */
-      const shieldDef = wcfg.bossShields ? wcfg.bossShields[String(this.waveIndex)] : null;
-      if (shieldDef && typeof e.applyShield === 'function') e.applyShield(shieldDef);
+      /* BOSS 护盾（JSON 驱动 waves.bossShields）：
+         - 旧格式（第 7 关）：单对象 → 本波所有 BOSS 共用同一护盾
+         - 新格式（第 8 关）：数组 → 按 BOSS 出怪顺序逐一分配，lavaBoss 不参与
+           （走自身三阶段岩盾机制）。计数在 startWave 重置为 0。 */
+      const shieldsRaw = wcfg.bossShields ? wcfg.bossShields[String(this.waveIndex)] : null;
+      if (shieldsRaw && typeof e.applyShield === 'function') {
+        if (Array.isArray(shieldsRaw)) {
+          /* lavaBoss 跳过 bossShields 分配，保留自身岩盾机制 */
+          if (typeKey !== 'lavaBoss') {
+            const idx = this._bossShieldIdx || 0;
+            const shieldDef = shieldsRaw[idx % shieldsRaw.length];
+            if (shieldDef) e.applyShield(shieldDef);
+            this._bossShieldIdx = idx + 1;
+          }
+        } else {
+          e.applyShield(shieldsRaw);
+        }
+      }
     } else {
       /* 第 5 关等关卡可配 enemyHpMul：小怪（非 BOSS）血量在波次成长基础上再乘此系数 */
       const hpMul = this.levelCfg.enemyHpMul || 1;

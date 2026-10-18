@@ -215,9 +215,12 @@ class Enemy extends Phaser.GameObjects.Container {
      【不设减速上限】减速幅度由调用方决定，本方法不做任何强度截断，只保
      "移速不为负"的安全下限（系数下限 0 → 移速最低 0，绝不倒退）。 */
   applySlow(factor, duration, element, noMark) {
-    if (this.shield && this.shield.type === 'element' && this.shield.element === 'ice' &&
-        (!element || element === 'ice')) {
-      return;
+    /* 元素护盾免疫对应元素的负面效果：
+       - 同元素减速直接拦截（冰盾拦冰减速、雷盾拦雷麻痹定身等）
+       - 冰盾额外拦截无元素标注的减速（引力塔等），因旧版减速全部来自冰系 */
+    if (this.shield && this.shield.type === 'element' && this.shield.element) {
+      if (element === this.shield.element) return;
+      if (!element && this.shield.element === 'ice') return;
     }
     if (!(factor > 0)) factor = 0;   // 只防负移速，不设减速强度上限
     // 多种减速同时存在时：取更强（系数更小）者，持续时间刷新为较长者
@@ -552,12 +555,26 @@ class Enemy extends Phaser.GameObjects.Container {
       this.drawHpBar(Math.max(0, this.hp / this.maxHp));
     }
 
-    /* 元素护盾：非免疫元素（或无元素攻击）每次命中计 1 次有效攻击，
-       累计满 maxHits 破盾；被免疫的同元素命中在函数入口已 return，不计次 */
+    /* 元素护盾：
+       - 次数盾（breakHits）：非免疫元素/无元素攻击每次命中计 1，满 maxHits 破盾
+       - 元素值盾（value）：非免疫元素攻击按反应 cost 消耗盾值，归零破盾
+         （无元素攻击不消耗盾值，仅对本体造成伤害）
+       被免疫的同元素命中在函数入口已 return，不进入此处 */
     if (this.shield && this.shield.type === 'element') {
-      this.shield.hits++;
-      this.refreshShieldView(false);
-      if (this.shield.hits >= this.shield.maxHits) this.breakShield();
+      if (this.shield.value != null) {
+        if (element) {
+          const consumed = this._elementShieldConsume(element);
+          if (consumed > 0) {
+            this.shield.value -= consumed;
+            this.refreshShieldView(false);
+            if (this.shield.value <= 1e-6) this.breakShield();
+          }
+        }
+      } else {
+        this.shield.hits++;
+        this.refreshShieldView(false);
+        if (this.shield.hits >= this.shield.maxHits) this.breakShield();
+      }
     }
 
     /* 三阶段 BOSS（第 5/7 关，JSON 驱动）：一阶段血量降到阈值即分裂成分身；
@@ -633,10 +650,11 @@ class Enemy extends Phaser.GameObjects.Container {
         this.statusWindAmp = data.dmgAmp || 0;
         break;
       }
-      /* 雷塔4 麻痹定身 / 引力塔4 眩晕：复用减速通道实现定身（factor 0） */
+      /* 雷塔4 麻痹定身 / 引力塔4 眩晕：复用减速通道实现定身（factor 0）。
+         传入 data.element 使对应元素护盾（如雷盾）能免疫该负面效果。 */
       case 'paralyzed':
       case 'stun': {
-        if (data.duration > 0) this.applySlow(0, data.duration, null, true);
+        if (data.duration > 0) this.applySlow(0, data.duration, data.element || null, true);
         break;
       }
       /* 火塔4 灼烧：DOT 由塔侧结算，怪物侧无需处理（预留） */
@@ -647,7 +665,8 @@ class Enemy extends Phaser.GameObjects.Container {
   }
 
   /* 持续伤害（灼烧 DoT 等）结算：与 takeDamage 同规则尊重血量护盾
-     （盾存续时由盾吸收，击破溢出到本体），但不吃易伤/风蚀乘区；
+     （盾存续时由盾吸收，击破溢出到本体）；次数盾每跳计 1 次有效攻击；
+     元素值盾因无元素信息不消耗（仅本体承伤）。不吃易伤/风蚀乘区；
      旧关卡无人调用（burnStacks 恒空），零影响 */
   applyDot(amount) {
     if (this.dead || this.invulnTimer > 0) return;
@@ -664,6 +683,12 @@ class Enemy extends Phaser.GameObjects.Container {
       this.hp -= rest;
     } else {
       this.hp -= amount;
+      /* 次数盾：DOT 每跳也计 1 次有效攻击（百分比伤害对护盾生效） */
+      if (this.shield && this.shield.type === 'element' && this.shield.value == null) {
+        this.shield.hits++;
+        this.refreshShieldView(false);
+        if (this.shield.hits >= this.shield.maxHits) this.breakShield();
+      }
     }
     this.drawHpBar(Math.max(0, this.hp / this.maxHp));
     if (this.hp <= 0) {
@@ -863,23 +888,31 @@ class Enemy extends Phaser.GameObjects.Container {
   }
 
   /* ============================================================
-   * BOSS 护盾（第 7 关，JSON 驱动 waves.bossShields；由 GameScene
+   * BOSS 护盾（第 7/8 关，JSON 驱动 waves.bossShields；由 GameScene
    * 在 BOSS 出生时按波次挂载）
-   *   {type:'element', element, breakHits}：
+   *   {type:'element', element, breakHits}：次数盾
    *       免疫同元素的附着与伤害（shieldBlocks），同元素命中不计有效次数；
    *       其余元素/无元素攻击每次命中计 1，满 breakHits 破盾；
    *       冰盾存活期间同时免疫冰系减速（见 applySlow）。
-   *   {type:'hp', hp}：护盾血量吸收一切伤害，盾存期间本体不掉血。
+   *   {type:'element', element, value}：元素值盾（第 8 关）
+   *       免疫同元素伤害与负面效果；其他元素攻击按元素反应 cost 比例
+   *       消耗盾值（参照 attachElement 的反应消耗公式），value 归零破盾；
+   *       非元素攻击不消耗盾值，仅对本体造成伤害。
+   *   {type:'hp', hp}：血量盾
+   *       护盾血量吸收一切伤害，盾存期间本体不掉血。
    * ============================================================ */
   applyShield(def) {
     if (!def || this.dead) return;
+    const isValue = (def.type === 'element' && def.value != null);
     this.shield = {
       type: def.type === 'hp' ? 'hp' : 'element',
       element: def.element || null,
       hits: 0,
       maxHits: def.breakHits || 40,
       hp: def.hp || 0,
-      maxHp: def.hp || 0
+      maxHp: def.hp || 0,
+      value: isValue ? def.value : null,
+      maxValue: isValue ? def.value : null
     };
     this.showShieldGfx();
     this.refreshShieldView(true);
@@ -892,32 +925,58 @@ class Enemy extends Phaser.GameObjects.Container {
     return !!(s && s.type === 'element' && element && s.element === element);
   }
 
+  /* 元素值盾被其他元素攻击时的消耗量：严格参照防御塔之间的元素反应
+     消耗机制——u = min(盾值/cost盾, 攻击附着量/cost攻)，消耗 u×cost盾。
+     无对应反应表时退化为直接消耗 attachAmount（等量交换）。
+     仅非免疫元素调用；返回本次从盾中扣减的数值。 */
+  _elementShieldConsume(attackElement) {
+    const s = this.shield;
+    if (!s || s.value == null || !attackElement || attackElement === s.element) return 0;
+    const sys = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.elementSystem) || {};
+    const attachAmt = (sys.attachAmount != null) ? sys.attachAmount : 2;
+    const pairs = sys.pairs || {};
+    const pair = pairs[s.element + '+' + attackElement] || pairs[attackElement + '+' + s.element];
+    if (!pair) return attachAmt;
+    const cost = pair.cost || {};
+    const costShield = (cost[s.element] != null) ? cost[s.element] : 1;
+    const costAtk = (cost[attackElement] != null) ? cost[attackElement] : 1;
+    const u = Math.min(s.value / costShield, attachAmt / costAtk);
+    return u * costShield;
+  }
+
   /* 破盾：清状态 + 提示文字 + 扩散特效 + 销毁视觉 */
   breakShield() {
     const s = this.shield;
     if (!s) return;
     if (this.scene && typeof this.scene.floatText === 'function') {
-      const label = s.type === 'hp'
-        ? '血量护盾击破！'
-        : (s.element === 'thunder' ? '雷元素护盾击破！'
-          : s.element === 'ice' ? '冰元素护盾击破！' : '护盾击破！');
+      let label;
+      if (s.type === 'hp') label = '血量护盾击破！';
+      else if (s.value != null) {
+        label = s.element === 'fire' ? '火元素护盾击破！'
+          : s.element === 'thunder' ? '雷元素护盾击破！'
+          : s.element === 'ice' ? '冰元素护盾击破！' : '元素护盾击破！';
+      } else {
+        label = s.element === 'thunder' ? '雷元素护盾击破！'
+          : s.element === 'ice' ? '冰元素护盾击破！' : '护盾击破！';
+      }
       this.scene.floatText(this.x, this.y - this.radius - 30, label, 0xffffff);
     }
     if (this.scene && typeof this.scene.makePortalBurst === 'function') {
-      const col = s.type === 'hp' ? 0xffe27a
-        : (s.element === 'thunder' ? 0xb58bff : 0x7fdcff);
+      const col = this.shieldColor();
       this.scene.makePortalBurst(this.x, this.y, col);
     }
     this.shield = null;
     this.clearShieldGfx();
   }
 
-  /* 护盾颜色：雷=紫 / 冰=浅蓝 / 血量=金 */
+  /* 护盾颜色：火=橙红 / 雷=紫 / 冰=浅蓝 / 血量=金 */
   shieldColor() {
     const s = this.shield;
     if (!s) return 0xffffff;
     if (s.type === 'hp') return 0xffe27a;
-    return s.element === 'thunder' ? 0xb58bff : 0x7fdcff;
+    if (s.element === 'fire') return 0xff7a3c;
+    if (s.element === 'thunder') return 0xb58bff;
+    return 0x7fdcff;
   }
 
   /* 护盾光环（描边圆 + 外圈淡光 + 呼吸脉动） */
@@ -953,8 +1012,10 @@ class Enemy extends Phaser.GameObjects.Container {
     if (this.shieldText) { try { this.shieldText.destroy(); } catch (_) {} this.shieldText = null; }
   }
 
-  /* 血条上方的小盾条：元素盾=剩余有效次数比例；血量盾=剩余护盾血比例；
-     元素盾额外显示剩余次数文字 */
+  /* 血条上方的小盾条：
+     - 次数盾 = 剩余有效次数比例，文字显示剩余次数
+     - 元素值盾 = 剩余盾值比例，文字显示剩余盾值
+     - 血量盾 = 剩余护盾血比例 */
   refreshShieldView() {
     if (!this.scene) return;
     const s = this.shield;
@@ -970,15 +1031,20 @@ class Enemy extends Phaser.GameObjects.Container {
     g.fillStyle(0x000000, 0.35);
     g.fillRoundedRect(-w / 2 - 1, y0 - 1, w + 2, 5, 2.5);
     let ratio;
+    let text = null;
     if (s.type === 'hp') {
       ratio = Math.max(0, s.hp / Math.max(1, s.maxHp));
+    } else if (s.value != null) {
+      ratio = Math.max(0, s.value / Math.max(1, s.maxValue));
+      text = '盾值 ' + Math.ceil(Math.max(0, s.value));
     } else {
       ratio = 1 - s.hits / Math.max(1, s.maxHits);
+      text = '护盾 ' + Math.max(0, s.maxHits - s.hits);
     }
     g.fillStyle(this.shieldColor(), 1);
     g.fillRoundedRect(-w / 2, y0, Math.max(0, w * ratio), 3, 1.5);
 
-    if (s.type === 'element') {
+    if (text != null) {
       if (!this.shieldText) {
         this.shieldText = this.scene.add.text(0, y0 - 7, '', {
           fontFamily: TD_FONT_STACK,
@@ -987,7 +1053,7 @@ class Enemy extends Phaser.GameObjects.Container {
         }).setOrigin(0.5).setStroke('#2a1a4a', 3);
         this.add(this.shieldText);
       }
-      this.shieldText.setText('护盾 ' + Math.max(0, s.maxHits - s.hits));
+      this.shieldText.setText(text);
     }
   }
 
