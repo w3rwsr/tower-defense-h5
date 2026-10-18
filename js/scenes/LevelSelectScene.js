@@ -1,15 +1,19 @@
 /* ============================================================
  * LevelSelectScene.js —— 关卡选择界面
- * 显示 6 个关卡卡片：
- *   - 第 1 关：新手教程，可进入
- *   - 第 2 ~ 6 关：按通关进度逐关解锁
+ * 关卡卡片按网格排列：每排最多 6 张（5~6 张，见 get maxPerRow），
+ * 超出后自动换行，后续新增关卡无需改排版代码：
+ *   - 第 1~6 关：第一排（居中 6 列网格）
+ *   - 第 7 关及以后：第二排起，从每排第 1 个位置依次排列
  * 已通关的关卡显示 ✓ 标记（进度来自 TDStorage）。
  *
- * 自适应：
- *   - 横屏：6 张卡片单行排列
- *   - 竖屏：6 张卡片分两行（3 + 2）居中
- *   - 字号按画布实际缩放系数放大，保证小屏可读
- *   - 监听 resize / orientationchange，方向变化时重建布局
+ * 左下角「📖 图鉴」按钮 → 打开防御塔图鉴（半透明悬浮窗，可滚动、
+ * 可关闭）：逐塔列出名称/外观小图标、元素属性、功能说明，以及
+ * Lv1 / Lv2 / Lv3 的具体数值差异。数值全部实时读取 TD_CONFIG.towers，
+ * 口径与 Tower.recalcStats 完全一致，因此与游戏内实际战斗数据相同。
+ * 图鉴仅用于查看，不参与任何战斗逻辑。
+ *
+ * 强制横屏：布局基准 960×540，Phaser FIT 自动放大；方向变化时
+ * 只需刷新画布尺寸（监听挂在游戏级 ScaleManager，场景关闭时移除）。
  * ============================================================ */
 class LevelSelectScene extends Phaser.Scene {
   constructor() { super('LevelSelectScene'); }
@@ -33,6 +37,13 @@ class LevelSelectScene extends Phaser.Scene {
     document.getElementById('hud-bottom').style.display = 'none';
     window.__tdScene = this;
 
+    /* 图鉴状态重置：场景实例会被复用（返回选关不会 new 新实例），
+       每次 create 清空上一局的引用，避免悬浮窗残留 / 重复打开 */
+    this.codexPanel = null;
+    this.codexBtn = null;
+    this._codexWheel = null;
+    this._codexMask = null;
+
     this.buildLayout();
 
     /* 移动端：HUD 锚定（选关页 HUD 隐藏，但保持位置正确，返回游戏即生效） */
@@ -52,7 +63,14 @@ class LevelSelectScene extends Phaser.Scene {
       if (!this.scene.isActive()) return;
     };
     this.scale.on('resize', this.handleResize);
-    this.events.once('shutdown', () => this.scale.off('resize', this.handleResize));
+    this.events.once('shutdown', () => {
+      this.scale.off('resize', this.handleResize);
+      /* 图鉴全局滚轮监听与残留引用一并清理（场景关闭时 InputPlugin
+         本身会销毁监听，这里只清引用，双保险） */
+      if (this._codexWheel) { this.input.off('wheel', this._codexWheel); this._codexWheel = null; }
+      this.codexPanel = null;
+      this._codexMask = null;
+    });
 
     this._deferredVideoInit();
   }
@@ -94,12 +112,22 @@ class LevelSelectScene extends Phaser.Scene {
   ls(basePx) { return basePx; }
 
   /**
+   * 每排最多显示的关卡卡片数（5~6 张）。超过此数自动换行；
+   * 当前 7 关 = 第一排 6 张 + 第二排 1 张（第 7 关在第二排第 1 个位置）。
+   */
+  get maxPerRow() { return 6; }
+
+  /**
    * 纵向布局：标题 / 副标题 / 卡片行 / 底部提示的 y 中心坐标。
-   * 始终使用横屏布局（1 行 5 张卡片）。
+   * 卡片行数按「关卡总数 ÷ 每排上限」自动取整换行，行高按可用
+   * 高度自适应收缩，保证所有行 + 底部提示都落在 540 之内。
    */
   computeVerticalLayout() {
     const topPad = 20, titleH = 36, subH = 15, cardH = 160;
     const hintH = 12, bottomPad = 20, gap = 10;
+    const rowGap = 12;
+
+    const rows = Math.max(1, Math.ceil(TDStorage.total / this.maxPerRow));
 
     const titleY = topPad + titleH / 2;
     const subY = titleY + titleH / 2 + gap + subH / 2;
@@ -108,13 +136,17 @@ class LevelSelectScene extends Phaser.Scene {
     const hintY = this.H - bottomPad - hintH / 2;
     const hintTop = hintY - hintH / 2;
 
+    /* 可用高度按行数均分（含行间距），单卡最高 160 */
     const avail = hintTop - gap - headerBottom - gap;
-    const usedCardH = Math.min(cardH, avail);
+    const usedCardH = Math.min(cardH, Math.floor((avail - rowGap * (rows - 1)) / rows));
 
     const blockTop = headerBottom + gap;
-    const row1Y = blockTop + usedCardH / 2;
+    const rowYs = [];
+    for (let r = 0; r < rows; r++) {
+      rowYs.push(blockTop + usedCardH / 2 + r * (usedCardH + rowGap));
+    }
 
-    return { titleY, subY, hintY, cardH: usedCardH, row1Y, gap };
+    return { titleY, subY, hintY, cardH: usedCardH, rowYs, rowGap, gap };
   }
 
   buildLayout() {
@@ -169,25 +201,38 @@ class LevelSelectScene extends Phaser.Scene {
       fontSize: this.ls(13) + 'px', color: '#1e4620',
       resolution: TD_TEXT_RES
     }).setOrigin(0.5).setStroke('#e6f7d8', 3);
+
+    /* ---- 左下角「图鉴」按钮（纯 UI，不参与战斗） ---- */
+    this.buildCodexButton();
   }
 
   /**
    * 计算每张卡片的中心坐标与尺寸。
-   * 强制横屏：1 行 7 张，居中排列。
+   * 网格排列：每排最多 maxPerRow(6) 张，超出自动换行。
+   *   - 网格按 6 列固定列宽/列距居中排布（6×132 + 5×16 = 872 ≤ 960，
+   *     两侧各留 44px，绝不超出屏幕）；
+   *   - 不足一排的行（如第 7 关独占第二排）从第 1 个位置起排，
+   *     与上一排同列对齐（第 7 关 = 第二排第 1 个）。
    */
   computeCardPositions(vl) {
     const W = this.W;
     const out = [];
     const cardH = vl.cardH;
-    const count = TDStorage.total;          // 关卡总数（当前 7）
-    /* 7 张单行需收窄卡宽/间距才能落在 960 世界宽度内：
-       7×116 + 6×13 = 890，两侧各留 35px；6 张时保持原 132/16 不变 */
-    const cardW = count >= 7 ? 116 : 132;
-    const gap = count >= 7 ? 13 : 16;
-    const totalW = count * cardW + (count - 1) * gap;
+    const count = TDStorage.total;              // 关卡总数（当前 7）
+    const perRow = this.maxPerRow;              // 每排上限（5~6 张）
+    const cardW = 132;
+    const gap = 16;
+    const totalW = perRow * cardW + (perRow - 1) * gap;
     const startX = (W - totalW) / 2 + cardW / 2;
     for (let i = 0; i < count; i++) {
-      out.push({ x: startX + i * (cardW + gap), y: vl.row1Y, w: cardW, h: cardH });
+      const col = i % perRow;
+      const row = Math.floor(i / perRow);
+      out.push({
+        x: startX + col * (cardW + gap),
+        y: vl.rowYs[Math.min(row, vl.rowYs.length - 1)],
+        w: cardW,
+        h: cardH
+      });
     }
     return out;
   }
@@ -323,5 +368,398 @@ class LevelSelectScene extends Phaser.Scene {
       ],
       onComplete: () => t.destroy()
     });
+  }
+
+  /* ============================================================
+   * 防御塔图鉴（纯查看 UI，不参与任何战斗逻辑）
+   *   · 左下角「📖 图鉴」按钮 → openCodex() 弹出半透明悬浮窗
+   *   · 窗口内容上下拖动 / 滚轮滚动，右上 ✕ 或点窗口外关闭
+   *   · 每种塔列出：名称 / 元素色小图标 / 元素属性 / 功能说明 /
+   *     Lv1、Lv2、Lv3 的具体数值差异
+   *   · 全部数值实时读取 TD_CONFIG.towers，计算口径与
+   *     Tower.recalcStats 完全一致 → 与战斗内实际数值相同
+   * ============================================================ */
+
+  /** 左下角「图鉴」按钮（圆润卡通、明亮，与游戏 UI 同风格） */
+  buildCodexButton() {
+    const bw = 112, bh = 44;
+    const bx = 14 + bw / 2;                    // 左侧留 14px
+    const by = this.H - 16 - bh / 2;           // 底部留 16px（在第二排卡片下方，不遮挡）
+    const btn = this.add.container(bx, by).setDepth(60);
+
+    const g = this.add.graphics();
+    g.fillStyle(0x000000, 0.16);
+    g.fillRoundedRect(-bw / 2 + 2, -bh / 2 + 3, bw, bh, 16);      // 底部投影
+    g.fillStyle(0xffe9a8, 1);
+    g.fillRoundedRect(-bw / 2, -bh / 2, bw, bh, 16);
+    g.lineStyle(3.5, 0xffb43c, 1);
+    g.strokeRoundedRect(-bw / 2, -bh / 2, bw, bh, 16);
+
+    const label = this.add.text(0, 0, '📖 图鉴', {
+      fontFamily: TD_FONT_STACK, fontSize: '19px', fontStyle: 'bold',
+      color: '#7a4a06', resolution: TD_TEXT_RES
+    }).setOrigin(0.5).setStroke('#fff6d8', 3);
+
+    /* 手势状态机与关卡卡片一致：按下缩放，滑出热区不触发 */
+    const zone = this.add.zone(0, 0, bw + 6, bh + 6).setInteractive({ useHandCursor: true });
+    let pressed = false;
+    const setPressed = (v) => {
+      if (pressed === v) return;
+      pressed = v;
+      this.tweens.killTweensOf(btn);
+      this.tweens.add({
+        targets: btn, scaleX: v ? 0.94 : 1, scaleY: v ? 0.94 : 1,
+        duration: 70, ease: 'Quad.out'
+      });
+    };
+    zone.on('pointerdown', () => setPressed(true));
+    zone.on('pointerup', () => { if (!pressed) return; setPressed(false); this.openCodex(); });
+    zone.on('pointerout', () => setPressed(false));
+    zone.on('pointerupoutside', () => setPressed(false));
+
+    btn.add([g, label, zone]);
+    this.codexBtn = btn;
+  }
+
+  /** 打开图鉴悬浮窗（半透明背景 + 圆角面板 + 可滚动内容 + 关闭按钮） */
+  openCodex() {
+    if (this.codexPanel) return;               // 已打开：不重复构建
+
+    const cx = this.W / 2, cy = this.H / 2;
+    const PW = 780, PH = 460;                  // 面板尺寸（世界单位，960×540 内留足边距）
+    const barH = 48;                           // 标题条高度
+    const layer = this.add.container(0, 0).setDepth(660);
+
+    /* ---- 半透明压暗背景：覆盖全屏，屏蔽下方关卡卡片点击；点它关闭 ---- */
+    const backdrop = this.add.rectangle(0, 0, this.W, this.H, 0x14290f, 0.58)
+      .setOrigin(0, 0).setInteractive({ useHandCursor: true });
+    backdrop.on('pointerdown', () => this.closeCodex());
+    layer.add(backdrop);
+
+    /* ---- 圆角面板（容器，局部坐标以面板中心为原点；与游戏内公主窗口
+       同一套嵌套结构：后加入的可交互子元素优先命中，保证 ✕ 与拖动热区
+       不会被面板吞点击层盖住） ---- */
+    const panel = this.add.container(cx, cy);
+    const pz = this.add.zone(0, 0, PW, PH).setInteractive();   // 面板吞点击，不透到背景
+    panel.add(pz);
+
+    const pg = this.add.graphics();
+    pg.fillStyle(0xfffcf2, 0.97);
+    pg.fillRoundedRect(-PW / 2, -PH / 2, PW, PH, 22);
+    pg.lineStyle(3, 0x4a3313, 0.9);
+    pg.strokeRoundedRect(-PW / 2, -PH / 2, PW, PH, 22);
+    pg.fillStyle(0x59b83e, 0.98);                              // 顶部草绿标题条
+    pg.fillRoundedRect(-PW / 2, -PH / 2, PW, barH, { tl: 22, tr: 22, bl: 0, br: 0 });
+    pg.fillRect(-PW / 2, -PH / 2 + barH / 2, PW, barH / 2);
+    panel.add(pg);
+
+    const title = this.add.text(-PW / 2 + 22, -PH / 2 + barH / 2, '📖 防御塔图鉴', {
+      fontFamily: TD_FONT_STACK, fontSize: '21px', fontStyle: 'bold',
+      color: '#ffffff', resolution: TD_TEXT_RES
+    }).setOrigin(0, 0.5).setStroke('#25581a', 4);
+    panel.add(title);
+
+    /* 关闭按钮（右上红圆 ✕，热区放大；最后加入，命中优先级最高） */
+    const cbg = this.add.graphics();
+    cbg.fillStyle(0xff7d8d, 1); cbg.fillCircle(PW / 2 - 22, -PH / 2 + barH / 2, 15);
+    cbg.lineStyle(2.5, 0xc04055, 0.9);
+    cbg.strokeCircle(PW / 2 - 22, -PH / 2 + barH / 2, 15);
+    const ctxt = this.add.text(PW / 2 - 22, -PH / 2 + barH / 2, '✕', {
+      fontFamily: TD_FONT_STACK, fontSize: '17px', fontStyle: 'bold',
+      color: '#ffffff', resolution: TD_TEXT_RES
+    }).setOrigin(0.5);
+    const czone = this.add.zone(PW / 2 - 22, -PH / 2 + barH / 2, 44, 44)
+      .setInteractive({ useHandCursor: true });
+    czone.on('pointerdown', () => this.closeCodex());
+    panel.add([cbg, ctxt]);
+
+    /* ---- 滚动内容区：局部坐标（面板内）+ 世界坐标（几何蒙板用） ---- */
+    const vv = { x: -PW / 2 + 14, y: -PH / 2 + barH + 10, w: PW - 28, h: PH - barH - 34 };
+    const worldView = { x: cx + vv.x, y: cy + vv.y, w: vv.w, h: vv.h };
+
+    const scrollBox = this.add.container(vv.x, vv.y);
+    const maskG = this.make.graphics({ x: 0, y: 0, add: false });
+    maskG.fillStyle(0xffffff, 1);
+    maskG.fillRect(worldView.x, worldView.y, worldView.w, worldView.h);
+    scrollBox.setMask(maskG.createGeometryMask());
+    this._codexMask = maskG;
+
+    const entryW = vv.w - 12;                   // 右侧留 12px 给滚动条
+    const contentH = this.buildCodexEntries(scrollBox, entryW);
+    panel.add(scrollBox);
+
+    /* ---- 滚动条（内容超出一屏时显示） ---- */
+    const barW = 6;
+    const trackX = vv.x + vv.w - 2;
+    const track = this.add.graphics();
+    track.fillStyle(0x000000, 0.12);
+    track.fillRoundedRect(trackX - barW / 2, vv.y + 2, barW, vv.h - 4, barW / 2);
+    const thumb = this.add.graphics();
+    panel.add(track);
+    panel.add(thumb);
+
+    const scrollState = { y: 0 };
+    const maxScroll = Math.max(0, contentH - vv.h);
+    const applyScroll = (v) => {
+      const sv = Phaser.Math.Clamp(v, 0, maxScroll);
+      scrollState.y = sv;
+      scrollBox.y = vv.y - sv;
+      thumb.clear();
+      if (maxScroll <= 0) return;               // 不需要滚动：不画滑块
+      const trackH = vv.h - 4;
+      const thumbH = Math.max(30, trackH * (vv.h / contentH));
+      const ty = vv.y + 2 + (trackH - thumbH) * (sv / maxScroll);
+      thumb.fillStyle(0x6bb244, 0.95);
+      thumb.fillRoundedRect(trackX - barW / 2, ty, barW, thumbH, barW / 2);
+    };
+    applyScroll(0);
+
+    /* ---- 拖动滚动热区（覆盖内容区；在 pz 之后加入 → 命中优先于吞点击层） ---- */
+    const dragZone = this.add.zone(vv.x + vv.w / 2, vv.y + vv.h / 2, vv.w, vv.h)
+      .setInteractive({ useHandCursor: true });
+    panel.add(dragZone);
+    this.input.setDraggable(dragZone);
+    let dragStartY = 0, dragScroll0 = 0;
+    dragZone.on('pointerdown', (p) => { dragStartY = p.y; dragScroll0 = scrollState.y; });
+    dragZone.on('drag', (p) => { applyScroll(dragScroll0 - (p.y - dragStartY)); });
+
+    /* ---- 滚轮滚动（电脑端）：场景级监听，关闭时移除 ---- */
+    const wheelHandler = (pointer, objs, dx, dy) => {
+      if (!this.codexPanel) return;
+      applyScroll(scrollState.y - dy * 0.5);
+    };
+    this.input.on('wheel', wheelHandler);
+    this._codexWheel = wheelHandler;
+
+    /* ---- 底部提示 ---- */
+    const hint = this.add.text(0, PH / 2 - 16,
+      maxScroll > 0 ? '上下拖动或滚动滚轮查看更多 · 点窗口外或右上 ✕ 关闭' : '点窗口外或右上 ✕ 关闭', {
+        fontFamily: TD_FONT_STACK, fontSize: '12px', color: '#8a7554',
+        resolution: TD_TEXT_RES
+      }).setOrigin(0.5);
+    panel.add(hint);
+
+    panel.add(czone);                           // ✕ 热区最后加入（优先级最高）
+
+    layer.add(panel);
+
+    layer.setAlpha(0);
+    this.tweens.add({ targets: layer, alpha: 1, duration: 160, ease: 'Sine.easeOut' });
+    this.codexPanel = layer;
+  }
+
+  /** 关闭图鉴悬浮窗（移除滚轮监听 + 清理蒙板） */
+  closeCodex() {
+    if (!this.codexPanel) return;
+    if (this._codexWheel) {
+      this.input.off('wheel', this._codexWheel);
+      this._codexWheel = null;
+    }
+    const layer = this.codexPanel;
+    const maskG = this._codexMask;
+    this.codexPanel = null;
+    this._codexMask = null;
+    this.tweens.add({
+      targets: layer, alpha: 0, duration: 130, ease: 'Sine.easeIn',
+      onComplete: () => {
+        try { layer.destroy(); } catch (e) { /* 忽略 */ }
+        if (maskG) { try { maskG.destroy(); } catch (e) { /* 忽略 */ } }
+      }
+    });
+  }
+
+  /**
+   * 构建图鉴条目列表（全部塔，按 TD_CONFIG.towers 配置顺序）。
+   * @returns 内容总高度（像素），供滚动范围计算
+   */
+  buildCodexEntries(box, entryW) {
+    const picker = (TD_CONFIG.build && TD_CONFIG.build.picker) || {};
+    const colors = picker.iconColors || {};
+    const glyphs = picker.iconGlyph || {};
+    const entryH = 142, gap = 10;
+    const keys = Object.keys(TD_CONFIG.towers).filter((k) => TD_CONFIG.towers[k]);
+    let y = 0;
+
+    keys.forEach((key) => {
+      const cfg = TD_CONFIG.towers[key];
+      const meta = this.codexMeta(key, cfg);
+      const color = colors[key] != null ? colors[key] : (cfg.color || 0xffffff);
+      const glyph = glyphs[key] || meta.element.charAt(0);
+
+      const row = this.add.container(0, y);
+
+      /* 卡片底：奶油底 + 元素色描边，与选关卡片同风格 */
+      const g = this.add.graphics();
+      g.fillStyle(0xfffdf4, 1);
+      g.fillRoundedRect(0, 0, entryW, entryH, 14);
+      g.lineStyle(2.5, color, 0.85);
+      g.strokeRoundedRect(0, 0, entryW, entryH, 14);
+      row.add(g);
+
+      /* 外观小图标：元素色圆 + 白描边 + 中心单字（与战斗内选塔框图标一致） */
+      const icx = 36, icy = entryH / 2;
+      const ic = this.add.graphics();
+      ic.fillStyle(color, 1); ic.fillCircle(icx, icy, 21);
+      ic.lineStyle(3, 0xffffff, 0.92); ic.strokeCircle(icx, icy, 21);
+      const ict = this.add.text(icx, icy + 1, glyph, {
+        fontFamily: TD_FONT_STACK, fontSize: '19px', fontStyle: 'bold',
+        color: '#ffffff', resolution: TD_TEXT_RES
+      }).setOrigin(0.5);
+      row.add([ic, ict]);
+
+      /* 名称 + 元素属性标签（元素色胶囊，文字按底色亮度取黑/白保证可读）+ 造价 */
+      const name = this.add.text(70, 16, cfg.name, {
+        fontFamily: TD_FONT_STACK, fontSize: '17px', fontStyle: 'bold',
+        color: '#3d2b12', resolution: TD_TEXT_RES
+      }).setOrigin(0, 0.5);
+
+      const lum = (0.299 * ((color >> 16) & 0xff) + 0.587 * ((color >> 8) & 0xff) +
+        0.114 * (color & 0xff)) / 255;
+      const tag = this.add.text(0, 16, meta.element, {
+        fontFamily: TD_FONT_STACK, fontSize: '13px', fontStyle: 'bold',
+        color: lum > 0.72 ? '#3d2b12' : '#ffffff', resolution: TD_TEXT_RES
+      }).setOrigin(0.5);
+      const tagW = Math.ceil(tag.width) + 20;
+      const tagX = 70 + name.width + 12;
+      tag.setPosition(tagX + tagW / 2, 16);
+      const tagBg = this.add.graphics();
+      tagBg.fillStyle(color, 0.95);
+      tagBg.fillRoundedRect(tagX, 6, tagW, 20, 10);
+
+      const cost = this.add.text(entryW - 16, 16, '🪙 ' + cfg.cost, {
+        fontFamily: TD_FONT_STACK, fontSize: '14px', fontStyle: 'bold',
+        color: '#a06b12', resolution: TD_TEXT_RES
+      }).setOrigin(1, 0.5);
+      row.add([tagBg, name, tag, cost]);
+
+      /* 功能 / 定位说明 */
+      const role = this.add.text(70, 40, cfg.desc, {
+        fontFamily: TD_FONT_STACK, fontSize: '13px', fontStyle: 'bold',
+        color: '#5f4720', resolution: TD_TEXT_RES
+      }).setOrigin(0, 0.5);
+      const note = this.add.text(70, 60, meta.note, {
+        fontFamily: TD_FONT_STACK, fontSize: '12px', color: '#8a7a5e',
+        resolution: TD_TEXT_RES
+      }).setOrigin(0, 0.5);
+      row.add([role, note]);
+
+      /* Lv1 / Lv2 / Lv3 具体数值（与战斗内实际数值同口径） */
+      this.codexLines(key, cfg).forEach((t, i) => {
+        const lt = this.add.text(70, 82 + i * 22, t, {
+          fontFamily: TD_FONT_STACK, fontSize: '13px', color: '#2f4a1c',
+          resolution: TD_TEXT_RES
+        }).setOrigin(0, 0.5);
+        row.add(lt);
+      });
+
+      box.add(row);
+      y += entryH + gap;
+    });
+
+    return Math.max(0, y - gap);
+  }
+
+  /**
+   * 计算某塔某等级的最终属性——与 Tower.recalcStats 完全同口径
+   * （成长项支持「数组=逐级显式值」与「数值=逐级相乘系数」两种写法）。
+   */
+  towerStatsAt(cfg, level) {
+    const base = cfg.stats || {};
+    const up = cfg.upgrade || {};
+    const isArr = Array.isArray;
+    let dmgMul = 1, rangeMul = 1, cdMul = 1, jumpsAdd = 0;
+    for (let i = 1; i < level; i++) {
+      if (!isArr(up.damage) && up.damage != null) dmgMul *= up.damage;
+      if (!isArr(up.range) && up.range != null) rangeMul *= up.range;
+      if (!isArr(up.cooldown) && up.cooldown != null) cdMul *= up.cooldown;
+      if (up.jumps) jumpsAdd += up.jumps;
+    }
+    const baseJumps = (cfg.effect && cfg.effect.jumps != null) ? cfg.effect.jumps : 0;
+    const k = level - 1;
+    return {
+      damage: Math.round(isArr(up.damage) ? up.damage[k] : base.damage * dmgMul),
+      range: Math.round(isArr(up.range) ? up.range[k] : base.range * rangeMul),
+      cooldown: +(isArr(up.cooldown) ? up.cooldown[k] : base.cooldown * cdMul).toFixed(3),
+      jumps: baseJumps + jumpsAdd
+    };
+  }
+
+  /** 元素属性 + 功能补充说明（全部读配置，不写死数值） */
+  codexMeta(key, cfg) {
+    const pe = (cfg.projectile && cfg.projectile.effect) || {};
+    const eff = cfg.effect || {};
+    const type = pe.type || eff.type || '';
+    const elems = TD_CONFIG.elements || {};
+    const elKey = (cfg.projectile && cfg.projectile.element) || eff.element || null;
+    const elName = elKey && elems[elKey] ? elems[elKey].name : '';
+
+    if (type === 'pull') {
+      return {
+        element: '引力 / 牵引',
+        note: '无伤害·范围索敌：仅牵引小怪（BOSS 免疫），每 ' + (eff.attractInterval / 1000) +
+          ' 秒脉冲一次，被牵引期间推进减速'
+      };
+    }
+    if (type === 'windSpread') {
+      return {
+        element: '风元素',
+        note: '命中带元素小怪时，向 ' + eff.spreadRadius + 'px 内最多 ' + eff.spreadMaxTargets +
+          ' 只无元素小怪扩散该元素（冷却 ' + eff.spreadCooldown + ' 秒）'
+      };
+    }
+    if (type === 'chain') {
+      return {
+        element: (elems.thunder ? elems.thunder.name : '雷') + '元素',
+        note: '电链在小怪间弹跳，每次弹跳伤害 ×' + eff.jumpDecay +
+          '（递减 10%），搜索半径 ' + eff.chainRange + 'px'
+      };
+    }
+    if (type === 'splashSlow') {
+      return {
+        element: (elName || '冰') + '元素',
+        note: '命中溅射半径 ' + pe.splashRadius + 'px，范围内小怪减速持续 ' + pe.slowDuration + ' 秒'
+      };
+    }
+    return {
+      element: elName ? elName + '元素' : '无元素',
+      note: elName
+        ? '命中附加 ' + elName + '元素印记（纯视觉标记，供风元素塔扩散）'
+        : '单体伤害'
+    };
+  }
+
+  /** 生成 Lv1~maxLevel 的数值说明行（冰塔含 BOSS 专项减速等，全部读配置） */
+  codexLines(key, cfg) {
+    const pe = (cfg.projectile && cfg.projectile.effect) || {};
+    const eff = cfg.effect || {};
+    const type = pe.type || eff.type || '';
+    const maxLv = (cfg.upgrade && cfg.upgrade.maxLevel) || 3;
+    const out = [];
+    for (let lv = 1; lv <= maxLv; lv++) {
+      const st = this.towerStatsAt(cfg, lv);
+      const rate = st.cooldown > 0 ? (1 / st.cooldown).toFixed(2) + ' 次/秒' : '—';
+      let txt;
+      if (type === 'pull') {
+        txt = '牵引范围 ' + st.range + ' · 无伤害 · 对 BOSS 减速 ' +
+          Math.round((eff.bossSlow || 0) * 100) + '%';
+      } else if (type === 'chain') {
+        txt = '伤害 ' + st.damage + ' · 弹跳 ' + st.jumps + ' 次 · 攻速 ' + rate + ' · 射程 ' + st.range;
+      } else if (type === 'windSpread') {
+        txt = '伤害 ' + st.damage + ' · 扩散半径 ' + eff.spreadRadius + ' · 冷却 ' +
+          eff.spreadCooldown + ' 秒 · 射程 ' + st.range;
+      } else if (type === 'splashSlow') {
+        const tbl = pe.slowFactorByLevel || {};
+        const sf = tbl[String(lv)] != null ? tbl[String(lv)] : pe.slowFactor;
+        txt = '减速 ' + Math.round((1 - sf) * 100) + '% · 伤害 ' + st.damage +
+          ' · 攻速 ' + rate + ' · 射程 ' + st.range;
+        if (pe.bossSlow && lv >= (pe.bossSlow.minLevel || 1)) {
+          txt += ' · 对 BOSS 减速 ' + Math.round((1 - pe.bossSlow.factor) * 100) + '%';
+        }
+      } else {
+        txt = '伤害 ' + st.damage + ' · 攻速 ' + rate + ' · 射程 ' + st.range;
+      }
+      out.push('Lv' + lv + '：' + txt);
+    }
+    return out;
   }
 }
