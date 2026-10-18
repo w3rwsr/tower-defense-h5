@@ -185,8 +185,10 @@ class Enemy extends Phaser.GameObjects.Container {
 
   /* 施加减速：取更强（数值更小）的减速系数，时间刷新取较长者。
      element 标注减速来源（'ice'=冰弹/冰反应；第 7 关冰元素护盾存在期间
-     免疫一切冰系减速——当前游戏内减速全部来自冰元素，故无元素标注同样拦截） */
-  applySlow(factor, duration, element) {
+     免疫一切冰系减速——当前游戏内减速全部来自冰元素，故无元素标注同样拦截）
+     noMark=true 时不挂任何元素印记（塔D 对 BOSS 的固定减速：来源是引力而非
+     冰元素，不应在 1~5 关的旧印记模式下误挂"冰"标记） */
+  applySlow(factor, duration, element, noMark) {
     if (this.shield && this.shield.type === 'element' && this.shield.element === 'ice' &&
         (!element || element === 'ice')) {
       return;
@@ -197,7 +199,7 @@ class Enemy extends Phaser.GameObjects.Container {
     this.body.setTint(0xbbeeff);
     /* 旧印记模式（1~5 关）：冰印记与减速同生同灭；新反应模式中冰元素是
        独立元素槽（attachElement），不再由减速自动挂印记 */
-    if (!this.reactionsEnabled && (!this.element || this.elementTimer <= 0)) {
+    if (!noMark && !this.reactionsEnabled && (!this.element || this.elementTimer <= 0)) {
       this.element = 'ice';
       this.elementTimer = duration;
       this.showElementMark('ice');

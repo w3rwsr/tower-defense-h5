@@ -29,6 +29,7 @@ const TDMedia = (function () {
   const CACHE_NAME = 'td-media-' + VER;
   const ITEM_TIMEOUT = 10000;      // 单个媒体超时（ms）：超时即跳过，走降级
   const GROUP_TIMEOUT = 10000;     // 整组加载超时（ms）：到点强制放行（允许进入游戏）
+  const IDLE_GRACE = 2000;         // 零任务看门狗（ms）：组内迟迟无任务入队即收起进度条
   const OVERLAY_MIN_MS = 300;      // 进度条最短展示时长，避免一闪而过
 
   /* 缓存层可用性检测：http(s) + Cache API + fetch。
@@ -53,8 +54,8 @@ const TDMedia = (function () {
 
   /* ---------------- 进度组（进度条 UI） ---------------- */
   const group = {
-    active: false, label: '', total: 0, done: 0, fail: 0,
-    shownAt: 0, capTimer: null, hideTimer: null
+    active: false, shown: false, label: '', total: 0, done: 0, fail: 0,
+    shownAt: 0, capTimer: null, hideTimer: null, idleTimer: null
   };
   let overlay = null, barFill = null, textEl = null;
   let toastEl = null, toastTimer = null;
@@ -89,32 +90,52 @@ const TDMedia = (function () {
   }
 
   function renderGroup() {
-    if (!group.active || !overlay) return;
+    if (!group.active || !group.shown || !overlay) return;
     const settled = group.done + group.fail;
     const pct = group.total ? Math.min(100, Math.round(settled / group.total * 100)) : 0;
     barFill.style.width = pct + '%';
     textEl.textContent = group.label + ' ' + pct + '%';
   }
 
-  /** 开始一个进度组（显示进度条）。进关加载本关媒体时调用。 */
-  api.beginGroup = function (label) {
-    group.active = true;
-    group.label = label || '加载中';
-    group.total = group.done = group.fail = 0;
+  /* 【懒显示】真正有媒体入队时才显示进度条。
+     这样“再次游玩”时若资源已在内存/纹理管理器里（没有任何任务入队），
+     进度条根本不会出现——既不会闪出 0% 假加载页，也不会把进度重置为 0。
+     首次进关时首个媒体通常在 0.8~1.4s 内入队，进度条随即显示，观感不变。 */
+  function showGroup() {
+    if (!group.active || group.shown) return;
+    group.shown = true;
     group.shownAt = Date.now();
     ensureOverlay();
     if (overlay) overlay.style.display = 'flex';
     renderGroup();
+  }
+
+  /** 开始一个进度组（有媒体入队时才显示进度条）。进关时调用。 */
+  api.beginGroup = function (label) {
+    group.active = true;
+    group.shown = false;                 // 先不显示：等首个媒体入队（见 showGroup）
+    group.label = label || '加载中';
+    group.total = group.done = group.fail = 0;
+    group.shownAt = 0;
+    ensureOverlay();
+    if (overlay) overlay.style.display = 'none';
     /* 整组硬超时：到点无论是否加载完都放行（隐藏进度条，绝不卡住玩家） */
     clearTimeout(group.capTimer);
     group.capTimer = setTimeout(() => api.endGroup(true), GROUP_TIMEOUT);
-  };
+    /* 零任务看门狗：宽限期内始终没有媒体入队 → 直接结束本组，绝不显示“0%”。 */
+    clearTimeout(group.idleTimer);
+    group.idleTimer = setTimeout(() => {
+      if (group.active && group.total === 0) api.endGroup(true);
+    }, IDLE_GRACE);
+  }
 
   /** 结束进度组：清进度条；failed>0 时给一次轻提示 */
   api.endGroup = function (force) {
     if (!group.active) return;
     group.active = false;
+    group.shown = false;
     clearTimeout(group.capTimer);
+    clearTimeout(group.idleTimer);
     clearTimeout(group.hideTimer);
     const failed = group.fail;
     const wait = force ? 0 : Math.max(0, OVERLAY_MIN_MS - (Date.now() - group.shownAt));
@@ -191,7 +212,7 @@ const TDMedia = (function () {
     if (!el || !url) return;
     const o = opts || {};
     const task = { el, url, onReady: o.onReady, onFail: o.onFail, fill: !!o.fillCache };
-    if (group.active) { group.total++; renderGroup(); }
+    if (group.active) { group.total++; showGroup(); }   // 首个媒体入队时才显示进度条
     api._queue.push(task);
     runNext();
   };
@@ -227,6 +248,8 @@ const TDMedia = (function () {
       try { el.removeEventListener('loadeddata', onLoaded); } catch (e) {}
       try { el.removeEventListener('error', onError); } catch (e) {}
       if (ok) api._stats.done++; else api._stats.fail++;
+      /* 不静默失败：打出具体 URL 与原因（超时/错误/赋值失败），方便真机排查 */
+      if (!ok) console.warn('[TDMedia] 媒体加载失败，已跳过并走降级：', task.url, '(' + reason + ')');
       if (group.active) {
         if (ok) group.done++; else group.fail++;
         renderGroup();

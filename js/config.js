@@ -451,7 +451,13 @@ window.TD_CONFIG = {
           "value": 9,
           "splashRadius": 68,
           "slowFactor": 0.50,      // 减速到 50% 移速
-          "slowDuration": 1.6      // 持续秒数
+          "slowDuration": 1.6,     // 持续秒数
+          /* BOSS 免疫冰冻（不能定身），用更强减速弥补：冰元素塔命中 BOSS 时，
+             减速【幅度与时长】均按本倍率放大（幅度口径：减速量 = 1-slowFactor，
+             乘倍率后反算系数，并钳下限 0.1）。例：小怪 50% 减速/1.6s → BOSS
+             的减速量 50%×1.75=87.5%（移速降到 12.5%）、时长 1.6×1.75=2.8s。
+             仅对 cfg.boss / bossMini 生效，小怪数值完全不变。1=不加强。 */
+          "bossSlowMul": 1.75
         },
         /* 冰弹贴图（assets/ice_bullets.png 离线裁切，见 build_ice_assets.py；
            data URI 模块 IceBulletData.js，纹理键 proj_ice_lv1/2/3）。
@@ -621,7 +627,12 @@ window.TD_CONFIG = {
         "pullStrength": 10,    // 单次吸附时位移收敛速率（越大越快被拉拢，1/秒），所有小怪同一速率
         "maxDisplace": 130,    // 沿路向塔投影点的最大位移（像素，向前/向后对称限幅），绝不会被拉出道路
         "attractInterval": 2000, // 吸附间隔（毫秒）：每 2 秒触发一次
-        "attractDuration": 500   // 单次吸附持续（毫秒）：收敛窗口，结束后停在新位置继续前进（不弹回）
+        "attractDuration": 500,  // 单次吸附持续（毫秒）：收敛窗口，结束后停在新位置继续前进（不弹回）
+        /* BOSS 免疫牵引（位置完全不位移），用固定减速弥补：牵引脉冲命中 BOSS
+           时挂一层减速 debuff，减速量固定 0.30（30%），【不随塔等级变化】；
+           持续时间 = attractDuration（本次牵引时长）。仅对 cfg.boss / bossMini
+           生效，小怪仍只被吸引、不额外减速。0=不减速。 */
+        "bossSlow": 0.30
       },
       "upgrade": {
         "maxLevel": 3,

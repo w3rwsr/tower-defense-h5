@@ -121,7 +121,10 @@ class GameScene extends Phaser.Scene {
        TDMedia 串行队列逐个下载 + 进度条 + 10s 超时跳过。进关到 BOSS 出场
        间隔数十秒，死亡视频届时必然就绪；未就绪时 Enemy/Tower 照旧走既有
        静态贴图降级，玩法与观感零变化。 */
-    try { this._deferredLevelMedia(); } catch (e) { /* 忽略：不影响进关 */ }
+    try { this._deferredLevelMedia(); } catch (e) {
+      /* 不影响进关，但不静默：打出具体报错便于真机排查 */
+      console.error('[TDMedia] 本关媒体调度异常（不影响进关）：', e);
+    }
 
     /* ---- 波次状态机：ready(可开战) / active(出怪中) / won / lost ---- */
     this.state = 'ready';
@@ -189,29 +192,51 @@ class GameScene extends Phaser.Scene {
       catch (e) { return false; }
     }).call(this);
 
+    /* 只把【真正还会入队下载】的项计入计划：已经 init 过的模块 / 已经建过
+       条目（下载中/已就绪/已判失败）的死亡视频一律不再排——再次游玩同一关时
+       资源已在内存/纹理管理器里，计划为空 → 不显示加载页 → 秒进游戏。
+       若资源有缺失（例如上次加载失败），只把缺失项重新入队，绝不重置整关加载。 */
     const plan = [];
     if (hasBoss && typeof BOSS_VIDEO !== 'undefined' && BOSS_VIDEO.init && !BOSS_VIDEO._inited) {
-      plan.push({ delay: 800, fn: () => BOSS_VIDEO.init(this) });
+      plan.push({ tag: 'BOSS_VIDEO.init', delay: 800, fn: () => BOSS_VIDEO.init(this) });
     }
     if (windUsable && typeof WIND_VIDEO !== 'undefined' && WIND_VIDEO.init && !WIND_VIDEO._inited) {
-      plan.push({ delay: 1100, fn: () => WIND_VIDEO.init(this) });
+      plan.push({ tag: 'WIND_VIDEO.init', delay: 1100, fn: () => WIND_VIDEO.init(this) });
     }
     /* 死亡视频按出场顺序逐个错峰预载：队列串行，下完一个才下一个 */
+    const deathMod = (typeof BOSS_DEATH !== 'undefined') ? BOSS_DEATH : null;
     bossKeys.forEach((k, i) => {
+      if (!deathMod) return;
+      if (!deathMod.supported) return;                      // H.264/管线不支持：加载无意义，不计入
+      if (deathMod._st && deathMod._st[k]) return;          // 已建条目：已在下载/已就绪/已失败 → 不重复排
       plan.push({
+        tag: 'BOSS_DEATH.prewarm(' + k + ')',
         delay: 1400 + i * 3500,
-        fn: () => { if (typeof BOSS_DEATH !== 'undefined') BOSS_DEATH.prewarm(k); }
+        fn: () => deathMod.prewarm(k)
       });
     });
-    if (!plan.length) return;
+    if (!plan.length) {
+      /* 本关所需媒体本会话已全部加载过（或本关无需媒体）：直接进游戏，不出现加载页 */
+      try { if (typeof TDMedia !== 'undefined' && TDMedia.endGroup) TDMedia.endGroup(true); } catch (e) {}
+      return;
+    }
 
     /* 进度条：百分比由 TDMedia 按已入队媒体的完成/失败推进；
        10s 上限到点自动隐藏放行，绝不卡住玩家。
        调度用 DOM setTimeout（不用 this.time.delayedCall）：媒体加载属于
        资源层，不应受游戏暂停/场景时钟暂停影响，且与选关页的错峰加载同源。 */
-    try { if (typeof TDMedia !== 'undefined' && TDMedia.beginGroup) TDMedia.beginGroup('加载本关资源'); } catch (e) {}
+    try {
+      if (typeof TDMedia !== 'undefined' && TDMedia.beginGroup) TDMedia.beginGroup('加载本关资源');
+    } catch (e) {
+      console.warn('[TDMedia] 进度条启动失败（不影响进关）：', e);
+    }
     plan.forEach((p) => {
-      setTimeout(() => { try { p.fn(); } catch (e) { /* 单项失败不影响其余 */ } }, p.delay);
+      setTimeout(() => {
+        try { p.fn(); } catch (e) {
+          /* 不静默：打出具体任务名与错误，便于真机排查 */
+          console.error('[TDMedia] 媒体加载任务异常：' + p.tag, e);
+        }
+      }, p.delay);
     });
   }
 

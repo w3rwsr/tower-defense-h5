@@ -273,7 +273,18 @@ class Projectile extends Phaser.GameObjects.Image {
               mul = e.attachElement(el, null, el).reactionMul || 1;
             }
             e.takeDamage(this.damage * mul, el);
-            if (!e.dead) e.applySlow(this.effect.slowFactor, this.effect.slowDuration, el);
+            /* 减速：BOSS/BossMini 免疫冰冻（不能定身），为弥补，冰元素塔对其
+               减速的【幅度与时长】按 JSON bossSlowMul（缺省 1.75）放大后再施加；
+               小怪数值完全不变（倍率=1 或缺省时不放大）。
+               幅度口径：减速量 = (1-slowFactor) × 倍率，反算系数并钳下限 0.1。 */
+            let sf = this.effect.slowFactor;
+            let sd = this.effect.slowDuration;
+            const bMul = this.effect.bossSlowMul;
+            if (((e.cfg && e.cfg.boss) || e.bossMini) && bMul && bMul !== 1) {
+              sf = Math.max(0.1, 1 - (1 - sf) * bMul);
+              sd = sd * bMul;
+            }
+            if (!e.dead) e.applySlow(sf, sd, el);
           }
         });
       }

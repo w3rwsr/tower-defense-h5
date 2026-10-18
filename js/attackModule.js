@@ -255,13 +255,25 @@
       for (let i = 0; i < ctx.enemies.length; i++) {
         const e = ctx.enemies[i];
         if (e.dead || e.invulnTimer > 0) continue; // 传送后短暂无敌：不可被索敌/吸引
-        /* 小怪过滤：nonBoss 模式下 BOSS（cfg.boss===true）免疫吸引；
-           第 7 关绿色史莱姆分身带 bossMini 标记，同样免疫吸引 */
-        if (this.smallOnly && ((e.cfg && e.cfg.boss) || e.bossMini)) continue;
-
         const dx = e.x - t.x;
         const dy = e.y - t.y;
         const d2 = dx * dx + dy * dy;
+
+        /* 小怪过滤：nonBoss 模式下 BOSS（cfg.boss===true）免疫吸引；
+           第 7 关绿色史莱姆分身带 bossMini 标记，同样免疫吸引。
+           【弥补】BOSS 不能被牵引（位置完全不动），但被引力塔效果命中时挂一层
+           固定减速 debuff：减速量 = JSON effect.bossSlow（缺省 0.30，不随等级变化），
+           持续时间 = 本次牵引时长 attractDuration；每个牵引窗口（windowId）对同一
+           BOSS 只挂一次，既不丢控场也不产生位移。 */
+        if (this.smallOnly && ((e.cfg && e.cfg.boss) || e.bossMini)) {
+          if (d2 <= r2 && typeof e.applySlow === 'function' &&
+              e._gravSlowWindow !== this.windowId) {
+            e._gravSlowWindow = this.windowId;
+            const amt = this.eff.bossSlow != null ? this.eff.bossSlow : 0.30;
+            if (amt > 0) e.applySlow(Math.max(0.1, 1 - amt), this.duration, 'gravity', true);
+          }
+          continue;                                 // BOSS 永不位移
+        }
         if (d2 > r2) continue; // 射程外：不标记，Enemy 首帧烘焙位移后继续前进
 
         /* 水+冰冰冻期间免疫牵引：本脉冲不产生任何位移；脉冲首次扫到冰冻
