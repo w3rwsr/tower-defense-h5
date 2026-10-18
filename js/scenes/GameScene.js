@@ -2059,7 +2059,12 @@ class GameScene extends Phaser.Scene {
   /** 热区是否可放：画面边界 + 热区未占用 + 塔心离路径中心线足够远（避路）
       + 不落入 HUD 安全禁区 */
   canBuildAt(x, y, key) {
-    const b = TD_CONFIG.build;
+    /* 用【本关合并后的 build 配置】（顶层 build 被 levelCfg.build 覆盖，见 create），
+       与 buildHotspots 生成热区时的判定完全一致：否则关卡自定义了
+       minPathDistance（如第 7 关 52，为解锁发夹弯内侧塔位）时，生成出来的点
+       会在绘制/点击判定的这一刻被按全局值 56 拒绝，导致"看得见格子却放不了塔"。
+       第 1~6 关 build 未覆盖该键，取值与全局完全相同，行为零变化。 */
+    const b = this.buildCfg || TD_CONFIG.build;
     if (x < b.edgeMargin || x > this.W - b.edgeMargin || y < b.edgeMargin || y > this.H - b.edgeMargin) return false;
     if (this.occupied.has(key)) return false;
     if (this.distToPath(x, y) < b.minPathDistance) return false;
@@ -2098,8 +2103,13 @@ class GameScene extends Phaser.Scene {
       const t = cand[i]; cand[i] = cand[j]; cand[j] = t;
     }
     const kinds = ocfg.kinds || ['rock'];
+    /* 自动障碍物数量上限：关卡可用 levelCfg.obstaclesAutoCount 覆盖
+       （第 7 关 = 0：关掉随机布点，改为 extraObstacles 的显式整齐布点）；
+       未配置的关卡沿用全局 maxCount，第 1~6 关行为零变化。 */
+    const autoMax = (this.levelCfg.obstaclesAutoCount != null)
+      ? this.levelCfg.obstaclesAutoCount : ocfg.maxCount;
     for (const c of cand) {
-      if (this.obstacles.length >= ocfg.maxCount) break;
+      if (this.obstacles.length >= autoMax) break;
       /* HUD 安全禁区（顶部信息栏/控制按钮、左下波次按钮）不放障碍物：
          否则被按钮遮挡无法点选/转火攻击（血量/奖励规则不变，只是换位置） */
       if (this.inUiSafeZone(c.x, c.y)) continue;
