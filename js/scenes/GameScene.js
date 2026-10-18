@@ -367,6 +367,20 @@ class GameScene extends Phaser.Scene {
     return min;
   }
 
+  /** 是否命中【关卡专属排除点】（JSON：build.excludeSpots / excludeRadius）：
+      用于删掉个别自动生成的火力点（如第 7 关终点大门旁被门体与血量牌遮挡的点）。
+      未配置该字段的关卡恒返回 false → 第 1~6 关行为零变化。 */
+  isExcludedSpot(x, y) {
+    const b = this.buildCfg || TD_CONFIG.build;
+    const list = b.excludeSpots;
+    if (!list || !list.length) return false;
+    const r = b.excludeRadius != null ? b.excludeRadius : 30;
+    for (const e of list) {
+      if (Math.hypot(x - e.x, y - e.y) <= r) return true;
+    }
+    return false;
+  }
+
   /* ============================================================
    * 道路火力点：由路径几何直接生成【沿道路两侧均匀分布的两排整齐点】。
    * 沿路径每 step 采样一次，向两侧法向各偏移 roadGap(62px)：
@@ -402,6 +416,7 @@ class GameScene extends Phaser.Scene {
           p.y < b.edgeMargin || p.y > this.H - b.edgeMargin) continue;
       if (this.distToPath(p.x, p.y) < b.minPathDistance) continue;
       if (this.inUiSafeZone(p.x, p.y)) continue;   // 避开顶部HUD/左下波次按钮（两端统一）
+      if (this.isExcludedSpot(p.x, p.y)) continue; // 关卡专属排除点（JSON：build.excludeSpots）
       let dup = false;
       for (const h of this.hotspots) {
         if (Math.abs(h.x - p.x) < minSpacing && Math.abs(h.y - p.y) < minSpacing) { dup = true; break; }
@@ -420,6 +435,7 @@ class GameScene extends Phaser.Scene {
           p.y < b.edgeMargin || p.y > this.H - b.edgeMargin) continue;
       if (this.distToPath(p.x, p.y) < b.minPathDistance) continue;
       if (this.inUiSafeZone(p.x, p.y)) continue;
+      if (this.isExcludedSpot(p.x, p.y)) continue;   // 与自动点同一套排除规则
       let dup = false;
       for (const h of this.hotspots) {
         if (Math.abs(h.x - p.x) < minSpacing && Math.abs(h.y - p.y) < minSpacing) { dup = true; break; }
@@ -2094,6 +2110,7 @@ class GameScene extends Phaser.Scene {
     if (this.occupied.has(key)) return false;
     if (this.distToPath(x, y) < b.minPathDistance) return false;
     if (this.inUiSafeZone(x, y)) return false;
+    if (this.isExcludedSpot(x, y)) return false;   // 关卡专属排除点（与生成规则一致）
     return true;
   }
 
