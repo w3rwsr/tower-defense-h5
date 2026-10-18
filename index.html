@@ -123,6 +123,9 @@
        Phaser 启动前后台动态注入，选关页先行进入，视频数据就绪后自动挂接 -->
   <script defer src="js/config.js?v=20261017h"></script>
   <script defer src="js/storage.js?v=20261016a"></script>
+  <!-- 媒体加载统一调度（串行队列 + 进度条 + 10s 超时跳过 + Cache API 缓存）：
+       必须早于各视频模块执行，供其按需排进加载队列 -->
+  <script defer src="js/MediaLoader.js?v=20261018a"></script>
   <!-- 开发调试工具：仅 URL 带 #dbg 时激活（全内容解锁 + 应用内浏览器），无 #dbg 的正式环境脚本立即退出，不创建 DOM、不写任何存储 -->
   <script defer src="js/debugTools.js?v=20260921r"></script>
   <script defer src="js/attackModule.js?v=20261017a"></script>
@@ -145,14 +148,14 @@
   <script defer src="js/PrincessArtData.js?v=20261016a"></script>
   <script defer src="js/objects/FireBurn.js?v=20261009n"></script>
   <script defer src="js/objects/FireVideoPipeline.js?v=20261014c"></script>
-  <script defer src="js/objects/SlimeVideo.js?v=20261014b"></script>
-  <script defer src="js/objects/BossVideo.js?v=20261014i"></script>
-  <script defer src="js/objects/WindVideo.js?v=20261013i"></script>
+  <script defer src="js/objects/SlimeVideo.js?v=20261018a"></script>
+  <script defer src="js/objects/BossVideo.js?v=20261018a"></script>
+  <script defer src="js/objects/WindVideo.js?v=20261018a"></script>
   <script defer src="js/objects/Tower.js?v=20261017h"></script>
   <script defer src="js/objects/ThunderArc.js?v=20261012m"></script>
-  <script defer src="js/scenes/BootScene.js?v=20261016b"></script>
-  <script defer src="js/scenes/LevelSelectScene.js?v=20261017c"></script>
-  <script defer src="js/scenes/GameScene.js?v=20261017c"></script>
+  <script defer src="js/scenes/BootScene.js?v=20261018a"></script>
+  <script defer src="js/scenes/LevelSelectScene.js?v=20261018a"></script>
+  <script defer src="js/scenes/GameScene.js?v=20261018a"></script>
   <script defer src="js/main.js?v=20261017g"></script>
   <script>
     /* 启动进度条 + 失败自动重试（放在所有 defer 脚本之后：
@@ -169,13 +172,27 @@
       var btn = document.getElementById('boot-retry');
       var scripts = document.querySelectorAll('script[src]');
       var total = scripts.length, done = 0;
+      /* 进度条分两段：脚本下载 0~60%，BootScene 本地贴图解码 60~100%
+         （由 BootScene 回调 window.__tdArtProgress 推进），全程百分比可见 */
+      var SCRIPT_W = 60, artPct = 0;
       function render() {
-        var pct = total ? Math.round(done / total * 100) : 0;
+        var sp = total ? done / total : 0;
+        var pct = Math.round(sp * SCRIPT_W + artPct * (100 - SCRIPT_W) / 100);
         if (fill) fill.style.width = pct + '%';
         if (tip && !window.__tdBootFailed && !window.__tdBootOK) {
           tip.textContent = '正在加载资源 ' + done + '/' + total + '（' + pct + '%）';
         }
       }
+      /* BootScene：本地贴图解码进度（0~100）并入同一条进度条 */
+      window.__tdArtProgress = function (d, t) {
+        artPct = t ? Math.round(d / t * 100) : 100;
+        var sp = total ? done / total : 1;
+        var pct = Math.round(sp * SCRIPT_W + artPct * (100 - SCRIPT_W) / 100);
+        if (fill) fill.style.width = pct + '%';
+        if (tip && !window.__tdBootFailed && !window.__tdBootOK) {
+          tip.textContent = '正在准备贴图 ' + d + '/' + (t || 0) + '（' + pct + '%）';
+        }
+      };
       /* 失败统一入口（由开头启动守护的 window error 捕获调用） */
       window.__tdBootOnFail = function () {
         var n = 0;

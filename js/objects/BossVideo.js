@@ -114,8 +114,20 @@
     });
 
     v.addEventListener('error', () => { this._failed = true; });
-    v.src = SRC;
-    try { v.load(); } catch (e) { /* ignore */ }
+    /* 来源统一交给 TDMedia 串行队列（一次只下载 1 个视频，与史莱姆/风塔/BOSS
+       死亡视频共用同一条队列，不再并发抢带宽；单项 10s 超时即跳过；http(s)
+       命中缓存用 blob URL 秒开并回填缓存）。TDMedia 缺失时回退旧直连方式。 */
+    try {
+      if (typeof TDMedia !== 'undefined' && TDMedia.loadVideo) {
+        TDMedia.loadVideo(v, SRC, {
+          fillCache: true,
+          onFail: () => { this._failed = true; }
+        });
+      } else {
+        v.src = SRC;
+        v.load();
+      }
+    } catch (e) { this._failed = true; }
   };
 
   api.use = function () { this._refs++; this._sync(); };
@@ -258,8 +270,21 @@
       } catch (e) { st.failed = true; }
     });
     v.addEventListener('error', () => { st.failed = true; });
-    v.src = (DC.src || 'assets/boss_death_#KEY#.mp4').replace('#KEY#', key) + '?v=' + VER;
-    try { v.load(); } catch (e) { /* ignore */ }
+    const url = (DC.src || 'assets/boss_death_#KEY#.mp4').replace('#KEY#', key) + '?v=' + VER;
+    /* 死亡视频同样走 TDMedia 串行队列：三个变体逐个下载，不并发（弱网下
+       避免 7.8MB 同时抢带宽拖垮进关后的帧率）；10s 超时即 failed → Enemy
+       端照旧走原有死亡动画 + 皇冠贴图降级，功能不缺失。 */
+    try {
+      if (typeof TDMedia !== 'undefined' && TDMedia.loadVideo) {
+        TDMedia.loadVideo(v, url, {
+          fillCache: true,
+          onFail: () => { st.failed = true; }
+        });
+      } else {
+        v.src = url;
+        v.load();
+      }
+    } catch (e) { /* ignore */ }
   };
 
   function SEGS_ONLY(k) { return k === 'gold' || k === 'blue' || k === 'gray'; }

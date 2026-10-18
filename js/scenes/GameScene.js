@@ -116,16 +116,12 @@ class GameScene extends Phaser.Scene {
     try { BOSS_VIDEO.enterScene(); } catch (e) {}
     /* BOSS 死亡视频：新一局停掉所有播放中的死亡动画并清零计数 */
     try { BOSS_DEATH.enterScene(); } catch (e) {}
-    /* 本关波次含 Boss 时，进关即后台预载三个死亡视频（不播放）。从进关到
-       Boss 出场间隔数十秒，死亡时必然就绪；消除旧方案「Boss 出场才 prewarm、
-       出场即被秒时 play() 因 !ready 永久走降级」的竞态。第 1 关无 Boss 不预载。
-       不能放进 Boot：启动瞬间 6 个视频并发首帧解码会拖慢黑屏（弱机明显）。 */
-    try {
-      if (BOSS_DEATH.prewarmAll &&
-        JSON.stringify(this.levelCfg.waves).indexOf('enemyBoss') >= 0) {
-        BOSS_DEATH.prewarmAll();
-      }
-    } catch (e) {}
+    /* 本关媒体【按需加载】：只加载本关真正会用到的视频（含 BOSS 的关卡才
+       加载 BOSS 运动视频，且只预载本关实际出场的死亡视频变体），全部经
+       TDMedia 串行队列逐个下载 + 进度条 + 10s 超时跳过。进关到 BOSS 出场
+       间隔数十秒，死亡视频届时必然就绪；未就绪时 Enemy/Tower 照旧走既有
+       静态贴图降级，玩法与观感零变化。 */
+    try { this._deferredLevelMedia(); } catch (e) { /* 忽略：不影响进关 */ }
 
     /* ---- 波次状态机：ready(可开战) / active(出怪中) / won / lost ---- */
     this.state = 'ready';
@@ -171,6 +167,85 @@ class GameScene extends Phaser.Scene {
 
     /* 第 1 关 = 新手教程关，启动引导提示 */
     if (this.levelId === 1) this.startTutorial();
+  }
+
+  /* ============================================================
+   * 本关媒体按需加载（移动端加载优化）
+   * 规则：只加载本关会用到的视频，且全部经 TDMedia 串行队列逐个下载
+   *      （一次只下 1 个媒体，不再并发抢带宽/解码器），带进度条与
+   *      10s 单项超时；任何失败都跳过并保持既有静态贴图降级。
+   *   - BOSS 运动视频（~4.1MB）：仅波次含 BOSS 的关卡加载；
+   *   - BOSS 死亡视频（每个 ~2.3~3.0MB）：仅预载本关实际出场的变体；
+   *   - 风塔视频（~2.3MB）：风元素塔在本关可用时才加载。
+   * ============================================================ */
+  _deferredLevelMedia() {
+    const hasBoss = (function () {
+      try { return JSON.stringify(this.levelCfg.waves).indexOf('enemyBoss') >= 0; }
+      catch (e) { return false; }
+    }).call(this);
+    const bossKeys = hasBoss ? this._bossKeysInLevel() : [];
+    const windUsable = (function () {
+      try { return TDStorage.isTowerUnlocked('towerF', this.levelId); }
+      catch (e) { return false; }
+    }).call(this);
+
+    const plan = [];
+    if (hasBoss && typeof BOSS_VIDEO !== 'undefined' && BOSS_VIDEO.init && !BOSS_VIDEO._inited) {
+      plan.push({ delay: 800, fn: () => BOSS_VIDEO.init(this) });
+    }
+    if (windUsable && typeof WIND_VIDEO !== 'undefined' && WIND_VIDEO.init && !WIND_VIDEO._inited) {
+      plan.push({ delay: 1100, fn: () => WIND_VIDEO.init(this) });
+    }
+    /* 死亡视频按出场顺序逐个错峰预载：队列串行，下完一个才下一个 */
+    bossKeys.forEach((k, i) => {
+      plan.push({
+        delay: 1400 + i * 3500,
+        fn: () => { if (typeof BOSS_DEATH !== 'undefined') BOSS_DEATH.prewarm(k); }
+      });
+    });
+    if (!plan.length) return;
+
+    /* 进度条：百分比由 TDMedia 按已入队媒体的完成/失败推进；
+       10s 上限到点自动隐藏放行，绝不卡住玩家。
+       调度用 DOM setTimeout（不用 this.time.delayedCall）：媒体加载属于
+       资源层，不应受游戏暂停/场景时钟暂停影响，且与选关页的错峰加载同源。 */
+    try { if (typeof TDMedia !== 'undefined' && TDMedia.beginGroup) TDMedia.beginGroup('加载本关资源'); } catch (e) {}
+    plan.forEach((p) => {
+      setTimeout(() => { try { p.fn(); } catch (e) { /* 单项失败不影响其余 */ } }, p.delay);
+    });
+  }
+
+  /* 本关实际出场的 BOSS 变体 key 列表（gold/blue/gray），取值规则与
+     resolveBossVariant 完全对齐：entry.bossVariantPattern 优先，
+     其次关卡级 waves.bossWaveVariant，最后全局 boss.waveVariant（表外回退下标 0）。
+     用途：只预载本关会用到的死亡视频，避免把三个（~7.8MB）全下载下来。 */
+  _bossKeysInLevel() {
+    const out = [];
+    const add = (k) => {
+      if ((k === 'gold' || k === 'blue' || k === 'gray') && out.indexOf(k) < 0) out.push(k);
+    };
+    const bcfg = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.boss) || {};
+    const variants = bcfg.variants || [];
+    const globalMap = bcfg.waveVariant || {};
+    const waves = (this.levelCfg && this.levelCfg.waves) || {};
+    const levelMap = waves.bossWaveVariant || {};
+    (waves.list || []).forEach((grp, wi) => {
+      (grp || []).forEach((entry) => {
+        if (!entry || !entry.type) return;
+        const ec = (TD_CONFIG.enemies && TD_CONFIG.enemies[entry.type]) || null;
+        if (!ec || !ec.boss) return;
+        const pattern = entry.bossVariantPattern;
+        if (pattern && pattern.length) {
+          const n = Math.max(1, entry.count || 1);
+          for (let i = 0; i < n; i++) add(pattern[i % pattern.length]);
+          return;
+        }
+        if (levelMap[String(wi)] != null) { add(levelMap[String(wi)]); return; }
+        const vi = (globalMap[String(wi)] != null) ? globalMap[String(wi)] : 0;
+        if (variants[vi]) add(variants[vi].key);
+      });
+    });
+    return out;
   }
 
   /* ============================================================

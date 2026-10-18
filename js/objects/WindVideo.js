@@ -131,10 +131,24 @@ const WIND_VIDEO = (() => {
     });
     v.addEventListener('error', () => { this._failed = true; });
 
-    /* file:// 协议下 Chromium 把本地视频视为跨域，WebGL texImage2D 上传
+    /* 来源统一交给 TDMedia 串行队列：一次只下载 1 个视频（不再与史莱姆/BOSS
+       视频抢带宽与解码器），单项 10s 未就绪按失败跳过；http(s) 下命中
+       Cache Storage 缓存时用 blob URL 秒开，并在完整缓冲后回填缓存。
+       TDMedia 缺失时回退旧的直连方式，行为与旧版完全一致。
+       file:// 协议下 Chromium 把本地视频视为跨域，WebGL texImage2D 上传
        会抛 SecurityError → 视频纹理建不出来；http(s):// 同源正常。
        file:// 失败时静默降级到静态贴图（Tower 端兜底）。 */
-    try { v.src = SRC; v.load(); } catch (e) { this._failed = true; }
+    try {
+      if (typeof TDMedia !== 'undefined' && TDMedia.loadVideo) {
+        TDMedia.loadVideo(v, SRC, {
+          fillCache: true,
+          onFail: () => { this._failed = true; }
+        });
+      } else {
+        v.src = SRC;
+        v.load();
+      }
+    } catch (e) { this._failed = true; }
 
     /* 首次用户手势后解锁（pointer/touch/mouse 三类全监听，兼容旧 X5） */
     const unlock = () => { api._locked = false; api._sync(); };

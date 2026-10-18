@@ -57,19 +57,30 @@ class LevelSelectScene extends Phaser.Scene {
     this._deferredVideoInit();
   }
 
-  /* 延迟错峰加载三个运动视频（wind_towers/slime_walk/boss_walk.mp4，~8.4MB）：
-     从 BootScene 移到这里——选关页已出现、首屏带宽空闲后再后台逐个下载，
-     移动端弱网下不再抢占启动资源。玩家从选关到放塔/出怪至少有数秒，
-     视频通常早已就绪；未就绪时 Tower/Enemy 走既有静态贴图降级，
-     就绪后经各模块 whenReady 回调自动接管。重复进入本场景安全：
-     各 init 内部均有 _inited 防重入。 */
+  /* 选关页后台“按需”预载：只预载【马上就可能用到】的视频，其余进关再加载。
+     - 史莱姆视频（~2.2MB）：第 1 关就有史莱姆小怪，选关页空闲时预载；
+     - 风塔视频（~2.3MB）：仅当风元素塔（通关第 3 关解锁）在本存档可用时预载；
+     - BOSS 运动视频（~4.1MB）/ BOSS 死亡视频（3 个共 ~7.8MB）：
+       【不在选关页加载】，改为进入含 BOSS 的关卡后按本关实际出场的变体懒加载
+       （见 GameScene.create），避免“进选关就下 16MB”把弱网彻底堵死。
+     所有视频统一走 TDMedia 串行队列（一次只下 1 个），下载期间/不支持/失败时
+     Tower/Enemy 保持既有静态贴图降级，就绪后经各模块 whenReady 回调自动接管。
+     重复进入本场景安全：各 init 内部均有 _inited 防重入。 */
   _deferredVideoInit() {
-    const jobs = [
-      () => { try { WIND_VIDEO.init(this); } catch (e) { /* 静态兜底 */ } },
-      () => { try { SLIME_VIDEO.init(this); } catch (e) { /* 静态兜底 */ } },
-      () => { try { BOSS_VIDEO.init(this); } catch (e) { /* 静态兜底 */ } }
-    ];
-    jobs.forEach((fn, i) => setTimeout(fn, 700 + i * 1100));
+    const jobs = [];
+    jobs.push(() => { try { SLIME_VIDEO.init(this); } catch (e) { /* 静态兜底 */ } });
+    /* 风塔是否可用：按该塔自身的解锁关卡判定（通关第 3 关才永久解锁）。
+       不能用 isTowerUnlocked('towerF', 总关卡数)——第 7 关配置了
+       allTowersAvailable，会把它误判为"已解锁"，导致新档进选关就白下 2.3MB。 */
+    let windUsable = false;
+    try {
+      const need = TDStorage.towerUnlockLevel('towerF') || 1;
+      windUsable = TDStorage.isTowerUnlocked('towerF', need);
+    } catch (e) { /* 忽略 */ }
+    if (windUsable) {
+      jobs.push(() => { try { WIND_VIDEO.init(this); } catch (e) { /* 静态兜底 */ } });
+    }
+    jobs.forEach((fn, i) => setTimeout(fn, 900 + i * 1200));
   }
 
   /**

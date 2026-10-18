@@ -767,10 +767,20 @@ class BootScene extends Phaser.Scene {
       }));
     }
 
-    /* 内嵌贴图就绪后再进选关（小图解码通常几十 ms；超时兜底绝不阻断启动） */
+    /* 内嵌贴图就绪后再进选关（小图解码通常几十 ms；超时兜底绝不阻断启动）。
+       同时把解码进度接入 index.html 的启动进度条（__tdArtProgress）：
+       脚本下载段占 0~60%，本地贴图解码段占 60~100%，百分比全程可见；
+       任一张贴图解码失败也照常推进（缺失时塔/怪自动回退程序化贴图）。 */
     if (artJobs) {
       let started = false;
       const go = () => { if (!started) { started = true; this.scene.start('LevelSelectScene'); } };
+      const total = artJobs.length;
+      let doneN = 0;
+      const prog = () => { try { if (window.__tdArtProgress) window.__tdArtProgress(doneN, total); } catch (e) {} };
+      prog();
+      artJobs.forEach((job) => {
+        Promise.resolve(job).then(() => { doneN++; prog(); }, () => { doneN++; prog(); });
+      });
       Promise.all(artJobs).then(go);
       setTimeout(go, 800);
       return;
