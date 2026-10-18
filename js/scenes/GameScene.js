@@ -2129,13 +2129,18 @@ class GameScene extends Phaser.Scene {
     const extraObs = this.levelCfg.extraObstacles || [];
     const bld = this.buildCfg || {};
     const minPath = bld.minPathDistance || 56;
+    /* 固定障碍物之间的最小间距：关卡可用 levelCfg.obstacleSpacing 覆盖
+       （第 7 关 = 64：该关可放障碍物的空白带有限，用 64px 排出整齐一排凑满 10 个）；
+       未配置的关卡沿用全局 obstacles.spacing（80），第 1~6 关行为零变化。 */
+    const obGap = (this.levelCfg.obstacleSpacing != null)
+      ? this.levelCfg.obstacleSpacing : ocfg.spacing;
     for (const p of extraObs) {
       if (p.x < 24 || p.x > this.W - 24 || p.y < 24 || p.y > this.H - 24) continue;
       if (this.distToPath(p.x, p.y) < minPath) continue;
       if (this.inUiSafeZone(p.x, p.y)) continue;   // 固定障碍物同样避开 HUD 区
       let dup = false;
       for (const o of this.obstacles) {
-        if (Math.hypot(o.x - p.x, o.y - p.y) < ocfg.spacing) { dup = true; break; }
+        if (Math.hypot(o.x - p.x, o.y - p.y) < obGap) { dup = true; break; }
       }
       if (dup) continue;
       this.obstacles.push(this.makeObstacle(p.x, p.y, kinds[Math.floor(rnd() * kinds.length)]));

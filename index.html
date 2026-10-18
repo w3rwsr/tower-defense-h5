@@ -121,7 +121,7 @@
   <!-- ===== 脚本按依赖顺序加载（全部 defer：按文档顺序执行，下载并行） =====
        FireBurnData.js（~600KB 内嵌燃烧视频）不在此同步加载——由 main.js 在
        Phaser 启动前后台动态注入，选关页先行进入，视频数据就绪后自动挂接 -->
-  <script defer src="js/config.js?v=20261018b"></script>
+  <script defer src="js/config.js?v=20261018c"></script>
   <script defer src="js/storage.js?v=20261016a"></script>
   <!-- 媒体加载统一调度（串行队列 + 进度条 + 10s 超时跳过 + Cache API 缓存）：
        必须早于各视频模块执行，供其按需排进加载队列 -->
@@ -155,7 +155,7 @@
   <script defer src="js/objects/ThunderArc.js?v=20261012m"></script>
   <script defer src="js/scenes/BootScene.js?v=20261018a"></script>
   <script defer src="js/scenes/LevelSelectScene.js?v=20261018a"></script>
-  <script defer src="js/scenes/GameScene.js?v=20261018b"></script>
+  <script defer src="js/scenes/GameScene.js?v=20261018c"></script>
   <script defer src="js/main.js?v=20261017g"></script>
   <script>
     /* 启动进度条 + 失败自动重试（放在所有 defer 脚本之后：
