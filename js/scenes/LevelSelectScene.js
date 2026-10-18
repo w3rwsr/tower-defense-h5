@@ -8,7 +8,8 @@
  *
  * 左下角「📖 图鉴」按钮 → 打开防御塔图鉴（半透明悬浮窗，可滚动、
  * 可关闭）：逐塔列出名称/外观小图标、元素属性、功能说明，以及
- * Lv1 / Lv2 / Lv3 的具体数值差异。数值全部实时读取 TD_CONFIG.towers，
+ * Lv1~Lv4 的具体数值差异，并以金色高亮标注 Lv4 进化特性（机制质变）。
+ * 数值全部实时读取 TD_CONFIG.towers，
  * 口径与 Tower.recalcStats 完全一致，因此与游戏内实际战斗数据相同。
  * 图鉴仅用于查看，不参与任何战斗逻辑。
  *
@@ -367,7 +368,7 @@ class LevelSelectScene extends Phaser.Scene {
    *   · 左下角「📖 图鉴」按钮 → openCodex() 弹出半透明悬浮窗
    *   · 窗口内容上下拖动 / 滚轮滚动，右上 ✕ 或点窗口外关闭
    *   · 每种塔列出：名称 / 元素色小图标 / 元素属性 / 功能说明 /
-   *     Lv1、Lv2、Lv3 的具体数值差异
+   *     Lv1~Lv4 的具体数值差异 + Lv4 进化特性（机制质变说明）
    *   · 全部数值实时读取 TD_CONFIG.towers，计算口径与
    *     Tower.recalcStats 完全一致 → 与战斗内实际数值相同
    * ============================================================ */
@@ -571,9 +572,10 @@ class LevelSelectScene extends Phaser.Scene {
     const picker = (TD_CONFIG.build && TD_CONFIG.build.picker) || {};
     const colors = picker.iconColors || {};
     const glyphs = picker.iconGlyph || {};
-    /* 卡高按 Lv1~Lv4 四行数值行加高（142→186），间距 10→12，
-       保证 Lv4 行完整落在卡片内、不与下一张卡重叠 */
-    const entryH = 186, gap = 12;
+    /* 卡高按 Lv1~Lv4 四行数值行 + 一行 Lv4 特性说明加高（186→220），
+       间距 12，保证 Lv4 特性行（含自动换行余量）完整落在卡片内、
+       不与下一张卡重叠 */
+    const entryH = 220, gap = 12;
     const keys = Object.keys(TD_CONFIG.towers).filter((k) => TD_CONFIG.towers[k]);
     let y = 0;
 
@@ -641,14 +643,28 @@ class LevelSelectScene extends Phaser.Scene {
       row.add([role, note]);
 
       /* Lv1~Lv4 具体数值（与战斗内实际数值同口径）；行距 26、起始 84，
-         末行（i=3）底边 ≈170 < entryH 186，完整收在卡片内 */
-      this.codexLines(key, cfg).forEach((t, i) => {
+         末行（i=3）底边 ≈170，完整收在卡片内 */
+      const lines = this.codexLines(key, cfg);
+      lines.forEach((t, i) => {
         const lt = this.add.text(70, 84 + i * 26, t, {
           fontFamily: TD_FONT_STACK, fontSize: '13px', color: '#2f4a1c',
           resolution: TD_TEXT_RES
         }).setOrigin(0, 0.5);
         row.add(lt);
       });
+
+      /* Lv4 特性：进化后的机制质变说明（纯展示文案，不改战斗数值）。
+         金色加粗 + 奶白描边高亮，与 Lv1~Lv4 基础数值行区分；
+         wordWrap 限制在卡片宽度内，极端长度自动换行、不溢出 */
+      const feature = this.codexLv4Feature(key);
+      if (feature) {
+        const ft = this.add.text(70, 84 + lines.length * 26 + 4, 'Lv4 特性：' + feature, {
+          fontFamily: TD_FONT_STACK, fontSize: '13px', fontStyle: 'bold',
+          color: '#b8860b', resolution: TD_TEXT_RES,
+          wordWrap: { width: entryW - 86 }
+        }).setOrigin(0, 0.5).setStroke('#fff3cf', 3);
+        row.add(ft);
+      }
 
       box.add(row);
       y += entryH + gap;
@@ -772,5 +788,22 @@ class LevelSelectScene extends Phaser.Scene {
       out.push('Lv' + lv + '：' + txt);
     }
     return out;
+  }
+
+  /**
+   * Lv4 进化特性说明（机制质变文案，纯图鉴展示，不参与战斗逻辑）。
+   * 文案数值口径与 TowerConfig.json 的 lv4 段一致；
+   * 返回 null 表示该塔无 Lv4 特性（不渲染该行）。
+   */
+  codexLv4Feature(key) {
+    const map = {
+      towerA: '攻击产生 50% 溅射，附加【灼烧】：每秒扣 1% 最大生命值（持续 5 秒）',
+      towerB: '攻击叠加【寒冷值】，满 5 层触发【寒冷】：降 20% 防御，每秒扣 2% 最大生命值',
+      towerC: '攻击附加【潮湿】（最多 5 层），每层使非水元素塔对其伤害 +4%',
+      towerD: '牵引结束造成 1 秒眩晕（对 BOSS 无效，5秒CD），对 BOSS 减速提升至 15%',
+      towerE: '弹射 10 次（衰减 5%），50% 概率麻痹，附加【麻痹值】：降 5% 防御，每秒扣 0.5% 生命',
+      towerF: '触发全屏【风蚀增伤】：全场怪物受到伤害 +20%（持续 5 秒，10秒CD）'
+    };
+    return map[key] || null;
   }
 }
