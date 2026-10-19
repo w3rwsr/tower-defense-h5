@@ -174,9 +174,10 @@ class GameScene extends Phaser.Scene {
     /* 第 1 关 = 新手教程关，启动引导提示 */
     if (this.levelId === 1) this.startTutorial();
 
-    /* 第 8 关「风蚀荒原」：风眼装饰 + 风蚀增伤 + 火焰路径容器
+    /* 第 8 关「风蚀荒原」：风眼装饰 + 风蚀增伤
        （仅本关配置 levelCfg.windEyes 时创建；同时预生成三种新怪的
-       代码绘制贴图，供 Enemy 构造器按 enemy_<typeKey> 直接取用） */
+       代码绘制贴图，供 Enemy 构造器按 enemy_<typeKey> 直接取用。
+       BOSS「火焰路径」技能已移除，控制器不再持有地面伤害区域） */
     if (this.levelCfg.windEyes && typeof Level8Controller !== 'undefined') {
       this.level8 = new Level8Controller(this);
     }
@@ -1257,7 +1258,7 @@ class GameScene extends Phaser.Scene {
     if (dt > 0) {
       this.updateWaves(dt);
 
-      /* 第 8 关：风眼计时 / 风蚀增伤倒计时 / 火焰路径区域结算（暂停即冻结） */
+      /* 第 8 关：风眼计时 / 风蚀增伤倒计时（暂停即冻结） */
       if (this.level8) this.level8.tick(dt);
 
       const ctx = {
@@ -1675,6 +1676,9 @@ class GameScene extends Phaser.Scene {
     /* 三阶段 BOSS（第 5 关）：分身死亡不入正常击杀流程（无金币、无爆尸动画），
        按组统计；全部死亡后合体成强化 BOSS */
     if (e.bossPhase === 2) { this.onMiniBossKilled(e); return; }
+    /* 第 8 关熔岩巨兽分裂体：走正常击杀流程（金币 + 死亡动画），
+       同时按组计数（位置在销毁前记录），全灭即触发聚合 */
+    if (e.__lavaSplitGid) this._lavaSplitCountKill(e);
     e.dead = true;
     this.gold += e.reward;
     this.floatText(e.x, e.y - e.radius - 6, '+' + e.reward, 0xffe27a);
@@ -1682,11 +1686,13 @@ class GameScene extends Phaser.Scene {
   }
 
   /* ============================================================
-   * 塔「禁言」（第 8 关：自爆泥怪爆炸 / 熔岩巨兽火焰路径）
+   * 塔「禁言」（第 8 关：自爆泥怪爆炸 / 熔岩巨兽「岩浆爆发」沉默）
    * 实现方式：对塔实例【运行时包装 update】——禁言期内整塔冻结（索敌/
    * 开火/炮塔动画全部停止），到期自动还原为原型方法。不改动 Tower.js 与
    * attackModule.js 任何源码，也不影响伤害计算公式；包装仅存在于被禁言
    * 的塔实例上，出售/场景销毁随实例一并消失。
+   * 配色：统一【中性灰】罩圈 + 灰色「🔇 禁言」气泡 —— 灰色 = 被禁言 /
+   * 无法攻击，与橙红的「高温岩浆」特效明确区分。
    * ============================================================ */
   silenceTower(tw, duration) {
     if (!tw || tw.removed || !(duration > 0)) return;
@@ -1706,23 +1712,23 @@ class GameScene extends Phaser.Scene {
         }
         if (orig) orig.call(this, dt, ctx);  // 还原当帧立即恢复攻击逻辑
       };
-      /* 视觉：灰蓝罩圈 + 「禁言」气泡（挂场景层，不进塔容器，
+      /* 视觉：灰色罩圈 + 灰色「禁言」气泡（挂场景层，不进塔容器，
          避免影响塔自身的缩放/深度管理）；销毁时机与还原逻辑绑定 */
       const fx = this.add.container(tw.x, tw.y);
       fx.setDepth(tw.depth != null ? tw.depth + 1 : 40);
       const g = this.add.graphics();
-      g.fillStyle(0x9fb6cc, 0.22);
+      g.fillStyle(0x70757a, 0.22);        // 中性深灰：罩圈底色
       g.fillCircle(0, 0, 22);
-      g.lineStyle(2, 0x9fb6cc, 0.85);
+      g.lineStyle(2, 0x9aa0a6, 0.9);      // 中灰：罩圈描边
       g.strokeCircle(0, 0, 22);
       const label = this.add.text(0, -30, '🔇 禁言', {
         fontFamily: TD_FONT_STACK, fontSize: '12px', fontStyle: 'bold',
-        color: '#cfe3f2', resolution: TD_TEXT_RES
-      }).setOrigin(0.5).setStroke('#22303c', 3);
+        color: '#e3e6e9', resolution: TD_TEXT_RES
+      }).setOrigin(0.5).setStroke('#3a3f45', 3);
       fx.add([g, label]);
       tw.__silenceFx = fx;
     } else {
-      /* 已在禁言：取更长剩余时间（火焰路径 0.5s 一跳需要持续刷新） */
+      /* 已在禁言：取更长剩余时间（多次沉默需要持续刷新） */
       tw.__silenceLeft = Math.max(tw.__silenceLeft, duration);
     }
   }
@@ -1875,6 +1881,113 @@ class GameScene extends Phaser.Scene {
     this.makePortalBurst(p.x, p.y, bp.mergeKeepParentStats ? 0x7be86b : 0xff6666);
   }
 
+  /* ============================================================
+   * 熔岩巨兽分裂 / 聚合（第 8 关，全部 JSON 驱动 lavaBoss.phases）
+   * ------------------------------------------------------------
+   * 分裂（血量 20%，由 LavaBehemoth.onHpThresholdCheck 调用）：
+   *   本体消失（无死亡动画、无金币），原地生成 N 只【特殊水晶史莱姆】：
+   *   常态减伤 90%（armorBase），需累计 40 次元素反应才破防把减伤降到 0
+   *   （破防窗口 splitBreakDuration 秒，到期恢复 90%）。
+   * 聚合（3 只全灭 / 全部漏怪后）：在最后一只的位置重新生成本 BOSS，
+   *   血量 = 父代最大血量 × mergeHealRatio(0.5)，沿用父代移速/金币/漏血/贴图，
+   *   标记 __noSplit 不再二次分裂（防无限循环），继续沿路走向终点。
+   * 计数在 onEnemyKilled / onEnemyLeak 中同步完成，保证「清场判定前」
+   *   聚合体已在 enemies 数组里，波次不会提前判清空。
+   * ============================================================ */
+  lavaBossSplit(boss) {
+    if (!boss || boss.__splitting || boss.__noSplit) return;
+    boss.__splitting = true;
+    const ph = boss._ph || {};
+    const n = ph.splitCount != null ? ph.splitCount : 3;
+    const gid = (this._lavaSplitSeq = (this._lavaSplitSeq || 0) + 1);
+    this._lavaSplitGroups = this._lavaSplitGroups || {};
+    const group = this._lavaSplitGroups[gid] = {
+      alive: n,
+      total: n,
+      done: false,
+      healRatio: ph.mergeHeal != null ? ph.mergeHeal : 0.5,
+      lastRoute: boss.routeId,
+      lastDist: boss.pathDist,
+      lastX: boss.x,
+      lastY: boss.y,
+      parent: {
+        maxHp: boss.maxHp,
+        speed: boss.baseSpeed,
+        reward: boss.reward,
+        leak: boss.leakDamage,
+        tex: (boss.opts && boss.opts.bossTexKey) || null
+      }
+    };
+    const len = this.routeLength(boss.routeId);
+    const bx = boss.x, by = boss.y;
+    for (let i = 0; i < n; i++) {
+      const e = this.spawnEnemy({ type: 'crystalSlime', route: boss.routeId });
+      if (!e) continue;
+      /* 特殊分裂体：90% 常态减伤 + 40 次元素反应破防后减伤归零 */
+      e.armorBase = (ph.splitArmor != null) ? ph.splitArmor : 0.9;
+      e.dmgReduction = e.armorBase;
+      e._brk = {
+        need: (ph.splitNeed != null) ? ph.splitNeed : 40,
+        reduced: (ph.splitReduced != null) ? ph.splitReduced : 0,
+        duration: (ph.splitBreakDur != null) ? ph.splitBreakDur : 6
+      };
+      e.reactionCount = 0;    // 分裂体从 0 开始重新累计元素反应
+      e.breakTimer = 0;
+      e.__lavaSplitGid = gid;
+      const off = (i - (n - 1) / 2) * 26;   // 沿路前后错开，避免完全重叠
+      e.pathDist = Phaser.Math.Clamp(boss.pathDist + off, 0, len);
+      const p = this.pathPointAt(e.pathDist, e.routeId);
+      e.setPosition(p.x, p.y);
+      e.drawHpBar(1);
+      this.makePortalBurst(p.x, p.y, 0x9fdcff);
+    }
+    this.floatText(bx, by - boss.radius - 40, '熔岩巨兽分裂！', 0x9fdcff);
+    this.banner('熔岩巨兽分裂出 ' + n + ' 只水晶史莱姆（90% 减伤）！', 0x9fdcff);
+    this.makePortalBurst(bx, by, 0xff8c3a);
+    /* 本体消失：直接销毁（不走死亡流程，无金币/无爆炸动画） */
+    boss.dead = true;
+    boss.destroyImmediately();
+  }
+
+  /** 分裂体死亡 / 漏怪计数：全部结束后同步聚合（保证清场判定前 BOSS 已在场） */
+  _lavaSplitCountKill(e) {
+    const g = this._lavaSplitGroups && this._lavaSplitGroups[e.__lavaSplitGid];
+    if (!g || g.done) return;
+    g.alive--;
+    g.lastRoute = e.routeId;
+    g.lastDist = e.pathDist;
+    g.lastX = e.x;
+    g.lastY = e.y;
+    if (g.alive <= 0) {
+      g.done = true;
+      this._mergeLavaBoss(g);
+    }
+  }
+
+  /** 聚合：在最后一只分裂体位置重生熔岩巨兽，恢复父代最大血量 × mergeHealRatio */
+  _mergeLavaBoss(g) {
+    const Cls = (typeof LEVEL8_ENEMY_CLASSES !== 'undefined' && LEVEL8_ENEMY_CLASSES.lavaBoss)
+      ? LEVEL8_ENEMY_CLASSES.lavaBoss : null;
+    if (!Cls) return;
+    const len = this.routeLength(g.lastRoute);
+    const e = new Cls(this, 'lavaBoss', g.lastRoute,
+      g.parent.tex ? { bossTexKey: g.parent.tex } : null);
+    e.maxHp = Math.max(1, Math.round(g.parent.maxHp));
+    e.hp = Math.max(1, Math.round(e.maxHp * g.healRatio));
+    e.baseSpeed = g.parent.speed;
+    e.reward = g.parent.reward;
+    e.leakDamage = g.parent.leak;
+    e.__noSplit = true;            // 聚合体：不再二次分裂（防无限分裂循环）
+    e.pathDist = Phaser.Math.Clamp(g.lastDist, 0, len);
+    const p = this.pathPointAt(e.pathDist, g.lastRoute);
+    e.setPosition(p.x, p.y);
+    e.drawHpBar(e.hp / e.maxHp);
+    this.enemies.push(e);
+    this.floatText(p.x, p.y - e.radius - 42, '聚合！恢复 50% 生命', 0xff8c3a);
+    this.banner('水晶史莱姆重新聚合为熔岩巨兽！', 0xff8c3a);
+    this.makePortalBurst(p.x, p.y, 0xff8c3a);
+  }
+
   onEnemyLeak(e) {
     /* 防重入：进门动画期间若再次触发（理论上 update 已被 dead 拦截），直接忽略 */
     if (e._gateEntered) return;
@@ -1897,6 +2010,12 @@ class GameScene extends Phaser.Scene {
        仅把销毁点放在进门动画结束后） */
     this.playEnterGate(e, gate, () => {
       if (e.bossPhase === 2) { this.onMiniBossKilled(e); }
+      else if (e.__lavaSplitGid && !e.removed) {
+        /* 第 8 关熔岩巨兽分裂体漏怪：同样计入聚合组（否则 3 只不全灭，
+           聚合体永远不出现、本体等同白送），再销毁 */
+        this._lavaSplitCountKill(e);
+        e.destroyImmediately();
+      }
       else if (!e.removed) { e.destroyImmediately(); }
       if (this.lives <= 0) this.endGame(false);
     });

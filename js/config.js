@@ -803,14 +803,17 @@ window.TD_CONFIG = {
        「快怪血低·移速快·金币少 / 慢怪血高·移速慢·金币多」。
        bg/key：实测视频底色 L1 距离抠像参数（换素材须同步重测）；
        displayH：两段显示高度（世界单位，宽按段宽高比自动算，不变形）。
-       尺寸依据：视频实测内容宽度/段高 ≈ 绿 0.861 / 蓝 0.933，路宽 50px →
-       绿 57（可见宽约 49.1，不超路，维持原值）；蓝 52（可见宽约 48.5，
-       原 68 时可见宽 63.4 明显超路，已修正） */
+       尺寸依据：视频窗口含蹦跳上下限余量（绿内容占窗口高 0.8825 / 蓝 0.9101），
+       故 displayH 取 enemyX/enemyY 的 art.h ÷ 内容占比，使【视频档可见本体】
+       与【静态降级档 art.h】严格一致（绿 46 / 蓝 41）——修复「视频接管瞬间
+       体型变大」：同一只怪在静态→视频切换时不再改变世界尺寸。
+       与第 8 关水晶史莱姆/自爆泥怪同约定（那边窗口已按内容裁紧，displayH=art.h）。
+       宽按窗口宽高比自动算：绿 45.3 / 蓝 44.2 可见宽均 ≤ 路宽 50 */
     "slimeVideo": {
       "src": "assets/slime_walk.mp4",
       "bg": { "r": 50.7, "g": 228.7, "b": 57.8 },
       "key": { "low": 0.06, "high": 0.13 },
-      "displayH": { "green": 57, "blue": 52 }
+      "displayH": { "green": 52, "blue": 45 }
     },
 
     /* BOSS 运动视频（assets/boss_walk.mp4，640x640 绿幕，横排三只：左金/中蓝/右灰）。
@@ -877,8 +880,9 @@ window.TD_CONFIG = {
       /* 显示高度（世界单位）：宽按贴图/视频段宽高比自动算，保持造型不变形；
          超采样静态贴图 / 高分辨率视频经 setDisplaySize 缩回世界尺寸，
          DPR 下与塔清晰度一致。
-         静态贴图宽高比实测 1.04 → h 46 时宽约 47.8 ≤ 路宽 50（视频版由
-         slimeVideo.displayH 驱动，绿怪 57 可见宽约 49.1 同样不超路） */
+         静态贴图宽高比实测 1.04 → h 46 时宽约 47.8 ≤ 路宽 50；视频档由
+         slimeVideo.displayH 驱动，其【可见本体】高度同样为 46（见上注释），
+         故视频接管/降级来回切换时体型恒定不变 */
       "art": { "h": 46, "superSample": 2 },
       /* 绿幕视频接管：绿色快怪=左段；视频不可用时回退静态贴图 + 蹦跳 Tween */
       "slimeVideo": { "frame": "green", "hopHeight": 6 }
@@ -893,8 +897,7 @@ window.TD_CONFIG = {
       "color": 0xa06cd5,
       "darkColor": 0x7447a6,
       /* 静态贴图宽高比实测 1.167 → h 41 时宽约 47.8 ≤ 路宽 50
-         （原 60 时宽 70 明显超路；视频版由 slimeVideo.displayH 驱动：
-         蓝 68→52，可见宽 63.4→48.5，同样修正不超路） */
+         （视频档由 slimeVideo.displayH 驱动，其可见本体高度同样为 41） */
       "art": { "h": 41, "superSample": 2 },
       /* 绿幕视频接管：蓝紫慢怪=右段 */
       "slimeVideo": { "frame": "blue", "hopHeight": 7 }
@@ -954,14 +957,16 @@ window.TD_CONFIG = {
          bg/key = 对实测白底(253,252,250)做 L1 距离键的抠图参数；
          win = 固定显示窗口（纹理像素坐标，已剔除画面底部烘焙投影）；
          displayH = 世界显示高度（宽按窗口宽高比自动算，可见宽 ≤ 路宽 50）；
-         maxEnemies = 同屏使用视频的小怪上限（超出者回退代码绘制贴图，手机降级） */
+         maxEnemies = 同屏使用视频的小怪上限（超出者回退代码绘制贴图，手机降级）
+         —— 第 8 关追加大量水晶史莱姆批次，上限放宽到 24，避免同屏超限后
+         部分小怪只显示静态贴图（观感不一致） */
       "moveVideo": {
         "src": "assets/crystal_slime_move.mp4",
         "bg": { "r": 253.0, "g": 252.0, "b": 250.0 },
         "key": { "low": 0.02, "high": 0.06 },
         "win": { "x": 84, "y": 78, "w": 474, "h": 418 },
         "displayH": 42,
-        "maxEnemies": 12
+        "maxEnemies": 24
       }
     },
 
@@ -993,15 +998,24 @@ window.TD_CONFIG = {
         "win": { "x": 94, "y": 144, "w": 452, "h": 364 },
         "displayH": 38,
         "rate": 1.6,
-        "maxEnemies": 12
+        "maxEnemies": 16
       }
     },
 
-    /* 熔岩巨兽 —— 第 8 关终极 BOSS（三阶段状态机由 LavaBehemoth 子类实现）：
+    /* 熔岩巨兽 —— 第 8 关终极 BOSS（状态机由 LavaBehemoth 子类实现）：
        免疫冰冻/眩晕/牵引（沿用 cfg.boss 既有豁免链）；可被 4 级塔灼烧
        （burnStacks）/降防（armorBreaks）等异常状态影响（Enemy 状态接口）。
        noVariant=true：不接入金/蓝/灰 BOSS 变体（贴图/移速/金币全走本配置，
-       血量仍 = 同波小怪 × bossHpFactor）。 */
+       血量仍 = 同波小怪 × bossHpFactor）。
+       机制（全部 JSON 驱动）：
+         · 血量盾：开局 5000 血，每 5s 刷新一次，盾不破本体不受伤害
+           （百分比伤害可打盾，但其最终伤害减半，见 Enemy.takeDamage）
+         · 岩浆爆发：每 5s 一次全屏【灰色】爆发，沉默半径内防御塔 2s
+         · 分裂：血量降到 20% → 本体消失，原地分裂 3 只【特殊水晶史莱姆】
+           （90% 减伤；累计 40 次元素反应才破防降至 0%）
+         · 聚合：3 只分裂体全灭 → 在最后一只位置聚合回 BOSS，恢复 50% 生命
+         · 跟班（原阶段二召唤的自爆泥怪）已移除
+         · 火焰路径已删除：BOSS 只做普通移动，不生成任何地面持续伤害区域 */
     "lavaBoss": {
       "name": "熔岩巨兽",
       "hp": 2480,           // 兜底占位（实际由 spawnEnemy 按波次公式覆盖）
@@ -1015,19 +1029,28 @@ window.TD_CONFIG = {
       "noVariant": true,
       "barThickness": 8,
       "art": { "h": 78 },   // 显示高度 78（与金/蓝/灰 BOSS 一致，可见宽 ≤ 路宽）
-      /* 三阶段参数（JSON 驱动，LavaBehemoth 读取） */
+      /* 阶段/分裂/聚合参数（JSON 驱动，LavaBehemoth 读取） */
       "phases": {
-        "rockShieldHp": 5000,     // 阶段一岩盾血量
-        "rockShieldInterval": 5,  // 岩盾生成/刷新周期（秒）
+        "rockShieldHp": 5000,     // 血量盾血量（开局即有，全阶段每 5s 刷新）
+        "rockShieldInterval": 5,  // 血量盾生成/刷新周期（秒）
         "p2HpRatio": 0.70,        // 阶段二触发血线
-        "p2SpeedMul": 1.5,        // 阶段二移速 +50%
-        "p2SummonCount": 4,       // 阶段二立即召唤自爆泥怪数量
+        "p2SpeedMul": 1.5,        // 阶段二移速 +50%（不再召唤跟班）
         "p3HpRatio": 0.30,        // 阶段三触发血线
         "p3SpeedMul": 1.3,        // 阶段三移速再 +30%
-        "firePathInterval": 0.5,  // 火焰路径留置间隔（秒）
-        "firePathRadius": 42,     // 火焰路径区域半径
-        "firePathHitRange": 62,   // 对塔判定距离（塔位距路心 52~62 均可被灼烧）
-        "firePathLife": 6         // 火焰路径存活时长（秒）
+        /* 岩浆爆发（沉默技能）：每 magmaInterval 秒一次全屏灰色爆发，
+           magmaRadius 半径内的防御塔禁言 magmaSilence 秒（无法攻击） */
+        "magmaInterval": 5,
+        "magmaRadius": 200,
+        "magmaSilence": 2,
+        /* 分裂（20% 血线）：本体消失 → splitCount 只特殊水晶史莱姆 */
+        "splitAtHpRatio": 0.20,
+        "splitCount": 3,
+        "splitArmor": 0.90,          // 分裂体常态减伤 90%
+        "splitReactionsToBreak": 40, // 需累计 40 次元素反应才破防
+        "splitReducedArmor": 0,      // 破防后减伤归零（全额输出）
+        "splitBreakDuration": 6,     // 破防窗口时长（秒），到期恢复 90%
+        /* 聚合：分裂体全灭 → 聚合成 BOSS 并恢复该比例生命 */
+        "mergeHealRatio": 0.5
       }
     }
   },
@@ -2012,8 +2035,8 @@ window.TD_CONFIG = {
           [ { "type": "enemyX", "count": 9,  "interval": 0.60, "delay": 0 },
             { "type": "enemyX", "count": 9,  "interval": 0.60, "delay": 6 },
             { "type": "enemyX", "count": 9,  "interval": 0.60, "delay": 12 } ],
-          /* ===== 第 3 波：原混编 +【追加 3 批】混编 + 4 只金史莱姆 Boss
-             （上下各 2，bossVariantPattern 强制金色贴图）===== */
+          /* ===== 第 3 波：原混编 +【追加 3 批】混编 +【再追加 1 批水晶史莱姆】
+             + 4 只金史莱姆 Boss（上下各 2，bossVariantPattern 强制金色贴图）===== */
           [ { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 0 },
             { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 4 },
             { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 8 },
@@ -2022,9 +2045,11 @@ window.TD_CONFIG = {
             { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 20 },
             { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 24 },
             { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 28 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 30 },
             { "type": "enemyBoss", "count": 2, "interval": 4, "delay": 32,
               "bossHpFactor": 30, "bossVariantPattern": ["gold"] } ],
-          /* ===== 第 4 波：原混编 +【追加 4 批】混编 + 4 只金史莱姆 Boss（上下各 2）===== */
+          /* ===== 第 4 波：原混编 +【追加 4 批】混编 +【再追加 2 批水晶史莱姆】
+             + 4 只金史莱姆 Boss（上下各 2）===== */
           [ { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 0 },
             { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 3 },
             { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 7 },
@@ -2035,9 +2060,12 @@ window.TD_CONFIG = {
             { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 24 },
             { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 28 },
             { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 31 },
+            { "type": "crystalSlime", "count": 4, "interval": 1.10, "delay": 34 },
+            { "type": "crystalSlime", "count": 4, "interval": 1.10, "delay": 38 },
             { "type": "enemyBoss", "count": 2, "interval": 4, "delay": 36,
               "bossHpFactor": 40, "bossVariantPattern": ["gold"] } ],
-          /* ===== 第 5 波：原混编 +【追加 5 批】混编 + 6 只金史莱姆 Boss（上下各 3）===== */
+          /* ===== 第 5 波：原混编 +【追加 5 批】混编 +【再追加 3 批水晶史莱姆】
+             + 6 只金史莱姆 Boss（上下各 3）===== */
           [ { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 0 },
             { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 2 },
             { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 8 },
@@ -2050,9 +2078,13 @@ window.TD_CONFIG = {
             { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 34 },
             { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 40 },
             { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 42 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 45 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 48 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 51 },
             { "type": "enemyBoss", "count": 3, "interval": 3, "delay": 48,
               "bossHpFactor": 50, "bossVariantPattern": ["gold"] } ],
-          /* ===== 第 6 波：原大乱斗 +【追加 6 批】大乱斗 + 8 只金史莱姆 Boss（上下各 4）===== */
+          /* ===== 第 6 波：原大乱斗 +【追加 6 批】大乱斗 +【再追加 4 批水晶史莱姆】
+             + 8 只金史莱姆 Boss（上下各 4）===== */
           [ { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 0 },
             { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 2 },
             { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 5 },
@@ -2071,9 +2103,14 @@ window.TD_CONFIG = {
             { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 37 },
             { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 40 },
             { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 42 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 44 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 47 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 50 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 53 },
             { "type": "enemyBoss", "count": 4, "interval": 3, "delay": 48,
               "bossHpFactor": 60, "bossVariantPattern": ["gold"] } ],
-          /* ===== 第 7 波：原精英+快兵 +【追加 7 批】+ 8 只金史莱姆 Boss（上下各 4）===== */
+          /* ===== 第 7 波：原精英+快兵 +【追加 7 批】+【再追加 5 批水晶史莱姆】
+             + 8 只金史莱姆 Boss（上下各 4）===== */
           [ { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 0,
               "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
             { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 2 },
@@ -2095,10 +2132,18 @@ window.TD_CONFIG = {
             { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 60,
               "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
             { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 62 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 45 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 49 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 53 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 57 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 61 },
             { "type": "enemyBoss", "count": 4, "interval": 3, "delay": 70,
               "bossHpFactor": 80, "bossVariantPattern": ["gold"] } ],
-          /* ===== 第 8 波：原护卫 +【追加 8 批】护卫 + 8 只金史莱姆 Boss（上下各 4）
-             + 2 只熔岩巨兽（上下各 1，使用灰史莱姆 Boss 贴图）===== */
+          /* ===== 第 8 波：原护卫 +【追加 8 批】护卫 +【再追加 5 批水晶史莱姆】
+             + 8 只金史莱姆 Boss（上下各 4）
+             + 2 只熔岩巨兽（上下各 1，使用灰史莱姆 Boss 贴图；
+               血量盾每 5s 刷新 / 岩浆爆发沉默 / 20% 血分裂 3 只特殊水晶史莱姆
+               / 全灭后聚合回 50% 血，见 lavaBoss.phases）===== */
           [ { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 0 },
             { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 5 },
             { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 10 },
@@ -2108,6 +2153,11 @@ window.TD_CONFIG = {
             { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 30 },
             { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 35 },
             { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 40 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 44 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 48 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 52 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 56 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 60 },
             { "type": "enemyBoss", "count": 4, "interval": 3, "delay": 48,
               "bossHpFactor": 100, "bossVariantPattern": ["gold"] },
             { "type": "lavaBoss", "count": 1, "interval": 0, "delay": 64,

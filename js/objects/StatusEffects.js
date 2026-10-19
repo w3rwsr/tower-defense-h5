@@ -105,7 +105,10 @@
       return e.__lv4st || (e.__lv4st = {});
     }
 
-    /** DOT 通用结算：每满 1 秒扣一次血，保底 1 点；返回计时器是否仍在持续 */
+    /** DOT 通用结算：每满 1 秒扣一次血，保底 1 点；返回计时器是否仍在持续。
+        伤害按【最大生命百分比】计算 → 标记为百分比伤害（percent:true）：
+        怪物侧照常经过 armorReduction（水晶史莱姆 80% 减伤等），
+        打到血量护盾时最终伤害再 ×0.5（见 Enemy.takeDamage 注释）。 */
     _dot(e, slot, dt) {
       slot.timer -= dt;
       slot.acc = (slot.acc || 0) + dt;
@@ -114,7 +117,7 @@
         slot.acc -= 1;
         if (e.dead) break;
         const dmg = Math.max(slot.minDamage || 1, Math.round(e.maxHp * slot.pct));
-        e.takeDamage(dmg, slot.element || null);
+        e.takeDamage(dmg, slot.element || null, { percent: true });
       }
       return slot.timer > 0;
     }
@@ -159,7 +162,7 @@
             p.acc -= 1;
             if (e.dead) break;
             const dmg = Math.max(1, Math.round(e.maxHp * p.pct * p.timers.length));
-            e.takeDamage(dmg, 'thunder');
+            e.takeDamage(dmg, 'thunder', { percent: true });   // 最大生命百分比 → 百分比伤害
           }
         }
         if (changed) {

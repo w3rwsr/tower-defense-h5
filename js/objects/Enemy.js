@@ -516,8 +516,12 @@ class Enemy extends Phaser.GameObjects.Container {
   /* 受伤结算。element = 本次伤害的元素属性（'fire'|'ice'|'thunder'|'water'|
      null），由 Projectile / 电链在命中时传入：第 7 关元素护盾据此拦截。
      调用点（附着之前）应先用 shieldBlocks(element) 跳过元素附着，避免被
-     免疫的元素仍触发反应；此处的同元素拦截仅作兜底。 */
-  takeDamage(value, element) {
+     免疫的元素仍触发反应；此处的同元素拦截仅作兜底。
+     opts.percent=true 表示【百分比伤害】（按最大生命百分比结算的 DOT，
+     见 StatusEffects / applyDot）：其伤害照常经过 armorReduction（含水晶
+     史莱姆 80% 减伤），但打到【血量护盾】时最终伤害再 ×0.5（减免 50%）；
+     常规固定伤害打血量盾不做任何减免。 */
+  takeDamage(value, element, opts) {
     /* 传送后 0.5s 无敌：伤害与索敌均跳过（含单体/溅射/电链） */
     if (this.dead || this.invulnTimer > 0) return;
     /* 元素护盾（第 7 关）：同元素伤害完全免疫——不掉血、不计有效攻击次数 */
@@ -542,12 +546,17 @@ class Enemy extends Phaser.GameObjects.Container {
     /* 4 级塔状态增幅剩余部分：潮湿每层 +4%（水塔4，排除元素不生效） */
     const statusAmp = 1 + ((this.statusWetAmp && element !== this.statusAmpExclude)
       ? this.statusWetAmp : 0);
-    const dmg = value * vulnMul * windMul * statusAmp * (1 - this.armorReduction);
+    /* 减伤口径：血量盾本体无盾时的基数 = armorReduction（水晶史莱姆 80%/分裂体
+       90% 等常态减伤在此生效 —— 百分比伤害同样受此减免，见需求第 4 条） */
+    let dmg = value * vulnMul * windMul * statusAmp * (1 - this.armorReduction);
 
     /* 血量护盾（第 7 关）：护盾血量优先吸收，盾存期间本体不掉血；
-       击破当帧的溢出伤害继续结算到本体 */
+       击破当帧的溢出伤害继续结算到本体。
+       【百分比伤害 vs 血量盾】最终伤害 ×0.5（减免 50%，需求和第 3 条）；
+       常规固定伤害照原样全额吸收，不做减免。 */
     const hpShield = (this.shield && this.shield.type === 'hp' && this.shield.hp > 0)
       ? this.shield : null;
+    if (hpShield && opts && opts.percent) dmg *= 0.5;
     if (hpShield) {
       const absorbed = Math.min(hpShield.hp, dmg);
       hpShield.hp -= absorbed;
@@ -585,12 +594,19 @@ class Enemy extends Phaser.GameObjects.Container {
       }
     }
 
+    /* 子类血量阈值分裂（第 8 关熔岩巨兽 20% 血线分裂）：
+       子类覆写 onHpThresholdCheck 并在命中/持续伤害结算后判定；
+       返回 true = 已接管（本击不再走死亡流程）。无覆写/无配置的关卡恒 false。 */
+    if (!this.dead && this.onHpThresholdCheck()) return;
     /* 三阶段 BOSS（第 5/7 关，JSON 驱动）：一阶段血量降到阈值即分裂成分身；
        分裂优先于死亡判定（一击打穿阈值也走分裂），无 bossPhases 配置的
        关卡 bossPhase 恒为 0，此检查零影响 */
     if (!this.dead && this.bossPhase === 1 && this.scene.checkBossSplit(this)) return;
     if (this.hp <= 0) this.scene.onEnemyKilled(this);
   }
+
+  /* 血量阈值分裂钩子（子类覆写；基类恒 false = 零影响） */
+  onHpThresholdCheck() { return false; }
 
   /* ============================================================
    * 状态接口（第 8 关起，供 4 级塔挂载异常状态；旧关卡无人调用）
@@ -689,25 +705,27 @@ class Enemy extends Phaser.GameObjects.Container {
     }
   }
 
-  /* 持续伤害（灼烧 DoT 等）结算：与 takeDamage 同规则尊重血量护盾
+  /* 持续伤害（灼烧 DoT / 燃烧层等）结算：与 takeDamage 同规则尊重血量护盾
      （盾存续时由盾吸收，击破溢出到本体）；次数盾每跳计 1 次有效攻击；
      元素值盾因无元素信息不消耗（仅本体承伤）。不吃易伤/风蚀乘区；
+     opts.percent=true 的百分比 DoT（burnStacks）打血量盾最终伤害 ×0.5；
      旧关卡无人调用（burnStacks 恒空），零影响 */
-  applyDot(amount) {
+  applyDot(amount, opts) {
     if (this.dead || this.invulnTimer > 0) return;
     const hpShield = (this.shield && this.shield.type === 'hp' && this.shield.hp > 0)
       ? this.shield : null;
+    const inDmg = (hpShield && opts && opts.percent) ? amount * 0.5 : amount;
     if (hpShield) {
-      const absorbed = Math.min(hpShield.hp, amount);
+      const absorbed = Math.min(hpShield.hp, inDmg);
       hpShield.hp -= absorbed;
       this.refreshShieldView(false);
       if (hpShield.hp > 1e-6) return; // 本跳被护盾完全吸收
       this.breakShield();
-      const rest = amount - absorbed;
+      const rest = inDmg - absorbed;
       if (rest <= 0) return;
       this.hp -= rest;
     } else {
-      this.hp -= amount;
+      this.hp -= inDmg;
       /* 次数盾：DOT 每跳也计 1 次有效攻击（百分比伤害对护盾生效） */
       if (this.shield && this.shield.type === 'element' && this.shield.value == null) {
         this.shield.hits++;
@@ -717,6 +735,7 @@ class Enemy extends Phaser.GameObjects.Container {
     }
     this.drawHpBar(Math.max(0, this.hp / this.maxHp));
     if (this.hp <= 0) {
+      if (this.onHpThresholdCheck()) return;
       if (this.bossPhase === 1 && this.scene.checkBossSplit(this)) return;
       this.scene.onEnemyKilled(this);
     }

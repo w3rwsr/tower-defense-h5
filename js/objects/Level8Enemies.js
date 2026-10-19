@@ -20,12 +20,14 @@
  *                        + 高光闪烁 + 冰蓝粒子拖尾
  *     BomberSlime        自爆泥怪：极快移速 + 死亡/碰塔爆炸 → 半径 50 内
  *                        塔「禁言」2 秒 + 高频膨胀 + 红色残影
- *     LavaBehemoth       熔岩巨兽（终极 BOSS）：三阶段状态机
- *                        P1 每 5s 岩盾 5000（盾存本体免疫一切伤害）
- *                        P2 移速 +50% + 召唤 4 自爆泥怪
- *                        P3 移速再 +30% + 身后 0.5s/个火焰路径灼烧防御塔
+ *     LavaBehemoth       熔岩巨兽（终极 BOSS）：常驻血量盾（开局 5000，每 5s
+ *                        刷新，盾不破本体不受伤）+ 每 5s 全屏「岩浆爆发」
+ *                        （灰色特效）沉默半径内防御塔 2s + P2 移速 +50%
+ *                        （跟班已移除）+ P3 移速再 +30%（火焰路径已删除）
+ *                        + 20% 血线分裂 3 只特殊水晶史莱姆（90% 减伤 /
+ *                        40 次元素反应破防）+ 全灭聚合回 50% 血
  *     WindEye            风眼装饰（不可建造）：每 10s 全屏风蚀增伤 +20%（5s）
- *     Level8Controller   第 8 关每帧控制器（风眼计时 / 风蚀倒计时 / 火焰路径）
+ *     Level8Controller   第 8 关每帧控制器（风眼计时 / 风蚀倒计时）
  * ============================================================ */
 (function () {
   'use strict';
@@ -35,11 +37,19 @@
    * ============================================================ */
   const Level8Art = {
     /** 进关时预生成三种新怪贴图（GameScene.create → Level8Controller 内调用）；
-     *  Enemy 构造器按 'enemy_<typeKey>' 取图，故必须先于首波出怪执行 */
+     *  Enemy 构造器按 'enemy_<typeKey>' 取图，故必须先于首波出怪执行。
+     *  【关键】BootScene 会遍历 enemies 配置为每只怪预生成同名程序化占位贴图
+     *  （enemy_crystalSlime / enemy_bomberSlime / enemy_lavaBoss 都是「光球」），
+     *  若此处按 textures.exists 跳过，代码绘制贴图将永远不生效 —— 一旦视频
+     *  不可用（file:// 跨域 / 不支持 H.264 / 超出同屏上限），小怪就退化成光球
+     *  占位图（观感丢失、BOSS 变圆球）。故先移除同名占位贴图再重绘生成。 */
     ensureAll(scene) {
-      if (!scene.textures.exists('enemy_crystalSlime')) this.crystal(scene);
-      if (!scene.textures.exists('enemy_bomberSlime')) this.bomber(scene);
-      if (!scene.textures.exists('enemy_lavaBoss')) this.lava(scene);
+      ['enemy_crystalSlime', 'enemy_bomberSlime', 'enemy_lavaBoss'].forEach((k) => {
+        if (scene.textures.exists(k)) scene.textures.remove(k);
+      });
+      this.crystal(scene);
+      this.bomber(scene);
+      this.lava(scene);
     },
 
     /* 水晶史莱姆：半透明冰蓝圆球（本体 alpha 0.88 由子类叠加；高光点由
@@ -536,15 +546,23 @@
   }
 
   /* ============================================================
-   * LavaBehemoth —— 终极 BOSS 熔岩巨兽（三阶段状态机）
+   * LavaBehemoth —— 终极 BOSS 熔岩巨兽（状态机）
    * 免疫：冰冻/眩晕/牵引（沿用 cfg.boss 既有豁免链：冰冻→30% 减速、
    *       易伤拒绝、塔D 索敌排除 BOSS）；可被 4 级塔灼烧/降防影响
    *       （Enemy.burnStacks / armorBreaks 状态接口）。
-   * 阶段一（100%~70% 血）：每 5s 生成/重塑 5000 血「岩盾」；盾存续期间
-   *       本体免疫一切伤害（hp 盾吸收全部伤害，见 Enemy.takeDamage）。
-   * 阶段二（70%~30% 血）：移速 +50%，立刻召唤 4 只自爆泥怪。
-   * 阶段三（30% 以下）：移速再 +30%，身后每 0.5s 留置「火焰路径」，
-   *       对踩在上面的防御塔造成持续伤害（禁言压制，GameScene.silenceTower）。
+   * 血量盾：开局即有 5000 血「岩盾」，每 5s 刷新一次（未破回满 / 已破重凝）；
+   *       盾存续期间本体不掉血（hp 盾吸收全部伤害，见 Enemy.takeDamage）；
+   *       百分比伤害可以打盾，但其最终伤害 ×0.5（减免 50%，需求第 3 条）。
+   * 岩浆爆发（沉默技能）：每 5s 自动释放一次全屏【灰色】爆发，沉默半径内的
+   *       防御塔 2 秒（GameScene.silenceTower 实例级包装，塔无法攻击）。
+   * 阶段二（70% 血）：移速 +50%；【跟班已移除】不再召唤自爆泥怪。
+   * 阶段三（30% 血）：移速再 +30%。
+   *       【火焰路径技能已删除】BOSS 只做普通移动，任何阶段都不再生成
+   *       地面持续伤害区域 / 火焰残留，相关判定与绘制已全部清理。
+   * 分裂（20% 血）：本体消失，原地分裂出 3 只【特殊水晶史莱姆】
+   *       （90% 减伤；需累计 40 次元素反应才破防把减伤降到 0）。
+   * 聚合：3 只分裂体全灭 → 在最后一只位置重新聚合回本 BOSS 并恢复 50% 生命，
+   *       继续沿路走向终点（聚合体标记 __noSplit，不再二次分裂，避免无限循环）。
    * 注：lvPhase 为本 BOSS 专属阶段位，与第 5/7 关 bossPhase 分裂系统
    *     完全独立（bossPhase 恒 0，不触发 checkBossSplit）。
    * ============================================================ */
@@ -557,88 +575,153 @@
         shieldInterval: ph.rockShieldInterval != null ? ph.rockShieldInterval : 5,
         p2Ratio: ph.p2HpRatio != null ? ph.p2HpRatio : 0.7,
         p2SpeedMul: ph.p2SpeedMul != null ? ph.p2SpeedMul : 1.5,
-        p2Summon: ph.p2SummonCount != null ? ph.p2SummonCount : 4,
         p3Ratio: ph.p3HpRatio != null ? ph.p3HpRatio : 0.3,
         p3SpeedMul: ph.p3SpeedMul != null ? ph.p3SpeedMul : 1.3,
-        fireInterval: ph.firePathInterval != null ? ph.firePathInterval : 0.5,
-        fireRadius: ph.firePathRadius != null ? ph.firePathRadius : 42,
-        fireHit: ph.firePathHitRange != null ? ph.firePathHitRange : 62,
-        fireLife: ph.firePathLife != null ? ph.firePathLife : 6
+        /* 岩浆爆发（沉默技能） */
+        magmaInterval: ph.magmaInterval != null ? ph.magmaInterval : 5,
+        magmaRadius: ph.magmaRadius != null ? ph.magmaRadius : 200,
+        magmaSilence: ph.magmaSilence != null ? ph.magmaSilence : 2,
+        /* 分裂 / 聚合 */
+        splitRatio: ph.splitAtHpRatio != null ? ph.splitAtHpRatio : 0.2,
+        splitCount: ph.splitCount != null ? ph.splitCount : 3,
+        splitArmor: ph.splitArmor != null ? ph.splitArmor : 0.9,
+        splitNeed: ph.splitReactionsToBreak != null ? ph.splitReactionsToBreak : 40,
+        splitReduced: ph.splitReducedArmor != null ? ph.splitReducedArmor : 0,
+        splitBreakDur: ph.splitBreakDuration != null ? ph.splitBreakDuration : 6,
+        mergeHeal: ph.mergeHealRatio != null ? ph.mergeHealRatio : 0.5
       };
-      this.lvPhase = 1;                 // 1=岩盾期 2=狂暴期 3=燃地期
+      this.lvPhase = 1;                 // 1=护盾期 2=狂暴期 3=疾行期
       this.shieldTimer = this._ph.shieldInterval;
-      this.fireTimer = 0;
+      this.magmaTimer = this._ph.magmaInterval;   // 首圈满 5s 后第一次爆发
+      this.__splitting = false;         // 分裂流程防重入
+      this.__noSplit = false;           // 聚合体标记：不再二次分裂
       /* 岩盾配色覆写（实例级）：熔岩橙光环 + 「岩盾击破！」专属文案 */
       this.shieldColor = function () { return 0xff8c3a; };
+      /* 开局即拥有血量盾（盾不破本体不受伤害） */
+      this.applyShield({ type: 'hp', hp: this._ph.shieldHp });
     }
 
     update(dt) {
       super.update(dt);
       if (this.dead || this.removed || !this.scene) return;
       const ratio = this.maxHp > 0 ? this.hp / this.maxHp : 1;
+
+      /* 血量盾：全阶段常驻，每 5s 刷新一次（未破回满；已破则重新凝聚） */
+      this.shieldTimer -= dt;
+      if (this.shieldTimer <= 0) {
+        this.shieldTimer = this._ph.shieldInterval;
+        if (this.shield && this.shield.type === 'hp') {
+          this.shield.hp = this.shield.maxHp;
+          this.refreshShieldView();
+        } else if (!this.shield) {
+          this.applyShield({ type: 'hp', hp: this._ph.shieldHp });
+          if (typeof this.scene.floatText === 'function') {
+            this.scene.floatText(this.x, this.y - this.radius - 42, '岩盾凝聚！', 0xffb27a);
+          }
+        }
+      }
+
+      /* 岩浆爆发（沉默技能）：每 5s 一次全屏爆发，沉默半径内防御塔 2s */
+      this.magmaTimer -= dt;
+      if (this.magmaTimer <= 0) {
+        this.magmaTimer = this._ph.magmaInterval;
+        this.magmaBurst();
+      }
+
       /* 三阶段血线驱动转换（单向、不回退，转换即生效保证流畅） */
       if (this.lvPhase === 1 && ratio <= this._ph.p2Ratio) this.enterPhase2();
       if (this.lvPhase === 2 && ratio <= this._ph.p3Ratio) this.enterPhase3();
+    }
 
-      /* 阶段一：每 5s 生成岩盾；未破则满血重塑（盾存本体免疫一切伤害） */
-      if (this.lvPhase === 1) {
-        this.shieldTimer -= dt;
-        if (this.shieldTimer <= 0) {
-          this.shieldTimer = this._ph.shieldInterval;
-          if (this.shield && this.shield.type === 'hp') {
-            this.shield.hp = this.shield.maxHp;
-            this.refreshShieldView();
-          } else if (!this.shield) {
-            this.applyShield({ type: 'hp', hp: this._ph.shieldHp });
-            if (typeof this.scene.floatText === 'function') {
-              this.scene.floatText(this.x, this.y - this.radius - 42, '岩盾凝聚！', 0xffb27a);
-            }
+    /* ============================================================
+     * 血量阈值分裂（Enemy.takeDamage / applyDot 结算后回调）
+     * 血量降到 splitAtHpRatio(20%) → 交接给 GameScene.lavaBossSplit：
+     * 本体消失、原地生成 3 只特殊水晶史莱姆（90% 减伤 / 40 次反应破防）。
+     * 返回 true = 已接管，本击不再走死亡流程（一击打穿阈值也走分裂）。
+     * ============================================================ */
+    onHpThresholdCheck() {
+      if (this.__noSplit || this.__splitting) return false;
+      if (!this.scene || typeof this.scene.lavaBossSplit !== 'function') return false;
+      if (this.maxHp <= 0 || this.hp > this.maxHp * this._ph.splitRatio) return false;
+      this.scene.lavaBossSplit(this);
+      return true;
+    }
+
+    /* ============================================================
+     * 岩浆爆发：全屏【灰色】爆发 → 半径内防御塔「禁言」magmaSilence(2s)
+     * （沉默 = 完全无法攻击；走 GameScene.silenceTower 实例级 update 包装，
+     *   不改 Tower.js / attackModule.js 源码，也不改任何伤害计算公式）。
+     * 配色统一为中性灰（深灰冲击环 + 浅灰内芯/文字），与橙红「高温岩浆」
+     * 区分开：灰 = 被禁言 / 无法攻击。
+     * ============================================================ */
+    magmaBurst() {
+      const s = this.scene;
+      if (!s) return;
+      const R = this._ph.magmaRadius;
+      const W = (TD_CONFIG.world && TD_CONFIG.world.width) || 960;
+      const H = (TD_CONFIG.world && TD_CONFIG.world.height) || 540;
+      const GRAY_MID = 0x70757a;    // 深灰：冲击环 / 全屏罩闪
+      const GRAY_LIGHT = 0xdfe3e6;  // 浅灰：内芯高光 / 文字
+
+      /* 沉默：半径内所有防御塔 2 秒内无法攻击 */
+      let hit = 0;
+      const towers = s.towers || [];
+      for (const tw of towers) {
+        if (!tw || tw.removed) continue;
+        if (Phaser.Math.Distance.Between(this.x, this.y, tw.x, tw.y) <= R) {
+          s.silenceTower(tw, this._ph.magmaSilence);
+          hit++;
+          if (typeof s.floatText === 'function') {
+            s.floatText(tw.x, tw.y - 36, '沉默', GRAY_LIGHT);
           }
         }
       }
-
-      /* 阶段三：身后每 0.5s 留置火焰路径（区域结算托管给 Level8Controller） */
-      if (this.lvPhase === 3) {
-        this.fireTimer -= dt;
-        if (this.fireTimer <= 0) {
-          this.fireTimer = this._ph.fireInterval;
-          if (this.scene.level8) {
-            this.scene.level8.addFireZone(this.x, this.y, this._ph);
-          }
-        }
+      /* 以 BOSS 为中心的灰色冲击环 */
+      const ring = s.add.circle(this.x, this.y, 24, GRAY_MID, 0.45).setDepth(this.depth + 3);
+      s.tweens.add({
+        targets: ring, scaleX: R / 24, scaleY: R / 24, alpha: 0,
+        duration: 620, ease: 'Quad.easeOut',
+        onComplete: () => { try { ring.destroy(); } catch (_) {} }
+      });
+      const core = s.add.circle(this.x, this.y, 14, GRAY_LIGHT, 0.9).setDepth(this.depth + 4);
+      s.tweens.add({
+        targets: core, scaleX: 5, scaleY: 5, alpha: 0, duration: 380,
+        onComplete: () => { try { core.destroy(); } catch (_) {} }
+      });
+      /* 全屏灰色罩闪（纯视觉提示，不遮挡 UI 操作） */
+      const veil = s.add.rectangle(W / 2, H / 2, W, H, GRAY_MID, 0.12).setDepth(800);
+      s.tweens.add({
+        targets: veil, alpha: 0, duration: 420,
+        onComplete: () => { try { veil.destroy(); } catch (_) {} }
+      });
+      if (typeof s.floatText === 'function') {
+        s.floatText(this.x, this.y - this.radius - 46, '岩浆爆发！', GRAY_LIGHT);
+      }
+      if (hit > 0 && typeof s.banner === 'function') {
+        s.banner('岩浆爆发！防御塔被沉默 ' + this._ph.magmaSilence + ' 秒', 0x9aa0a6);
       }
     }
 
-    /* 阶段二：移速 +50% + 立即召唤 4 只自爆泥怪（本位前后错开沿路） */
+    /* 阶段二：移速 +50%（跟班已移除 —— 不再召唤任何自爆泥怪） */
     enterPhase2() {
       this.lvPhase = 2;
       this.baseSpeed *= this._ph.p2SpeedMul;
-      this.shieldTimer = 0;
       const s = this.scene;
-      for (let i = 0; i < this._ph.p2Summon; i++) {
-        const e = s.spawnEnemy({ type: 'bomberSlime', route: this.routeId });
-        if (e) {
-          e.pathDist = Math.max(0, this.pathDist - 8 - i * 16);
-          const p = s.pathPointAt(e.pathDist, e.routeId);
-          e.setPosition(p.x, p.y);
-          e.drawHpBar(1);
-        }
-      }
       if (typeof s.banner === 'function') s.banner('熔岩巨兽进入狂暴阶段！', 0xff7a3c);
       if (typeof s.floatText === 'function') {
-        s.floatText(this.x, this.y - this.radius - 44, '移速 +50%，召唤泥怪！', 0xff7a3c);
+        s.floatText(this.x, this.y - this.radius - 44, '移速 +50%', 0xff7a3c);
       }
     }
 
-    /* 阶段三：移速再 +30% + 开启火焰路径留置 */
+    /* 阶段三：移速再 +30%（火焰路径技能已移除：BOSS 只做普通移动，
+       不在任何阶段生成地面持续伤害区域/火焰残留） */
     enterPhase3() {
       this.lvPhase = 3;
       this.baseSpeed *= this._ph.p3SpeedMul;
-      this.fireTimer = 0;
       const s = this.scene;
-      if (typeof s.banner === 'function') s.banner('熔岩巨兽燃烧大地！', 0xff5a2a);
+      if (typeof s.banner === 'function') s.banner('熔岩巨兽加速冲锋！', 0xff7a3c);
       if (typeof s.floatText === 'function') {
-        s.floatText(this.x, this.y - this.radius - 44, '移速再 +30%，大地灼烧！', 0xff5a2a);
+        s.floatText(this.x, this.y - this.radius - 44, '移速再 +30%', 0xff7a3c);
       }
     }
 
@@ -657,7 +740,6 @@
     }
 
     destroy(fromScene) {
-      /* 火焰路径区域不随 BOSS 死亡消失（由 Level8Controller 独立衰减） */
       super.destroy(fromScene);
     }
   }
@@ -734,8 +816,10 @@
 
   /* ============================================================
    * Level8Controller —— 第 8 关每帧控制器
-   * 职责：风眼计时触发 / 风蚀增伤倒计时 / 火焰路径区域结算与绘制。
+   * 职责：风眼计时触发 / 风蚀增伤倒计时。
    * 由 GameScene 持有（this.level8），dt>0 时每帧 tick（暂停即冻结）。
+   * 注：BOSS 的「火焰路径」技能已移除（不再生成任何地面持续伤害区域），
+   *     故本控制器不再持有火焰区域绘制层与区域列表。
    * ============================================================ */
   class Level8Controller {
     constructor(scene) {
@@ -749,20 +833,6 @@
       /* 固定 2 个风眼装饰 */
       this.windEyes = (cfg.points || []).map((p) =>
         new WindEye(scene, p.x, p.y, { interval: cfg.interval || 10 }));
-      /* 火焰路径（BOSS 阶段三）共享绘制层与区域列表 */
-      this.fireGfx = scene.add.graphics().setDepth(12);
-      this.fireZones = [];
-    }
-
-    /** BOSS 阶段三留置火焰路径（LavaBehemoth 每 0.5s 调用） */
-    addFireZone(x, y, ph) {
-      this.fireZones.push({
-        x, y,
-        r: ph.fireRadius != null ? ph.fireRadius : 42,
-        hit: ph.firePathHitRange != null ? ph.firePathHitRange : 62,
-        life: ph.firePathLife != null ? ph.firePathLife : 6,
-        tick: 0.5      // 独立 0.5s 对塔结算节拍
-      });
     }
 
     tick(dt) {
@@ -773,54 +843,6 @@
       }
       /* 风眼计时 */
       for (const we of this.windEyes) we.tick(dt);
-
-      /* 火焰路径：存活衰减 + 每 0.5s 对踩上来的塔持续伤害（禁言压制） */
-      let changed = false;
-      for (let i = this.fireZones.length - 1; i >= 0; i--) {
-        const z = this.fireZones[i];
-        z.life -= dt;
-        z.tick -= dt;
-        if (z.life <= 0) {
-          this.fireZones.splice(i, 1);
-          changed = true;
-          continue;
-        }
-        if (z.tick <= 0) {
-          z.tick = 0.5;
-          const towers = s.towers || [];
-          for (const tw of towers) {
-            if (!tw || tw.removed) continue;
-            if (Phaser.Math.Distance.Between(z.x, z.y, tw.x, tw.y) <= z.hit) {
-              s.silenceTower(tw, 0.85);   // 短禁言高频刷新 ≈ 站火即持续压制
-              if (typeof s.floatText === 'function' && Math.random() < 0.2) {
-                s.floatText(tw.x, tw.y - 36, '灼烧', 0xff7a3c);
-              }
-            }
-          }
-        }
-        changed = true;
-      }
-      this.drawFireZones(changed);
-    }
-
-    /** 火焰路径绘制：橙红地火圆斑 + 内焰闪烁（随存活时间衰减） */
-    drawFireZones() {
-      const g = this.fireGfx;
-      if (!g) return;
-      g.clear();
-      const now = this.scene.time.now;
-      for (const z of this.fireZones) {
-        const fade = Math.min(1, z.life / 1.2);             // 临消失 1.2s 渐隐
-        const flick = 0.72 + 0.28 * Math.sin(now / 90);     // 火苗闪烁
-        g.fillStyle(0xff5a2a, 0.30 * fade);
-        g.fillCircle(z.x, z.y, z.r);
-        g.fillStyle(0xff8c3a, 0.38 * fade * flick);
-        g.fillCircle(z.x, z.y, z.r * 0.66);
-        g.fillStyle(0xffc24a, 0.55 * fade * flick);
-        g.fillCircle(z.x, z.y, z.r * 0.3);
-        g.lineStyle(2, 0xff8c3a, 0.55 * fade);
-        g.strokeCircle(z.x, z.y, z.r);
-      }
     }
   }
 
