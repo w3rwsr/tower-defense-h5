@@ -222,6 +222,11 @@ class Enemy extends Phaser.GameObjects.Container {
       if (element === this.shield.element) return;
       if (!element && this.shield.element === 'ice') return;
     }
+    /* 【硬控免疫】BOSS / 小BOSS：factor ≤ 0 的「完全定身」（雷塔4 麻痹定身、
+       引力塔4 眩晕、以及各处 applySlow(0) 兜底）一律不生效 —— 避免高频硬控
+       把 BOSS 钉在原地走不动路。减速（factor > 0：冰塔对 BOSS 的专项减速、
+       引力塔对 BOSS 的 bossSlow、水+冰反应改判的减速）照常生效。 */
+    if (this.hardControlImmune && !(factor > 0)) return;
     if (!(factor > 0)) factor = 0;   // 只防负移速，不设减速强度上限
     // 多种减速同时存在时：取更强（系数更小）者，持续时间刷新为较长者
     this.slowFactor = this.slowTimer > 0 ? Math.min(this.slowFactor, factor) : factor;
@@ -351,8 +356,11 @@ class Enemy extends Phaser.GameObjects.Container {
     }
   }
 
-  /* 冰冻：定身，期间免疫塔D牵引 */
+  /* 冰冻：定身，期间免疫塔D牵引。
+     BOSS / 小BOSS 完全免疫冰冻 —— 既不进入定身态，也不显示冰晶覆盖；
+     水+冰反应对 BOSS 早已改判为减速（见 applyReactionEffect），此处为兜底。 */
   applyFreeze(duration) {
+    if (this.hardControlImmune) return;
     this.freezeTimer = Math.max(this.freezeTimer, duration); // 重复冰冻刷新取较长
     this.showFreezeGfx(true);
   }
@@ -591,6 +599,19 @@ class Enemy extends Phaser.GameObjects.Container {
   /* 是否处于冰冻定身（freezeTimer > 0，供 4 级塔/水晶史莱姆判定「寒冷」） */
   get isFrozen() { return this.freezeTimer > 0; }
 
+  /* ============================================================
+   * 硬控免疫（BOSS / 小BOSS）—— 全局拦截口径
+   * ------------------------------------------------------------
+   * 「硬控」= 停止移动类状态：冰冻、雷塔4 麻痹定身、引力塔4 眩晕、
+   * 以及任何以 applySlow(0) 实现定身的兜底路径。
+   * BOSS（cfg.boss，含第 8 关熔岩巨兽 / 金蓝灰变体 BOSS）与第 7 关绿色
+   * 史莱姆分身（bossMini）一律免疫，只保留软控与 Debuff：
+   *   · 减速（冰塔对 BOSS 的专项减速、引力塔 bossSlow、水+冰反应改判减速）
+   *   · 降防（寒冷 / 麻痹值 / 降防层）
+   *   · 持续掉血（灼烧 / 寒冷 DOT / 麻痹值 DOT）
+   * 判定口径与牵引豁免（attackModule PullBehavior）、易伤豁免完全一致。 */
+  get hardControlImmune() { return !!(this.bossMini || (this.cfg && this.cfg.boss)); }
+
   /* 当前有效伤害减免 = 基础减伤 - Σ状态降防（寒冷/麻痹值） - Σ降防层，下限 0。
      takeDamage 统一读取此接口；无任何降防时返回值与旧 dmgReduction 完全一致 */
   get armorReduction() {
@@ -651,9 +672,13 @@ class Enemy extends Phaser.GameObjects.Container {
         break;
       }
       /* 雷塔4 麻痹定身 / 引力塔4 眩晕：复用减速通道实现定身（factor 0）。
-         传入 data.element 使对应元素护盾（如雷盾）能免疫该负面效果。 */
+         传入 data.element 使对应元素护盾（如雷盾）能免疫该负面效果。
+         【硬控免疫】BOSS / 小BOSS 直接 return —— 雷塔4 攻击 BOSS 只照常施加
+         「麻痹值」（paralysisStack：降防 + 持续掉血），绝不打断移动；
+         引力塔4 眩晕同样被拦截。 */
       case 'paralyzed':
       case 'stun': {
+        if (this.hardControlImmune) return;
         if (data.duration > 0) this.applySlow(0, data.duration, data.element || null, true);
         break;
       }
@@ -837,6 +862,18 @@ class Enemy extends Phaser.GameObjects.Container {
       this.pullBack = 0;
     }
     this.pullFresh = false;
+
+    /* 【硬控免疫兜底】BOSS / 小BOSS：不论定身状态从哪条路径误挂上来，这里
+       一律强制清除，保证 BOSS 永远在移动 —— 只留减速等软控与 Debuff。
+       （正常路径已在 applySlow / applyFreeze / applyStatus 处被拦截，
+         这一段是最后一道保险，普通小怪完全不受影响。） */
+    if (this.hardControlImmune) {
+      if (this.freezeTimer > 0) {
+        this.freezeTimer = 0;
+        this.showFreezeGfx(false);
+      }
+      if (this.slowTimer > 0 && !(this.slowFactor > 0)) this.slowFactor = 1;
+    }
 
     /* 沿路径前进；窗口内被显著吸引时（向前/向后均算）推进减速
        （真控场，避免视觉位移叠加正常推进）；烘焙后从新位置全速继续走；

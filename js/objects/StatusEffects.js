@@ -13,7 +13,9 @@
  *  - wet     潮湿   水塔4：每攻击+1层(最多5)，每层+4%受伤(非水塔)，每层独立2秒
  *  - paralysisStack 麻痹值 雷塔4：每次触发麻痹+1层(最多4)，每层-5%防御、
  *                   -0.5%最大生命/秒，每层独立2.5秒
- *  - paralyzed 麻痹定身 雷塔4：50%概率0.5秒无法移动（接口缺失时用 applySlow(0) 兜底）
+ *  - paralyzed 麻痹定身 雷塔4：50%概率0.5秒无法移动（BOSS/小BOSS 免疫定身：
+ *                   怪物侧 applyStatus('paralyzed') 按硬控免疫拦截，BOSS 只吃
+ *                   麻痹值降防/DOT；接口缺失时用 applySlow(0) 兜底，同样被拦）
  *  - stun    眩晕   引力塔4：牵引结束1秒定身，BOSS免疫，每塔5秒一次
  *  - windErosion 风蚀增伤 风塔4：全屏受伤+20%，5秒，10秒全塔共享冷却，不叠加
  *
@@ -235,7 +237,10 @@
 
     /** 雷塔4：单次链击命中后的麻痹判定 + 麻痹值叠层（cfg: chance/duration/maxStacks/stackDuration/defReducePerStack/hpPerSecPctPerStack） */
     onThunderHit(e, cfg) {
-      /* 说明：麻痹对 BOSS 同样生效（需求未豁免），仅引力塔眩晕免疫 BOSS */
+      /* 说明：雷塔4 高频链击对 BOSS【只施加麻痹值（降防 + 持续掉血）】，
+         0.5 秒麻痹定身由怪物侧硬控免疫（Enemy.applyStatus('paralyzed') /
+         applySlow(factor 0)）拦下，BOSS 始终保持正常移动。
+         引力塔4 眩晕同样对 BOSS 免疫。 */
       if (!e || e.dead || e.invulnTimer > 0) return;
       if (Math.random() >= cfg.chance) return;
 
