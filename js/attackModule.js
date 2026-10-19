@@ -159,6 +159,8 @@
    *   - 射程：欧氏距离 ≤ tower.stats.range（升级 range 即扩大吸引范围）；
    *   - targetFilter='nonBoss'：仅小怪（cfg.boss 非真，如 enemyX/enemyY）
    *     生效，BOSS 免疫吸引；其他/缺省值 = 全部敌人生效；
+   *   - BOSS 补偿：免疫吸引的 BOSS 由 _bossSlowCheck() 每帧独立判定（与脉冲
+   *     窗口无关），射程内稳定挂 bossSlow 减速 Debuff（基础 10% / 4 级 15%）；
    *   - 开窗瞬间若存在 ≥1 个有效目标，回调 ctx.pullPulse(tower, range,
    *     targets) 播放一次多目标攻击动画（GameScene.playPullPulse），
    *     炮头转向距塔最近的被吸目标；无目标时炮头保持原方向。
@@ -191,8 +193,9 @@
       this.windowId = 0;           // 牵引窗口序号（破冰去重用，每开一次窗 +1）
       this.smallOnly = this.eff.targetFilter === 'nonBoss';
       /* BOSS 弥补减速（JSON：bossSlow/bossSlowDuration/bossSlowCooldown）：
-         同一座塔 2 秒内只对 BOSS 触发一次 0.75 秒的减速；冷却【每座塔独立计时】
-         （this 属于单塔行为实例），多座塔互不影响。 */
+         由 _bossSlowCheck() 每帧独立判定（不依赖牵引窗口），射程内 BOSS 稳定
+         挂减速；同塔再触发冷却 bossSlowCooldown、挂载时长 = max(Duration, Cooldown)
+         保证不断档；冷却【每座塔独立计时】（this 属于单塔行为实例），互不影响。 */
       this.bossSlowDur = (this.eff.bossSlowDuration != null ? this.eff.bossSlowDuration : 750) / 1000;
       this.bossSlowCdMax = (this.eff.bossSlowCooldown != null ? this.eff.bossSlowCooldown : 2000) / 1000;
       this.bossSlowCd = 0;         // 剩余触发冷却（秒），<=0 可触发
@@ -253,6 +256,12 @@
 
       this.targets = [];
 
+      /* 【BOSS 减速判定】独立于牵引窗口、独立于「射程内是否有可吸小怪」，
+         每帧都执行一次判定。原先该判定写在下面的牵引循环里，只有窗口打开
+         时才跑：脉冲间隙（约 1.5s）以及「射程内只有 BOSS、没有可牵引小怪」
+         时都不会执行 → 观感上就是引力塔不攻击 BOSS、减速完全没挂上。 */
+      this._bossSlowCheck(ctx);
+
       /* 脉冲间隙：不索敌不标记，Enemy.update 在首帧把 pullBack 位移烘焙进
          pathDist（停在吸附结束位置继续前进，不弹回）；炮头保持上一次朝向 */
       if (this.active <= 0) return;
@@ -280,26 +289,10 @@
 
         /* 小怪过滤：nonBoss 模式下 BOSS（cfg.boss===true）免疫吸引；
            第 7 关绿色史莱姆分身带 bossMini 标记，同样免疫吸引。
-           【弥补】BOSS 不能被牵引（位置完全不动），但被引力塔效果命中时挂一层
-           减速 debuff：减速量 = JSON effect.bossSlow（固定 0.10 = 10%，不随等级变化），
-           持续时间 = bossSlowDuration（0.75 秒）；
-           【多座引力塔同时作用于同一 BOSS 不叠加】——applySlow 只取最强系数，
-           多塔都施加 0.90，最终仍只按 10% 减速，不会变成 20%/19%。
-           【触发冷却】同一座塔 bossSlowCooldown（2 秒）内只触发一次，
-           倒计时挂在行为实例上 → 每座塔独立计时、互不影响。 */
+           BOSS 的减速 Debuff 不在循环里处理 —— 统一由 _bossSlowCheck() 每帧
+           独立判定（不依赖牵引窗口/不依赖有无可吸小怪），此处只负责
+           「BOSS 永不位移」这一件事。 */
         if (this.smallOnly && ((e.cfg && e.cfg.boss) || e.bossMini)) {
-          if (d2 <= r2 && this.bossSlowCd <= 0 && typeof e.applySlow === 'function') {
-            /* 4 级黑洞引力（TowerConfig.json lv4.bossSlow=0.15）：
-               对 BOSS 的减速从基础 10% 提升至 15% */
-            const lv4g = t.level >= 4 && t.cfg.lv4;
-            const amt = (lv4g && lv4g.bossSlow != null) ? lv4g.bossSlow
-              : (this.eff.bossSlow != null ? this.eff.bossSlow : 0.10);
-            if (amt > 0) {
-              /* 不做减速上限截断，仅保"移速不为负"的安全下限 0 */
-              e.applySlow(Math.max(0, 1 - amt), this.bossSlowDur, 'gravity', true);
-              this.bossSlowCd = this.bossSlowCdMax;
-            }
-          }
           continue;                                 // BOSS 永不位移
         }
         if (d2 > r2) continue; // 射程外：不标记，Enemy 首帧烘焙位移后继续前进
@@ -342,6 +335,47 @@
         ctx.pullPulse(t, range, this.targets);
         this.pulseCount++;
       }
+    }
+
+    /* ============================================================
+     * BOSS 减速判定（弥补「BOSS 免疫牵引」）
+     * ------------------------------------------------------------
+     * BOSS 对称拉不动（位置永不位移），改用固定减速 Debuff 弥补：
+     *   减速量 = effect.bossSlow（基础 10%）；4 级塔读 TowerConfig lv4.bossSlow
+     *            （15%），升级后自动提升；
+     *   每帧、每座塔独立判定，与牵引脉冲窗口完全解耦 —— 只要 BOSS 在射程内
+     *   就挂上减速，不再出现「脉冲间隙 / 射程内只有 BOSS」时减速缺失；
+     *   同塔再触发冷却 bossSlowCooldown（2s）：挂载时长取
+     *   max(bossSlowDuration, bossSlowCooldown)，BOSS 停在射程内期间持续生效、
+     *   不留空档，离开射程后自然到期；
+     *   多座引力塔同时作用不叠加 —— applySlow 只取最强系数（都是 0.85/0.90）。
+     * ============================================================ */
+    _bossSlowCheck(ctx) {
+      if (!this.smallOnly || this.bossSlowCd > 0) return;
+      const t = this.tower;
+      if (!t || !ctx || !ctx.enemies) return;
+      const range = t.stats.range;
+      const r2 = range * range;
+      /* 4 级黑洞引力（TowerConfig.json lv4.bossSlow=0.15）：基础 10% → 15% */
+      const lv4g = (t.level >= 4 && t.cfg && t.cfg.lv4) || null;
+      const amt = (lv4g && lv4g.bossSlow != null) ? lv4g.bossSlow
+        : (this.eff.bossSlow != null ? this.eff.bossSlow : 0.10);
+      if (!(amt > 0)) return;
+      /* 挂载时长不短于再触发冷却：BOSS 在射程内时减速持续不断档 */
+      const dur = Math.max(this.bossSlowDur, this.bossSlowCdMax);
+      let hit = false;
+      for (let i = 0; i < ctx.enemies.length; i++) {
+        const e = ctx.enemies[i];
+        if (e.dead || e.invulnTimer > 0) continue;
+        if (!((e.cfg && e.cfg.boss) || e.bossMini)) continue;
+        if (typeof e.applySlow !== 'function') continue;
+        const dx = e.x - t.x, dy = e.y - t.y;
+        if (dx * dx + dy * dy > r2) continue;       // 射程外不挂
+        /* 不做减速上限截断，仅保"移速不为负"的安全下限 0 */
+        e.applySlow(Math.max(0, 1 - amt), dur, 'gravity', true);
+        hit = true;
+      }
+      if (hit) this.bossSlowCd = this.bossSlowCdMax;
     }
 
     /* 4 级黑洞引力：牵引窗口结束瞬间，对射程内小怪施加 1 秒眩晕。

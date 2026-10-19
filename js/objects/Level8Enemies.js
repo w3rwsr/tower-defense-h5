@@ -21,7 +21,7 @@
  *     BomberSlime        自爆泥怪：极快移速 + 死亡/碰塔爆炸 → 半径 50 内
  *                        塔「禁言」2 秒 + 高频膨胀 + 红色残影
  *     LavaBehemoth       熔岩巨兽（终极 BOSS）：常驻血量盾（开局 5000，每 5s
- *                        刷新，盾不破本体不受伤）+ 每 5s 全屏「岩浆爆发」
+ *                        刷新，盾不破本体不受伤）+ 每 5s 以自身为圆心「岩浆爆发」
  *                        （灰色特效）沉默半径内防御塔 2s + P2 移速 +50%
  *                        （跟班已移除）+ P3 移速再 +30%（火焰路径已删除）
  *                        + 20% 血线分裂 3 只特殊水晶史莱姆（90% 减伤 /
@@ -557,7 +557,7 @@
    * 血量盾：开局即有 5000 血「岩盾」，每 5s 刷新一次（未破回满 / 已破重凝）；
    *       盾存续期间本体不掉血（hp 盾吸收全部伤害，见 Enemy.takeDamage）；
    *       百分比伤害可以打盾，但其最终伤害 ×0.5（减免 50%，需求第 3 条）。
-   * 岩浆爆发（沉默技能）：每 5s 自动释放一次全屏【灰色】爆发，沉默半径内的
+   * 岩浆爆发（沉默技能）：每 5s 自动释放一次以自身为圆心的【灰色】爆发，半径内的
    *       防御塔 2 秒（GameScene.silenceTower 实例级包装，塔无法攻击）。
    * 阶段二（70% 血）：移速 +50%；【跟班已移除】不再召唤自爆泥怪。
    * 阶段三（30% 血）：移速再 +30%。
@@ -622,7 +622,7 @@
         }
       }
 
-      /* 岩浆爆发（沉默技能）：每 5s 一次全屏爆发，沉默半径内防御塔 2s */
+      /* 岩浆爆发（沉默技能）：每 5s 一次半径内爆发，沉默半径内防御塔 2s */
       this.magmaTimer -= dt;
       if (this.magmaTimer <= 0) {
         this.magmaTimer = this._ph.magmaInterval;
@@ -649,20 +649,20 @@
     }
 
     /* ============================================================
-     * 岩浆爆发：全屏【灰色】爆发 → 半径内防御塔「禁言」magmaSilence(2s)
+     * 岩浆爆发：以 BOSS 为圆心的【灰色】爆发 → 半径内防御塔「禁言」magmaSilence(2s)
      * （沉默 = 完全无法攻击；走 GameScene.silenceTower 实例级 update 包装，
      *   不改 Tower.js / attackModule.js 源码，也不改任何伤害计算公式）。
-     * 配色统一为中性灰（深灰冲击环 + 浅灰内芯/文字），与橙红「高温岩浆」
+     * 生效半径 magmaRadius(150) 刻意收窄：塔心离 BOSS 轨迹 >150px 即完全免疫，
+     *   玩家可拉开塔距规避，不再出现「全屏禁言」。
+     * 配色统一为中性灰（深灰冲击环 + 浅灰内芯），与橙红「高温岩浆」
      * 区分开：灰 = 被禁言 / 无法攻击。
      * ============================================================ */
     magmaBurst() {
       const s = this.scene;
       if (!s) return;
       const R = this._ph.magmaRadius;
-      const W = (TD_CONFIG.world && TD_CONFIG.world.width) || 960;
-      const H = (TD_CONFIG.world && TD_CONFIG.world.height) || 540;
-      const GRAY_MID = 0x70757a;    // 深灰：冲击环 / 全屏罩闪
-      const GRAY_LIGHT = 0xdfe3e6;  // 浅灰：内芯高光 / 文字
+      const GRAY_MID = 0x70757a;    // 深灰：冲击环 / 半径内灰区
+      const GRAY_LIGHT = 0xdfe3e6;  // 浅灰：内芯高光
 
       /* 沉默：半径内所有防御塔 2 秒内无法攻击（状态由塔身灰化/特效体现，不弹文字） */
       const towers = s.towers || [];
@@ -684,11 +684,12 @@
         targets: core, scaleX: 5, scaleY: 5, alpha: 0, duration: 380,
         onComplete: () => { try { core.destroy(); } catch (_) {} }
       });
-      /* 全屏灰色罩闪（纯视觉提示，不遮挡 UI 操作） */
-      const veil = s.add.rectangle(W / 2, H / 2, W, H, GRAY_MID, 0.12).setDepth(800);
+      /* 半径内淡灰区域（纯视觉提示，与真实生效半径 1:1 对齐 —— 只覆盖 R，
+         不再铺满整屏，避免玩家误读为「全屏禁言」） */
+      const pool = s.add.circle(this.x, this.y, R, GRAY_MID, 0.10).setDepth(800);
       s.tweens.add({
-        targets: veil, alpha: 0, duration: 420,
-        onComplete: () => { try { veil.destroy(); } catch (_) {} }
+        targets: pool, alpha: 0, duration: 420,
+        onComplete: () => { try { pool.destroy(); } catch (_) {} }
       });
     }
 

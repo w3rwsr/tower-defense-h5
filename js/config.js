@@ -958,15 +958,16 @@ window.TD_CONFIG = {
          win = 固定显示窗口（纹理像素坐标，已剔除画面底部烘焙投影）；
          displayH = 世界显示高度（宽按窗口宽高比自动算，可见宽 ≤ 路宽 50）；
          maxEnemies = 同屏使用视频的小怪上限（超出者回退代码绘制贴图，手机降级）
-         —— 第 8 关追加大量水晶史莱姆批次，上限放宽到 24，避免同屏超限后
-         部分小怪只显示静态贴图（观感不一致） */
+         —— 第 8 关追加大量水晶史莱姆批次、且 BOSS 分裂还会额外产出 3 只，
+         上限放宽到 56（≥ 单波同屏峰值），保证包括分裂体在内所有水晶史莱姆
+         都走视频贴图，不再出现「纯蓝色圆球」静态占位观感 */
       "moveVideo": {
         "src": "assets/crystal_slime_move.mp4",
         "bg": { "r": 253.0, "g": 252.0, "b": 250.0 },
         "key": { "low": 0.02, "high": 0.06 },
         "win": { "x": 84, "y": 78, "w": 474, "h": 418 },
         "displayH": 42,
-        "maxEnemies": 24
+        "maxEnemies": 56
       }
     },
 
@@ -990,7 +991,8 @@ window.TD_CONFIG = {
       /* 滚动视频（assets/bomb_slime_move.mp4，640x640 绿幕）：
          key/spill = green-excess 绿幕色度键 + 去绿边参数；
          rate = 播放倍速基准，运行时再按小怪实际移速比缩放
-         （滚动节奏与物理位移同步，避免「滑步」） */
+         （滚动节奏与物理位移同步，避免「滑步」）；
+         maxEnemies = 同屏视频上限（第 8 关追加自爆泥怪批次后放宽到 24） */
       "moveVideo": {
         "src": "assets/bomb_slime_move.mp4",
         "key": { "low": 0.12, "high": 0.30 },
@@ -998,7 +1000,7 @@ window.TD_CONFIG = {
         "win": { "x": 94, "y": 144, "w": 452, "h": 364 },
         "displayH": 38,
         "rate": 1.6,
-        "maxEnemies": 16
+        "maxEnemies": 24
       }
     },
 
@@ -1010,7 +1012,7 @@ window.TD_CONFIG = {
        机制（全部 JSON 驱动）：
          · 血量盾：开局 5000 血，每 5s 刷新一次，盾不破本体不受伤害
            （百分比伤害可打盾，但其最终伤害减半，见 Enemy.takeDamage）
-         · 岩浆爆发：每 5s 一次全屏【灰色】爆发，沉默半径内防御塔 2s
+         · 岩浆爆发：每 5s 一次以自身为圆心的【灰色】爆发，沉默半径内防御塔 2s
          · 分裂：血量降到 20% → 本体消失，原地分裂 3 只【特殊水晶史莱姆】
            （90% 减伤；累计 40 次元素反应才破防降至 0%）
          · 聚合：3 只分裂体全灭 → 在最后一只位置聚合回 BOSS，恢复 50% 生命
@@ -1037,10 +1039,12 @@ window.TD_CONFIG = {
         "p2SpeedMul": 1.5,        // 阶段二移速 +50%（不再召唤跟班）
         "p3HpRatio": 0.30,        // 阶段三触发血线
         "p3SpeedMul": 1.3,        // 阶段三移速再 +30%
-        /* 岩浆爆发（沉默技能）：每 magmaInterval 秒一次全屏灰色爆发，
-           magmaRadius 半径内的防御塔禁言 magmaSilence 秒（无法攻击） */
+        /* 岩浆爆发（沉默技能）：每 magmaInterval 秒一次以自身为圆心的灰色爆发，
+           magmaRadius 半径内的防御塔禁言 magmaSilence 秒（无法攻击）。
+           半径收窄到 150：玩家拉开塔距（塔心离 BOSS 轨迹 >150px）即可规避，
+           不再是「全屏禁言」；半径外的塔完全不受影响。 */
         "magmaInterval": 5,
-        "magmaRadius": 200,
+        "magmaRadius": 150,
         "magmaSilence": 2,
         /* 分裂（20% 血线）：本体消失 → splitCount 只特殊水晶史莱姆 */
         "splitAtHpRatio": 0.20,
@@ -2159,34 +2163,57 @@ window.TD_CONFIG = {
             { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 60 },
             { "type": "enemyBoss", "count": 4, "interval": 3, "delay": 70,
               "bossHpFactor": 80, "bossVariantPattern": ["gold"] } ],
-          /* ===== 第 8 波：原护卫 +【追加 8 批】护卫 +【再追加 5 批水晶史莱姆】
-             +【新增 5 批】自爆泥怪（每批 3 只，delay 8 / 21 / 34 / 47 / 60）
+          /* ===== 第 8 波（终极波 · 潮水式紧凑出怪，间隔压到 0.5~0.9 秒）=====
+             绿史莱姆 enemyX（快怪）12 批 = 原 9 +【追加 3】，每批 6 只/路，0.5s
+             紫史莱姆 enemyY（慢怪） 4 批 =【新增】，每批 5 只/路，0.8s
+             水晶史莱姆 8 批 = 原 5 +【追加 3】，每批 3 只/路，0.9s
+             自爆泥怪   7 批 = 原 5 +【追加 2】，每批 3 只/路，0.5s
              + 8 只金史莱姆 Boss（上下各 4）
              + 4 只熔岩巨兽（上下各 2，使用灰史莱姆 Boss 贴图；
-               血量盾每 5s 刷新 / 岩浆爆发沉默 / 20% 血分裂 3 只特殊水晶史莱姆
-               / 全灭后聚合回 50% 血，见 lavaBoss.phases）===== */
-          [ { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 0 },
-            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 5 },
-            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 10 },
-            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 15 },
-            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 20 },
-            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 25 },
-            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 30 },
-            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 35 },
-            { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 40 },
-            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 44 },
-            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 48 },
-            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 52 },
-            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 56 },
-            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 60 },
-            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 8 },
-            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 21 },
-            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 34 },
-            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 47 },
-            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 60 },
-            { "type": "enemyBoss", "count": 4, "interval": 3, "delay": 48,
+               血量盾每 5s 刷新 / 岩浆爆发（半径 150）沉默 2s / 20% 血分裂 3 只
+               特殊水晶史莱姆 / 全灭后聚合回 50% 血，见 lavaBoss.phases）===== */
+          [ /* —— 绿史莱姆（快怪）：原 9 批，间隔 0.70→0.50 —— */
+            { "type": "enemyX", "count": 6, "interval": 0.50, "delay": 0 },
+            { "type": "enemyX", "count": 6, "interval": 0.50, "delay": 4 },
+            { "type": "enemyX", "count": 6, "interval": 0.50, "delay": 8 },
+            { "type": "enemyX", "count": 6, "interval": 0.50, "delay": 12 },
+            { "type": "enemyX", "count": 6, "interval": 0.50, "delay": 16 },
+            { "type": "enemyX", "count": 6, "interval": 0.50, "delay": 20 },
+            { "type": "enemyX", "count": 6, "interval": 0.50, "delay": 24 },
+            { "type": "enemyX", "count": 6, "interval": 0.50, "delay": 28 },
+            { "type": "enemyX", "count": 6, "interval": 0.50, "delay": 32 },
+            /* —— 绿史莱姆：追加 3 批（穿插进时间线，不集中涌出）—— */
+            { "type": "enemyX", "count": 6, "interval": 0.50, "delay": 2 },
+            { "type": "enemyX", "count": 6, "interval": 0.50, "delay": 18 },
+            { "type": "enemyX", "count": 6, "interval": 0.50, "delay": 34 },
+            /* —— 紫史莱姆（慢怪）：4 批 —— */
+            { "type": "enemyY", "count": 5, "interval": 0.80, "delay": 6 },
+            { "type": "enemyY", "count": 5, "interval": 0.80, "delay": 15 },
+            { "type": "enemyY", "count": 5, "interval": 0.80, "delay": 27 },
+            { "type": "enemyY", "count": 5, "interval": 0.80, "delay": 39 },
+            /* —— 水晶史莱姆：原 5 批，间隔 1.40→0.90 —— */
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 36 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 42 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 48 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 54 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 60 },
+            /* —— 水晶史莱姆：追加 3 批 —— */
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 33 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 45 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 57 },
+            /* —— 自爆泥怪：原 5 批，间隔 0.70→0.50 —— */
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 8 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 21 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 34 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 47 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 60 },
+            /* —— 自爆泥怪：追加 2 批 —— */
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 14 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 40 },
+            /* —— BOSS：4 只金史莱姆（上下各 2）+ 4 只熔岩巨兽（上下各 2）—— */
+            { "type": "enemyBoss", "count": 4, "interval": 2, "delay": 52,
               "bossHpFactor": 100, "bossVariantPattern": ["gold"] },
-            { "type": "lavaBoss", "count": 2, "interval": 4, "delay": 64,
+            { "type": "lavaBoss", "count": 2, "interval": 2.5, "delay": 66,
               "bossHpFactor": 30, "bossTex": "boss_gray" } ]
         ]
       }

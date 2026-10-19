@@ -3691,7 +3691,8 @@ class GameScene extends Phaser.Scene {
    *   段0 (-40,100)→(720,100)，段1 (720,100)→(720,250)。
    *   塔1 (300,200)：投影点 footDist=340；塔2 (780,150) 卡拐角，投影 footDist=810。
    *   小怪 e1 380（距≈108）、e2 400（≈117）、eA 420（≈128）均在塔1射程 200 内，
-   *   同一脉冲必须【全部】被回拉；eBoss 420 同为 cfg.boss，必须免疫；
+   *   同一脉冲必须【全部】被回拉；eBoss 420 同为 cfg.boss，必须免疫位移，
+   *   但必须被 _bossSlowCheck 挂上减速 Debuff（窗口内挂上、脉冲间隙仍持续）；
    *   eB 560（世界 (520,100)）距塔1≈241、距塔2≈265，两塔射程外；
    *   eD 850 在拐角竖段（回拉 40，严格竖直、x 恒 720）。
    *   射程边界（塔1 (300,200)，路径 y=100，段0 起点 x=-40）：
@@ -3791,10 +3792,14 @@ class GameScene extends Phaser.Scene {
         /* 射程 200 边界：197 在内且被回拉，206 在外且目标集不含、pullBack=0 */
         edgeInsideHit: tgts.indexOf(eEdgeIn) !== -1 && eEdgeIn.pullBack > 5,
         edgeOutsideSafe: tgts.indexOf(eEdgeOut) === -1 && eEdgeOut.pullBack < 0.5,
-        /* 多目标攻击动画：被吸小怪紫闪 0xd9b8ff，BOSS 保持原色；炮头已转向；
-           首次开窗脉冲计数 1（塔2 对 eD 同样 1） */
+        /* 多目标攻击动画：被吸小怪紫闪 0xd9b8ff；炮头已转向；
+           首次开窗脉冲计数 1（塔2 对 eD 同样 1）。
+           BOSS 不吃【牵引紫闪】，但会被 _bossSlowCheck 挂上减速 → 身上应为
+           减速蓝染 0xbbeeff（不能等于紫闪色，证明两种效果互不串色）；
+           bossSlowed 直接验证「BOSS 免疫位移但减速 Debuff 已挂上」。 */
         fxTintOnSmall: eA.body.tintTopLeft === 0xd9b8ff,
-        fxNoTintOnBoss: eBoss.body.tintTopLeft === 0xffffff,
+        fxNoTintOnBoss: eBoss.body.tintTopLeft !== 0xd9b8ff,
+        bossSlowed: eBoss.slowTimer > 0 && eBoss.slowFactor <= 0.91,
         turretAimed: Math.abs(tower.turret.rotation - (-Math.PI / 2)) > 0.05,
         pulseCount1: tower.behavior.pulseCount === 1 && tower2.behavior.pulseCount === 1
       };
@@ -3882,7 +3887,9 @@ class GameScene extends Phaser.Scene {
       await new Promise(r => setTimeout(r, 400));
       report.intervalGap = { time: 1.9, A_pullBack: eA.pullBack,
         targetsCleared: tower.behavior.targets.length === 0,
-        inGap: eA.pullBack < 2 };
+        inGap: eA.pullBack < 2,
+        /* 脉冲间隙（牵引窗口已关）BOSS 减速仍在 —— 证明减速判定与窗口解耦 */
+        bossSlowedInGap: eBoss.slowTimer > 0 };
 
       /* ---- 静止夹具被烘焙钉在投影点附近：复位到初始里程，模拟真实行军
          重新走进射程（随后第二次脉冲开窗） ---- */
@@ -3938,6 +3945,8 @@ class GameScene extends Phaser.Scene {
                     report.phase1.bossStillUntouched && report.secondPulse.bossStillImmune,
         multiTargetFx: report.phase0.fxTintOnSmall && report.phase0.fxNoTintOnBoss &&
                        report.phase0.turretAimed && report.phase0.pulseCount1,
+        /* BOSS 免疫牵引但减速 Debuff 必须挂上：窗口内挂上 + 间隙中仍持续 */
+        bossSlowDebuff: report.phase0.bossSlowed && report.intervalGap.bossSlowedInGap,
         outOfRangeSafe: report.phase1.B_notPulled,
         alwaysOnPath: report.phase1.allOnPath && report.ctrlSlow.onPathDist < 0.5 &&
                       report.release.A_onPathDist < 0.5 && report.secondPulse.onPath,
@@ -3960,6 +3969,7 @@ class GameScene extends Phaser.Scene {
               report.phase0.edgeInsideHit && report.phase0.edgeOutsideSafe &&
               report.phase0.fxTintOnSmall && report.phase0.fxNoTintOnBoss &&
               report.phase0.turretAimed && report.phase0.pulseCount1 &&
+              report.phase0.bossSlowed && report.intervalGap.bossSlowedInGap &&
               report.phase1.A_pulled && report.phase1.B_notPulled &&
               report.phase1.bossStillUntouched && report.phase1.edgeOutStillSafe &&
               report.phase1.allOnPath && report.phase1.D_strictVertical &&
