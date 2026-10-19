@@ -134,7 +134,7 @@
   <script defer src="js/attackModule.js?v=20261017c"></script>
   <script defer src="js/objects/Enemy.js?v=20261019a"></script>
   <!-- 第 8 关专属实体（水晶史莱姆/自爆泥怪/熔岩巨兽/风眼控制器），依赖 Enemy 基类 -->
-  <script defer src="js/objects/Level8Enemies.js?v=20261018a"></script>
+  <script defer src="js/objects/Level8Enemies.js?v=20261019c"></script>
   <script defer src="js/objects/Projectile.js?v=20261015c"></script>
   <!-- 4 级塔异常状态管理器（塔侧）：依赖 Projectile 做命中钩子，须在其后加载 -->
   <script defer src="js/objects/StatusEffects.js?v=20261018a"></script>
@@ -154,16 +154,18 @@
   <!-- 公主窗口图片（点击终点城堡大门弹出，整图缩放 data URI，离线生成） -->
   <script defer src="js/PrincessArtData.js?v=20261016a"></script>
   <script defer src="js/objects/FireBurn.js?v=20261009n"></script>
-  <script defer src="js/objects/FireVideoPipeline.js?v=20261014c"></script>
+  <script defer src="js/objects/FireVideoPipeline.js?v=20261019a"></script>
   <script defer src="js/objects/SlimeVideo.js?v=20261018a"></script>
   <script defer src="js/objects/BossVideo.js?v=20261018a"></script>
   <script defer src="js/objects/WindVideo.js?v=20261018a"></script>
+  <!-- 第 8 关小怪移动视频（水晶史莱姆 / 自爆泥怪，白底/绿幕抠图单例） -->
+  <script defer src="js/objects/Level8Video.js?v=20261019b"></script>
   <script defer src="js/objects/Tower.js?v=20261019a"></script>
   <script defer src="js/objects/ThunderArc.js?v=20261012m"></script>
   <script defer src="js/scenes/BootScene.js?v=20261018a"></script>
   <script defer src="js/scenes/LevelSelectScene.js?v=20261018l"></script>
   <script defer src="js/scenes/GameScene.js?v=20261019a"></script>
-  <script defer src="js/main.js?v=20261017g"></script>
+  <script defer src="js/main.js?v=20261019a"></script>
   <script>
     /* 启动进度条 + 失败自动重试（放在所有 defer 脚本之后：
        本内联脚本在文档解析期同步执行，早于任何 defer 脚本执行，

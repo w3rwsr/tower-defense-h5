@@ -129,10 +129,74 @@
   };
 
   /* ============================================================
+   * 移动视频接管（水晶史莱姆 / 自爆泥怪共用，Level8Video.js 提供单例）
+   * ------------------------------------------------------------
+   * 两个视频模块均为「全场共享单视频 + 引用计数」：
+   *   setupMoveVideo() 在子类构造器里登记引用并等纹理就绪；
+   *   就绪后把 body 贴图换成视频固定窗口 frame + 专用色度键管线
+   *   （CrystalSlimeGK / BombSlimeGK），视频自身即移动动画；
+   *   不支持 / 加载失败 / 超同屏上限 → 不登记引用，保持 Level8Art 代码
+   *   绘制贴图（功能与观感不缺失，绝不黑屏）；加载在途的小怪会在纹理
+   *   就绪那一刻自动换成视频（与史莱姆 / BOSS 视频同一接管模式）。
+   * ============================================================ */
+  function setupMoveVideo(host, modName, pipeName) {
+    host._mvUsed = false;
+    host._mvActive = false;
+    host._mvGiveUp = false;
+    host._mvMod = null;
+    const M = (typeof window[modName] !== 'undefined') ? window[modName] : null;
+    if (!M || !M.supported) return;
+    if (!M.use()) return;               // 不支持 / 已失败 / 超同屏上限 → 静态贴图降级
+    host._mvUsed = true;
+    host._mvMod = M;
+    host._mvPipe = pipeName;
+    M.whenReady(() => applyMoveVideo(host));
+  }
+
+  /* 视频纹理就绪：把 body 换成共享视频纹理的固定窗口 frame + 专用管线。
+     顺序关键：先让子类停掉会拉伸视频的代码动画（果冻跳动 / 高频膨胀，它们
+     在停止时仍会把 body 留在被缩放的状态），再 setDisplaySize 覆写为视频
+     窗口的等比尺寸——否则子类的 scale 复位会把显示尺寸改回纹理原始像素。 */
+  function applyMoveVideo(host) {
+    if (host.dead || host.removed || !host.scene || !host.body) return;
+    const M = host._mvMod;
+    if (!M || !M.isReady() || host._mvActive || host._mvGiveUp) return;
+    if (typeof fireVideoPipelineReady !== 'function' ||
+      !fireVideoPipelineReady(host.scene, host._mvPipe)) {
+      endMoveVideo(host);
+      return;
+    }
+    /* 子类收尾：停掉会拉伸视频的代码动画（果冻跳动 / 高频膨胀等） */
+    if (typeof host.onMoveVideoActive === 'function') {
+      try { host.onMoveVideoActive(); } catch (_) {}
+    }
+    const d = M.displaySize();
+    host.body.setTexture(M.texKey(), M.frameKey());
+    host.body.setPipeline(host._mvPipe);
+    host.body.setDisplaySize(d.w, d.h);
+    host.body.setAlpha(1);
+    host._mvActive = true;
+  }
+
+  /* 收尾：释放共享视频引用（引用计数归零即暂停解码） */
+  function endMoveVideo(host) {
+    host._mvGiveUp = true;
+    if (host._mvUsed) {
+      host._mvUsed = false;
+      try { if (host._mvMod) host._mvMod.release(); } catch (_) {}
+    }
+    host._mvActive = false;
+  }
+
+  /* ============================================================
    * CrystalSlime —— 水晶史莱姆
-   * 机制：80% 基础减伤；存在「寒冷」（冰元素附着 / 减速 / 冰冻）或
-   *       「麻痹值」> 0 时减伤立刻归零（全额伤害）。
-   * 动效：果冻跳动（压扁拉长 Tween）+ 高光点 1 秒周期闪烁 + 冰蓝粒子拖尾。
+   * 机制：常态 80% 减伤（armorBase）；每受到 1 次【元素反应】（火冰融化、
+   *       水雷感电等，单一元素附着不算）累积 1 次，达到 reactionsToBreak(20)
+   *       次触发「破防」：减伤降为 reducedArmor(30%)，持续 breakDuration(5s)；
+   *       破防期间不再计数、不可再次触发；5 秒结束后减伤复原为 80% 且计数
+   *       清零重新累积。触发时播放冰晶碎裂/爆散特效 + 「破防」飘字。
+   * 动效：移动动画走 assets/crystal_slime_move.mp4（白底抠图）；
+   *       视频不可用时回退代码绘制贴图 + 果冻跳动 + 高光闪烁 + 冰蓝拖尾。
    * ============================================================ */
   class CrystalSlime extends Enemy {
     constructor(scene, typeKey, routeId, opts) {
@@ -140,9 +204,20 @@
       const cfg = this.cfg || {};
       this.armorBase = (cfg.armorBase != null) ? cfg.armorBase : 0.8;
       this.dmgReduction = this.armorBase;   // 初始即 80% 减伤（update 每帧复核）
-      /* 半透明冰蓝质感 */
+      /* 破防参数（JSON 驱动）：常态 armorBase → 破防期 reduced，持续 duration */
+      const brk = cfg.break || {};
+      this._brk = {
+        need: Math.max(1, brk.reactionsToBreak != null ? brk.reactionsToBreak : 20),
+        reduced: (brk.reducedArmor != null) ? brk.reducedArmor : 0.30,
+        duration: (brk.breakDuration != null) ? brk.breakDuration : 5
+      };
+      this.reactionCount = 0;   // 已累积的元素反应次数（破防结束时清零重算）
+      this.breakTimer = 0;      // 破防剩余秒数（>0 = 破防中，期间不计数/不重复触发）
+      this._breakGfx = null;    // 破防期内身上的脉动冰环
+      this._breakTween = null;
+      /* 半透明冰蓝质感（视频接管后由 applyMoveVideo 改回不透明） */
       this.body.setAlpha(0.88);
-      /* 高光点（2~3 个白点，透明度 1 秒周期闪烁） */
+      /* 高光点（2~3 个白点，透明度 1 秒周期闪烁）——视频接管后移除 */
       const r = this.radius;
       const hl = scene.add.graphics();
       hl.fillStyle(0xffffff, 0.95);
@@ -150,27 +225,48 @@
       hl.fillCircle(r * 0.32, -r * 0.22, r * 0.11);
       hl.fillCircle(-r * 0.05, r * 0.32, r * 0.09);
       this.add(hl);
+      this._hl = hl;
       this._hlTween = scene.tweens.add({
         targets: hl, alpha: 0.2, duration: 1000, yoyo: true,
         repeat: -1, ease: 'Sine.easeInOut'
       });
-      /* 果冻跳动：压扁拉长（宽度 -10% ↔ 高度 +12%） */
+      /* 果冻跳动：压扁拉长（宽度 -10% ↔ 高度 +12%）——视频接管后停止 */
       const bx = this.body.scaleX, by = this.body.scaleY;
       this._jellyTween = scene.tweens.add({
         targets: this.body,
         scaleX: bx * 0.9, scaleY: by * 1.12,
         duration: 640, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
       });
+      /* 移动视频接管（assets/crystal_slime_move.mp4，白底抠图） */
+      setupMoveVideo(this, 'CRYSTAL_SLIME_VIDEO', 'CrystalSlimeGK');
       this._trailClock = 0;
+    }
+
+    /* 视频接管成功：视频自身即跳跃动画 → 关掉代码果冻跳动与高光点，
+       避免二次位移/拉伸把视频压变形（显示尺寸由 applyMoveVideo 随后设置） */
+    onMoveVideoActive() {
+      if (this._jellyTween) { try { this._jellyTween.stop(); } catch (_) {} this._jellyTween = null; }
+      if (this._hlTween) { try { this._hlTween.stop(); } catch (_) {} this._hlTween = null; }
+      if (this._hl) { try { this._hl.destroy(); } catch (_) {} this._hl = null; }
     }
 
     update(dt) {
       super.update(dt);
       if (this.dead || this.removed || !this.scene) return;
-      /* 减伤归零判定：寒冷（冰元素/减速/冰冻）或麻痹值 > 0 → 立刻全额承伤 */
-      const cold = this.slowTimer > 0 || this.freezeTimer > 0 ||
-        (this.reactionsEnabled ? this.hasElement('ice') : this.element === 'ice');
-      this.dmgReduction = (cold || this.paralysis > 0) ? 0 : this.armorBase;
+
+      /* 破防倒计时：到期后减伤复原为常态，反应计数清零重新累积 */
+      if (this.breakTimer > 0) {
+        this.breakTimer -= dt;
+        if (this.breakTimer <= 0) {
+          this.breakTimer = 0;
+          this.reactionCount = 0;
+          this._showBreakMark(false);
+        }
+      }
+      /* 减伤基数：破防中 = reduced(30%)，否则 = armorBase(80%)。
+         Enemy.takeDamage 统一读取 armorReduction（= 此处基数 - 状态降防 - 降防层） */
+      this.dmgReduction = (this.breakTimer > 0) ? this._brk.reduced : this.armorBase;
+
       /* 冰蓝粒子拖尾（移动时身后微弱光点，冻结时不产尾） */
       this._trailClock += dt;
       if (this._trailClock >= 0.16) {
@@ -186,9 +282,123 @@
       }
     }
 
+    /* 元素反应计数（每次真实触发一次反应计 1）：Enemy.attachElement 结算完
+       一轮反应后回调 applyReactionEffect，此处统一计数 —— 单一元素附着不会
+       走到这里，只有火冰融化/水雷感电/水冰冰冻等真实反应才计入。 */
+    applyReactionEffect(rule, mult) {
+      super.applyReactionEffect(rule, mult);
+      this._onReaction();
+    }
+
+    /* 破防累计：破防期间（breakTimer>0）不再计数、不可重复触发 */
+    _onReaction() {
+      if (this.dead || this.removed || this.breakTimer > 0) return;
+      this.reactionCount++;
+      if (this.reactionCount >= this._brk.need) this._triggerBreak();
+    }
+
+    /* 触发破防：减伤立刻降为 reduced，持续 duration 秒；冰晶碎裂特效 + 提示 */
+    _triggerBreak() {
+      this.breakTimer = this._brk.duration;
+      this.dmgReduction = this._brk.reduced;      // 当帧立即生效，不等下一帧
+      this._breakFx();
+      this._showBreakMark(true);
+      if (this.scene && typeof this.scene.floatText === 'function') {
+        this.scene.floatText(this.x, this.y - this.radius - 30, '破防！减伤 80%→30%', 0x9fdcff);
+      }
+      if (this.scene && typeof this.scene.banner === 'function') {
+        this.scene.banner('水晶史莱姆破防！5 秒输出窗口', 0x9fdcff);
+      }
+    }
+
+    /* 破防特效：冰晶碎裂/爆散 —— 双层扩散冰环 + 12 片冰晶碎片 + 中心白闪 */
+    _breakFx() {
+      const s = this.scene;
+      if (!s) return;
+      const x = this.x, y = this.y, R = this.radius;
+      /* 双层冰环扩散（内白外冰蓝） */
+      const ring = s.add.graphics().setDepth(this.depth + 3);
+      const rs = { r: R * 0.6, a: 1 };
+      s.tweens.add({
+        targets: rs, r: R * 3.4, a: 0, duration: 460, ease: 'Quad.easeOut',
+        onUpdate: () => {
+          ring.clear();
+          ring.lineStyle(3, 0x8fd8ff, rs.a).strokeCircle(x, y, rs.r);
+          ring.lineStyle(1.6, 0xffffff, rs.a * 0.9).strokeCircle(x, y, rs.r * 0.72);
+        },
+        onComplete: () => { try { ring.destroy(); } catch (_) {} }
+      });
+      /* 冰晶碎块四散（12 片三角碎片，带自旋与上抛） */
+      const sh = s.add.graphics().setDepth(this.depth + 3);
+      const pieces = [];
+      for (let i = 0; i < 12; i++) {
+        const a = (Math.PI * 2 * i) / 12 + Math.random() * 0.4;
+        const dist = R * (1.6 + Math.random() * 1.6);
+        pieces.push({
+          dx: Math.cos(a) * dist, dy: Math.sin(a) * dist,
+          r: R * (0.16 + Math.random() * 0.16),
+          rot: Math.random() * Math.PI, spin: (Math.random() - 0.5) * 6
+        });
+      }
+      const ps = { t: 0 };
+      s.tweens.add({
+        targets: ps, t: 1, duration: 520, ease: 'Cubic.easeOut',
+        onUpdate: () => {
+          sh.clear();
+          const al = 1 - ps.t;
+          for (const p of pieces) {
+            const px = x + p.dx * ps.t;
+            const py = y + p.dy * ps.t - ps.t * ps.t * R * 0.6;   // 轻微上抛
+            const ang = p.rot + p.spin * ps.t;
+            sh.fillStyle(0xd8f4ff, 0.95 * al);
+            sh.beginPath();
+            sh.moveTo(px + Math.cos(ang) * p.r * 1.7, py + Math.sin(ang) * p.r * 1.7);
+            sh.lineTo(px + Math.cos(ang + 2.1) * p.r, py + Math.sin(ang + 2.1) * p.r);
+            sh.lineTo(px + Math.cos(ang - 2.1) * p.r, py + Math.sin(ang - 2.1) * p.r);
+            sh.closePath();
+            sh.fillPath();
+          }
+        },
+        onComplete: () => { try { sh.destroy(); } catch (_) {} }
+      });
+      /* 中心白闪 */
+      const flash = s.add.circle(x, y, R * 1.1, 0xffffff, 0.85).setDepth(this.depth + 4);
+      s.tweens.add({
+        targets: flash, scaleX: 2.4, scaleY: 2.4, alpha: 0, duration: 300,
+        onComplete: () => { try { flash.destroy(); } catch (_) {} }
+      });
+    }
+
+    /* 破防期间身上的脉动冰环（提示这是 5 秒输出窗口） */
+    _showBreakMark(on) {
+      if (on) {
+        if (this._breakGfx || !this.scene) return;
+        const g = this.scene.add.graphics();
+        const r = this.radius + 6;
+        g.lineStyle(2.5, 0x9fdcff, 0.95).strokeCircle(0, 0, r);
+        g.lineStyle(1.2, 0xffffff, 0.7).strokeCircle(0, 0, r + 3);
+        this.add(g);
+        this._breakGfx = g;
+        this._breakTween = this.scene.tweens.add({
+          targets: g, alpha: 0.35, duration: 380, yoyo: true, repeat: -1
+        });
+      } else if (this._breakGfx) {
+        if (this._breakTween) { try { this._breakTween.stop(); } catch (_) {} this._breakTween = null; }
+        try { this._breakGfx.destroy(); } catch (_) {}
+        this._breakGfx = null;
+      }
+    }
+
+    playDeath() {
+      this._showBreakMark(false);   // 死亡时清掉破防冰环（tween 不残留）
+      super.playDeath();
+    }
+
     destroy(fromScene) {
+      this._showBreakMark(false);
       if (this._hlTween) { try { this._hlTween.stop(); } catch (_) {} this._hlTween = null; }
       if (this._jellyTween) { try { this._jellyTween.stop(); } catch (_) {} this._jellyTween = null; }
+      endMoveVideo(this);
       super.destroy(fromScene);
     }
   }
@@ -198,7 +408,9 @@
    * 机制：移速极快（132）；死亡时（或碰到塔时）爆炸，使爆炸半径
    *       （JSON explodeRadius=50 + 自身体积补偿）内的防御塔「禁言」
    *       （完全停止攻击）2 秒（GameScene.silenceTower，不改塔源码）。
-   * 动效：高频小幅膨胀收缩（170ms）+ 移动红色残影 + 头顶红色警示「!」。
+   * 动效：移动动画走 assets/bomb_slime_move.mp4（绿幕抠图），播放倍速随
+   *       移速缩放（滚动与位移同步，避免滑步）；视频不可用时回退代码绘制
+   *       贴图 + 高频膨胀收缩 + 移动红色残影 + 头顶红色警示「!」。
    * ============================================================ */
   class BomberSlime extends Enemy {
     constructor(scene, typeKey, routeId, opts) {
@@ -218,19 +430,35 @@
         targets: mark, y: '-=3', duration: 300,
         yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
       });
-      /* 高频小幅度膨胀收缩（模拟濒临爆炸的抖动） */
+      /* 高频小幅度膨胀收缩（模拟濒临爆炸的抖动）——视频接管后停止
+         （视频自身即滚动动画，再叠加缩放会把画面压变形） */
       const bx = this.body.scaleX, by = this.body.scaleY;
       this._pulseTween = scene.tweens.add({
         targets: this.body,
         scaleX: bx * 1.07, scaleY: by * 1.07,
         duration: 170, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
       });
+      /* 移动视频接管（assets/bomb_slime_move.mp4，绿幕抠图） */
+      setupMoveVideo(this, 'BOMB_SLIME_VIDEO', 'BombSlimeGK');
       this._ghostClock = 0;
+    }
+
+    /* 视频接管成功：停止代码膨胀收缩（滚动由视频呈现；显示尺寸由
+       applyMoveVideo 随后设置） */
+    onMoveVideoActive() {
+      if (this._pulseTween) { try { this._pulseTween.stop(); } catch (_) {} this._pulseTween = null; }
     }
 
     update(dt) {
       super.update(dt);
       if (this.dead || this.removed || !this.scene) return;
+      /* 滚动节奏与物理位移同步（避免「滑步」）：按本只小怪的实时移速比
+         上报播放倍速（减速/定身时滚动同步变慢），共享单视频取本帧最快者 */
+      if (this._mvActive && this._mvMod) {
+        const sp = (this.freezeTimer > 0) ? 0
+          : this.baseSpeed * (this.slowTimer > 0 ? this.slowFactor : 1);
+        this._mvMod.report(this.baseSpeed > 0 ? sp / this.baseSpeed : 1);
+      }
       /* 红色残影（短促淡出的小圆） */
       this._ghostClock += dt;
       if (this._ghostClock >= 0.12) {
@@ -302,6 +530,7 @@
     destroy(fromScene) {
       if (this._markTween) { try { this._markTween.stop(); } catch (_) {} this._markTween = null; }
       if (this._pulseTween) { try { this._pulseTween.stop(); } catch (_) {} this._pulseTween = null; }
+      endMoveVideo(this);
       super.destroy(fromScene);
     }
   }

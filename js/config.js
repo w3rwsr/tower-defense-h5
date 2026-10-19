@@ -927,10 +927,12 @@ window.TD_CONFIG = {
      * 在进关时用 Graphics.generateTexture 生成，键名固定为 enemy_<typeKey>）
      * ============================================================ */
 
-    /* 水晶史莱姆：自带 80% 基础减伤；身上存在「寒冷」（冰元素/减速/冰冻）
-       或「麻痹值」> 0 时减伤立刻归零（全额伤害）。减伤归零逻辑由
-       CrystalSlime 子类每帧自更新 this.dmgReduction 实现（Enemy.takeDamage
-       统一读取 armorReduction 接口，见 Enemy.js）。 */
+    /* 水晶史莱姆：常态 80% 减伤；每受到 1 次【元素反应】（火冰融化/水雷感电等，
+       单一元素附着不计）累积 1 次，累积到 reactionsToBreak 次触发「破防」：
+       减伤 80% → reducedArmor，持续 breakDuration 秒；破防期间不可再次触发，
+       结束后减伤复原、计数清零重新累积。减伤基数由 CrystalSlime 每帧写入
+       this.dmgReduction，Enemy.takeDamage 统一读取 armorReduction 接口。
+       移动动画改用 assets/crystal_slime_move.mp4（白底抠图，见 moveVideo）。 */
     "crystalSlime": {
       "name": "水晶史莱姆",
       "hp": 90,             // 基础血量（按波次 hpGrowth 复合成长）
@@ -940,13 +942,33 @@ window.TD_CONFIG = {
       "leakDamage": 2,
       "color": 0x9fdcff,
       "darkColor": 0x5aa8d8,
-      "art": { "h": 42 },   // 显示高度，宽按贴图宽高比自动算，不超路宽 50
-      "armorBase": 0.8      // 基础减伤 80%（寒冷/麻痹时归零），JSON 驱动
+      "art": { "h": 42 },   // 代码绘制兜底贴图显示高度（视频不可用时用）
+      "armorBase": 0.8,     // 常态减伤 80%（JSON 驱动）
+      /* 破防（元素反应计数触发）：全部 JSON 驱动 */
+      "break": {
+        "reactionsToBreak": 20,   // 累积 20 次元素反应触发破防
+        "reducedArmor": 0.30,     // 破防期间减伤降为 30%
+        "breakDuration": 5        // 破防持续 5 秒（期间不可再次触发）
+      },
+      /* 移动视频（assets/crystal_slime_move.mp4，640x640 白底）：
+         bg/key = 对实测白底(253,252,250)做 L1 距离键的抠图参数；
+         win = 固定显示窗口（纹理像素坐标，已剔除画面底部烘焙投影）；
+         displayH = 世界显示高度（宽按窗口宽高比自动算，可见宽 ≤ 路宽 50）；
+         maxEnemies = 同屏使用视频的小怪上限（超出者回退代码绘制贴图，手机降级） */
+      "moveVideo": {
+        "src": "assets/crystal_slime_move.mp4",
+        "bg": { "r": 253.0, "g": 252.0, "b": 250.0 },
+        "key": { "low": 0.02, "high": 0.06 },
+        "win": { "x": 84, "y": 78, "w": 474, "h": 418 },
+        "displayH": 42,
+        "maxEnemies": 12
+      }
     },
 
     /* 自爆泥怪：移速极快；死亡时（或碰到塔时）爆炸，使爆炸半径（含自身
        体积补偿）内的防御塔「禁言」（完全停止攻击）2 秒。
-       半径/禁言时长/触发距离全部 JSON 驱动，由 BomberSlime 子类实现。 */
+       半径/禁言时长/触发距离全部 JSON 驱动，由 BomberSlime 子类实现。
+       移动动画改用 assets/bomb_slime_move.mp4（绿幕抠图，见 moveVideo）。 */
     "bomberSlime": {
       "name": "自爆泥怪",
       "hp": 60,
@@ -956,10 +978,23 @@ window.TD_CONFIG = {
       "leakDamage": 1,
       "color": 0xd94a3a,
       "darkColor": 0x7a1f16,
-      "art": { "h": 38 },
+      "art": { "h": 38 },   // 代码绘制兜底贴图显示高度（视频不可用时用）
       "explodeRadius": 50,   // 爆炸禁言半径（像素，需求口径）
       "explodeSilence": 2,   // 禁言时长（秒）
-      "contactRange": 64     // 碰塔引爆判定距离（塔位距路心 ≥52~62，须略大于爆炸半径）
+      "contactRange": 64,    // 碰塔引爆判定距离（塔位距路心 ≥52~62，须略大于爆炸半径）
+      /* 滚动视频（assets/bomb_slime_move.mp4，640x640 绿幕）：
+         key/spill = green-excess 绿幕色度键 + 去绿边参数；
+         rate = 播放倍速基准，运行时再按小怪实际移速比缩放
+         （滚动节奏与物理位移同步，避免「滑步」） */
+      "moveVideo": {
+        "src": "assets/bomb_slime_move.mp4",
+        "key": { "low": 0.12, "high": 0.30 },
+        "spill": 0.03,
+        "win": { "x": 94, "y": 144, "w": 452, "h": 364 },
+        "displayH": 38,
+        "rate": 1.6,
+        "maxEnemies": 12
+      }
     },
 
     /* 熔岩巨兽 —— 第 8 关终极 BOSS（三阶段状态机由 LavaBehemoth 子类实现）：

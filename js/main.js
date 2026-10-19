@@ -291,8 +291,13 @@
     /* BOSS 运动视频 / 死亡视频距离键管线（BossVideo.js 配套） */
     if (typeof BossWalkGKPipeline !== 'undefined') pipes.BossWalkGK = BossWalkGKPipeline;
     if (typeof BossDeathGKPipeline !== 'undefined') pipes.BossDeathGK = BossDeathGKPipeline;
+    /* 第 8 关小怪移动视频管线（Level8Video.js 配套）：
+       CrystalSlimeGK=水晶史莱姆白底距离键，BombSlimeGK=自爆泥怪绿幕色度键 */
+    if (typeof CrystalSlimeGKPipeline !== 'undefined') pipes.CrystalSlimeGK = CrystalSlimeGKPipeline;
+    if (typeof BombSlimeGKPipeline !== 'undefined') pipes.BombSlimeGK = BombSlimeGKPipeline;
     if (pipes.FireVideo || pipes.FireVideoGK || pipes.FireVideoWK || pipes.WindVideoGK ||
-      pipes.SlimeVideoGK || pipes.BossWalkGK || pipes.BossDeathGK) {
+      pipes.SlimeVideoGK || pipes.BossWalkGK || pipes.BossDeathGK ||
+      pipes.CrystalSlimeGK || pipes.BombSlimeGK) {
       gameCfg.render.pipeline = pipes;
     }
   } catch (e) { /* 忽略：按等级回退 */ }

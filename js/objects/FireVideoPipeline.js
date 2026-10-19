@@ -81,6 +81,31 @@
   const BBK_LOW = n(BK2.low, 0.06);
   const BBK_HIGH = Math.max(n(BK2.high, 0.13), BBK_LOW + 0.001);
 
+  /* H. 第 8 关小怪移动视频键（预乘 alpha 输出，参数取 TD_CONFIG.enemies 实测值）
+     · crystalSlime：assets/crystal_slime_move.mp4 为【白底】(实测 253,252,250)，
+       冰蓝本体到白底的 L1 距离 d≥0.13 全不透明、背景 d≈0.001 全透明；
+       因本体大片棱面本身接近纯白（与背景同色），阈值取紧贴背景的
+       0.02/0.06（实测背景噪声上限 0.013 全落在 0.02 以下），把「吃掉本体
+       棱面」的破洞压到最小——在 42px 显示尺寸下不可见。
+     · bomberSlime ：assets/bomb_slime_move.mp4 为【绿幕】(实测 50,233,69)，
+       弹体为黄/橙/红（green-excess ≤0.04），绿幕 excess≈0.68，
+       阈值 0.12/0.30 落在两者空档；附 despill 去绿边。 */
+  const L8CFG = (typeof TD_CONFIG !== 'undefined' && TD_CONFIG.enemies) || {};
+  const CSFG = (L8CFG.crystalSlime && L8CFG.crystalSlime.moveVideo) || {};
+  const CSBG = CSFG.bg || { r: 253.0, g: 252.0, b: 250.0 };
+  const CSK = CSFG.key || { low: 0.02, high: 0.06 };
+  const CSH_R = n(CSBG.r, 253.0) / 255.0;
+  const CSH_G = n(CSBG.g, 252.0) / 255.0;
+  const CSH_B = n(CSBG.b, 250.0) / 255.0;
+  const CSK_LOW = n(CSK.low, 0.02);
+  const CSK_HIGH = Math.max(n(CSK.high, 0.06), CSK_LOW + 0.001);
+
+  const BSVCFG = (L8CFG.bomberSlime && L8CFG.bomberSlime.moveVideo) || {};
+  const BSK = BSVCFG.key || { low: 0.12, high: 0.30 };
+  const BSK_LOW = n(BSK.low, 0.12);
+  const BSK_HIGH = Math.max(n(BSK.high, 0.30), BSK_LOW + 0.001);
+  const BSK_SPILL = n(BSVCFG.spill, 0.03);
+
   /* G. BOSS 死亡视频专用背景色距离键（预乘 alpha 输出）。
      三个死亡视频背景绿幕实测 RGB(32,188,42)/(43,201,35)/(36,199,38)，取中值
      (36,199,38) 统一键控：各视频背景到该色的 d≤0.025（远低于 low 0.06），
@@ -223,6 +248,44 @@
     '}'
   ].join('\n');
 
+  /* H. 水晶史莱姆移动视频专用键（预乘 alpha 输出）。
+     白底 + 冰蓝本体：与 E/F 同款「到实测背景色的 L1 距离」键，参数见上方 H 段。 */
+  const CRYSTAL_SLIME_FS = PRECISION + '\n' + [
+    'void main ()',
+    '{',
+    '    vec4 tex = texture2D(uMainSampler, outTexCoord);',
+    '    float d = (abs(tex.r - ' + CSH_R.toFixed(4) + ') + abs(tex.g - ' + CSH_G.toFixed(4) + ') + abs(tex.b - ' + CSH_B.toFixed(4) + ')) / 3.0;',
+    '    float a = smoothstep(' + CSK_LOW.toFixed(3) + ', ' + CSK_HIGH.toFixed(3) + ', d);',
+    '    vec3 rgb = tex.rgb * outTint.bgr;',
+    '    float A = a * outTint.a;',
+    '    if (outTintEffect == 2.0) {',
+    '        gl_FragColor = vec4(outTint.bgr * A, A);',
+    '    } else {',
+    '        gl_FragColor = vec4(rgb * A, A);',
+    '    }',
+    '}'
+  ].join('\n');
+
+  /* I. 自爆泥怪移动视频专用键（预乘 alpha 输出）。
+     绿幕 + 黄橙弹体：green-excess 色度键（与 D 同结构）+ despill 去绿边，
+     参数见上方 H 段。 */
+  const BOMB_SLIME_FS = PRECISION + '\n' + [
+    'void main ()',
+    '{',
+    '    vec4 tex = texture2D(uMainSampler, outTexCoord);',
+    '    float ex = tex.g - max(tex.r, tex.b);',
+    '    float a = 1.0 - smoothstep(' + BSK_LOW.toFixed(3) + ', ' + BSK_HIGH.toFixed(3) + ', ex);',
+    '    float g2 = min(tex.g, max(tex.r, tex.b) + ' + BSK_SPILL.toFixed(3) + ');',
+    '    vec3 rgb = vec3(tex.r, g2, tex.b) * outTint.bgr;',
+    '    float A = a * outTint.a;',
+    '    if (outTintEffect == 2.0) {',
+    '        gl_FragColor = vec4(outTint.bgr * A, A);',
+    '    } else {',
+    '        gl_FragColor = vec4(rgb * A, A);',
+    '    }',
+    '}'
+  ].join('\n');
+
   /* C. 白幕色度键 */
   const FIRE_VIDEO_WK_FS = PRECISION + '\n' + [
     'void main ()',
@@ -279,6 +342,18 @@
       super({ game, fragShader: BOSS_DEATH_FS });
     }
   }
+  /* 第 8 关水晶史莱姆移动视频专用（白底距离键 + 预乘输出，见 H 段说明） */
+  class CrystalSlimeGKPipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipeline {
+    constructor(game) {
+      super({ game, fragShader: CRYSTAL_SLIME_FS });
+    }
+  }
+  /* 第 8 关自爆泥怪移动视频专用（绿幕色度键 + despill + 预乘输出，见 I 段说明） */
+  class BombSlimeGKPipeline extends Phaser.Renderer.WebGL.Pipelines.SinglePipeline {
+    constructor(game) {
+      super({ game, fragShader: BOMB_SLIME_FS });
+    }
+  }
 
   /* 供 Tower 端判断某条管线是否已在当前渲染器注册（WebGL） */
   function fireVideoPipelineReady(scene, name) {
@@ -296,5 +371,7 @@
   window.SlimeVideoGKPipeline = SlimeVideoGKPipeline;
   window.BossWalkGKPipeline = BossWalkGKPipeline;
   window.BossDeathGKPipeline = BossDeathGKPipeline;
+  window.CrystalSlimeGKPipeline = CrystalSlimeGKPipeline;
+  window.BombSlimeGKPipeline = BombSlimeGKPipeline;
   window.fireVideoPipelineReady = fireVideoPipelineReady;
 })();

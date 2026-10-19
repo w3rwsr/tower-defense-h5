@@ -116,6 +116,9 @@ class GameScene extends Phaser.Scene {
     try { BOSS_VIDEO.enterScene(); } catch (e) {}
     /* BOSS 死亡视频：新一局停掉所有播放中的死亡动画并清零计数 */
     try { BOSS_DEATH.enterScene(); } catch (e) {}
+    /* 第 8 关小怪移动视频（水晶史莱姆 / 自爆泥怪）：新一局引用计数归零并暂停 */
+    try { if (typeof CRYSTAL_SLIME_VIDEO !== 'undefined') CRYSTAL_SLIME_VIDEO.enterScene(); } catch (e) {}
+    try { if (typeof BOMB_SLIME_VIDEO !== 'undefined') BOMB_SLIME_VIDEO.enterScene(); } catch (e) {}
     /* 本关媒体【按需加载】：只加载本关真正会用到的视频（含 BOSS 的关卡才
        加载 BOSS 运动视频，且只预载本关实际出场的死亡视频变体），全部经
        TDMedia 串行队列逐个下载 + 进度条 + 10s 超时跳过。进关到 BOSS 出场
@@ -204,6 +207,22 @@ class GameScene extends Phaser.Scene {
        资源已在内存/纹理管理器里，计划为空 → 不显示加载页 → 秒进游戏。
        若资源有缺失（例如上次加载失败），只把缺失项重新入队，绝不重置整关加载。 */
     const plan = [];
+    /* 第 8 关专属小怪移动视频：本关出怪表里出现该类小怪才加载
+       （水晶史莱姆 / 自爆泥怪，Level8Video.js 单例；其他关卡零影响） */
+    const l8Use = (function () {
+      try {
+        const s = JSON.stringify(this.levelCfg.waves);
+        return { crystal: s.indexOf('crystalSlime') >= 0, bomb: s.indexOf('bomberSlime') >= 0 };
+      } catch (e) { return { crystal: false, bomb: false }; }
+    }).call(this);
+    if (l8Use.crystal && typeof CRYSTAL_SLIME_VIDEO !== 'undefined' &&
+      CRYSTAL_SLIME_VIDEO.init && !CRYSTAL_SLIME_VIDEO._inited) {
+      plan.push({ tag: 'CRYSTAL_SLIME_VIDEO.init', delay: 0, fn: () => CRYSTAL_SLIME_VIDEO.init(this) });
+    }
+    if (l8Use.bomb && typeof BOMB_SLIME_VIDEO !== 'undefined' &&
+      BOMB_SLIME_VIDEO.init && !BOMB_SLIME_VIDEO._inited) {
+      plan.push({ tag: 'BOMB_SLIME_VIDEO.init', delay: 0, fn: () => BOMB_SLIME_VIDEO.init(this) });
+    }
     if (hasBoss && typeof BOSS_VIDEO !== 'undefined' && BOSS_VIDEO.init && !BOSS_VIDEO._inited) {
       plan.push({ tag: 'BOSS_VIDEO.init', delay: 800, fn: () => BOSS_VIDEO.init(this) });
     }
@@ -1226,6 +1245,10 @@ class GameScene extends Phaser.Scene {
        仅在有 BOSS / 有死亡视频播放时才实际工作，控制手机端开销 */
     try { BOSS_VIDEO.tick(); } catch (e) {}
     try { BOSS_DEATH.tick(); } catch (e) {}
+    /* 第 8 关小怪移动视频（水晶史莱姆 / 自爆泥怪）：tick 内先按当前移速
+       同步播放倍速（自爆滚动节奏），再把视频帧上传共享 GL 纹理（各 1 次） */
+    try { if (typeof CRYSTAL_SLIME_VIDEO !== 'undefined') CRYSTAL_SLIME_VIDEO.tick(); } catch (e) {}
+    try { if (typeof BOMB_SLIME_VIDEO !== 'undefined') BOMB_SLIME_VIDEO.tick(); } catch (e) {}
     // 暂停或结算时冻结全部逻辑（画面保持）
     const rawDt = Math.min(delta, 50) / 1000;
     const dt = (this.paused || this.state === 'won' || this.state === 'lost')
@@ -4336,6 +4359,9 @@ class GameScene extends Phaser.Scene {
     /* BOSS 死亡视频（爆炸动画）随暂停停播/恢复；皇冠 Tween 已被
        tweens.timeScale=0 冻结，恢复后继续淡出 */
     try { BOSS_DEATH.setPaused(v); } catch (e) {}
+    /* 第 8 关小怪移动视频（水晶史莱姆 / 自爆泥怪）随暂停停播/恢复 */
+    try { if (typeof CRYSTAL_SLIME_VIDEO !== 'undefined') CRYSTAL_SLIME_VIDEO.setPaused(v); } catch (e) {}
+    try { if (typeof BOMB_SLIME_VIDEO !== 'undefined') BOMB_SLIME_VIDEO.setPaused(v); } catch (e) {}
   }
 
   toggleSpeed() {
