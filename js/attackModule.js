@@ -493,10 +493,10 @@
              护盾概念，多收一个元素参数不影响其实现） */
           if (!current.dead) {
             current.takeDamage(Math.round(dmg * mul), chainEl);
-            /* 4 级雷霆万钧：每个被电链命中的怪判定麻痹（50%×0.5 秒定身）
-               并叠 1 层麻痹值。同一只怪单次电链最多命中 1 次——上方
-               hit 集合已保证，绝无无限弹射/重复叠层。 */
-            if (lv4para && !current.dead && !current.isObstacle &&
+            /* 4 级雷霆万钧：麻痹只作用于本次电链的【首个命中目标】（i===0，
+               即这发闪电真正命中的那一只怪）。绝不沿弹射链扩散给其它被弹到
+               的怪——修复“一发电链让周围一圈怪集体麻痹”的问题。 */
+            if (i === 0 && lv4para && !current.dead && !current.isObstacle &&
                 typeof TDStatusEffects !== 'undefined') {
               const mgr = TDStatusEffects.ensure(this.tower.scene);
               if (mgr) mgr.onThunderHit(current, lv4para);

@@ -3555,7 +3555,6 @@ class GameScene extends Phaser.Scene {
       },
       onComplete: () => g.destroy()
     });
-    this.floatText(x, y - 24, '裂甲 +1', 0xff7a7a);
   }
 
   floatText(x, y, text, color) {

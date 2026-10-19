@@ -347,9 +347,6 @@ class Enemy extends Phaser.GameObjects.Container {
         const ratio = ((TD_CONFIG.elementSystem.vuln || {}).bossSlowRatio != null)
           ? TD_CONFIG.elementSystem.vuln.bossSlowRatio : 0.3;
         this.applySlow(Math.max(0, 1 - ratio), fz);
-        if (this.scene && typeof this.scene.floatText === 'function') {
-          this.scene.floatText(this.x, this.y - this.radius - 12, 'BOSS 减速', 0x9fd8ff);
-        }
       } else {
         this.applyFreeze(fz);
       }
@@ -1000,23 +997,10 @@ class Enemy extends Phaser.GameObjects.Container {
     return u * costShield;
   }
 
-  /* 破盾：清状态 + 提示文字 + 扩散特效 + 销毁视觉 */
+  /* 破盾：清状态 + 扩散特效 + 销毁视觉（状态由特效体现，不弹文字） */
   breakShield() {
     const s = this.shield;
     if (!s) return;
-    if (this.scene && typeof this.scene.floatText === 'function') {
-      let label;
-      if (s.type === 'hp') label = '血量护盾击破！';
-      else if (s.value != null) {
-        label = s.element === 'fire' ? '火元素护盾击破！'
-          : s.element === 'thunder' ? '雷元素护盾击破！'
-          : s.element === 'ice' ? '冰元素护盾击破！' : '元素护盾击破！';
-      } else {
-        label = s.element === 'thunder' ? '雷元素护盾击破！'
-          : s.element === 'ice' ? '冰元素护盾击破！' : '护盾击破！';
-      }
-      this.scene.floatText(this.x, this.y - this.radius - 30, label, 0xffffff);
-    }
     if (this.scene && typeof this.scene.makePortalBurst === 'function') {
       const col = this.shieldColor();
       this.scene.makePortalBurst(this.x, this.y, col);

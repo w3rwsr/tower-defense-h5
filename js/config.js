@@ -2036,6 +2036,7 @@ window.TD_CONFIG = {
             { "type": "enemyX", "count": 9,  "interval": 0.60, "delay": 6 },
             { "type": "enemyX", "count": 9,  "interval": 0.60, "delay": 12 } ],
           /* ===== 第 3 波：原混编 +【追加 3 批】混编 +【再追加 1 批水晶史莱姆】
+             +【新增 1 批】自爆泥怪（每批 3 只，delay 18）
              + 4 只金史莱姆 Boss（上下各 2，bossVariantPattern 强制金色贴图）===== */
           [ { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 0 },
             { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 4 },
@@ -2046,9 +2047,11 @@ window.TD_CONFIG = {
             { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 24 },
             { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 28 },
             { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 30 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 18 },
             { "type": "enemyBoss", "count": 2, "interval": 4, "delay": 32,
               "bossHpFactor": 30, "bossVariantPattern": ["gold"] } ],
           /* ===== 第 4 波：原混编 +【追加 4 批】混编 +【再追加 2 批水晶史莱姆】
+             +【新增 2 批】自爆泥怪（每批 3 只，delay 13 / 27）
              + 4 只金史莱姆 Boss（上下各 2）===== */
           [ { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 0 },
             { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 3 },
@@ -2062,9 +2065,12 @@ window.TD_CONFIG = {
             { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 31 },
             { "type": "crystalSlime", "count": 4, "interval": 1.10, "delay": 34 },
             { "type": "crystalSlime", "count": 4, "interval": 1.10, "delay": 38 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 13 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 27 },
             { "type": "enemyBoss", "count": 2, "interval": 4, "delay": 36,
               "bossHpFactor": 40, "bossVariantPattern": ["gold"] } ],
           /* ===== 第 5 波：原混编 +【追加 5 批】混编 +【再追加 3 批水晶史莱姆】
+             +【新增 3 批】自爆泥怪（每批 3 只，delay 13 / 27 / 41）
              + 6 只金史莱姆 Boss（上下各 3）===== */
           [ { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 0 },
             { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 2 },
@@ -2081,9 +2087,13 @@ window.TD_CONFIG = {
             { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 45 },
             { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 48 },
             { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 51 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 13 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 27 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 41 },
             { "type": "enemyBoss", "count": 3, "interval": 3, "delay": 48,
               "bossHpFactor": 50, "bossVariantPattern": ["gold"] } ],
           /* ===== 第 6 波：原大乱斗 +【追加 6 批】大乱斗 +【再追加 4 批水晶史莱姆】
+             +【新增 4 批】自爆泥怪（每批 3 只，delay 8 / 20 / 32 / 44）
              + 8 只金史莱姆 Boss（上下各 4）===== */
           [ { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 0 },
             { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 2 },
@@ -2107,9 +2117,14 @@ window.TD_CONFIG = {
             { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 47 },
             { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 50 },
             { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 53 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 8 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 20 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 32 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 44 },
             { "type": "enemyBoss", "count": 4, "interval": 3, "delay": 48,
               "bossHpFactor": 60, "bossVariantPattern": ["gold"] } ],
           /* ===== 第 7 波：原精英+快兵 +【追加 7 批】+【再追加 5 批水晶史莱姆】
+             +【新增 5 批】自爆泥怪（每批 3 只，delay 8 / 21 / 34 / 47 / 60）
              + 8 只金史莱姆 Boss（上下各 4）===== */
           [ { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 0,
               "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
@@ -2137,11 +2152,17 @@ window.TD_CONFIG = {
             { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 53 },
             { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 57 },
             { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 61 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 8 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 21 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 34 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 47 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 60 },
             { "type": "enemyBoss", "count": 4, "interval": 3, "delay": 70,
               "bossHpFactor": 80, "bossVariantPattern": ["gold"] } ],
           /* ===== 第 8 波：原护卫 +【追加 8 批】护卫 +【再追加 5 批水晶史莱姆】
+             +【新增 5 批】自爆泥怪（每批 3 只，delay 8 / 21 / 34 / 47 / 60）
              + 8 只金史莱姆 Boss（上下各 4）
-             + 2 只熔岩巨兽（上下各 1，使用灰史莱姆 Boss 贴图；
+             + 4 只熔岩巨兽（上下各 2，使用灰史莱姆 Boss 贴图；
                血量盾每 5s 刷新 / 岩浆爆发沉默 / 20% 血分裂 3 只特殊水晶史莱姆
                / 全灭后聚合回 50% 血，见 lavaBoss.phases）===== */
           [ { "type": "enemyX", "count": 6,  "interval": 0.70, "delay": 0 },
@@ -2158,9 +2179,14 @@ window.TD_CONFIG = {
             { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 52 },
             { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 56 },
             { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 60 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 8 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 21 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 34 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 47 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 60 },
             { "type": "enemyBoss", "count": 4, "interval": 3, "delay": 48,
               "bossHpFactor": 100, "bossVariantPattern": ["gold"] },
-            { "type": "lavaBoss", "count": 1, "interval": 0, "delay": 64,
+            { "type": "lavaBoss", "count": 2, "interval": 4, "delay": 64,
               "bossHpFactor": 30, "bossTex": "boss_gray" } ]
         ]
       }

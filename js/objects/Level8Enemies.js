@@ -307,18 +307,12 @@
       if (this.reactionCount >= this._brk.need) this._triggerBreak();
     }
 
-    /* 触发破防：减伤立刻降为 reduced，持续 duration 秒；冰晶碎裂特效 + 提示 */
+    /* 触发破防：减伤立刻降为 reduced，持续 duration 秒；冰晶碎裂特效（无文字提示） */
     _triggerBreak() {
       this.breakTimer = this._brk.duration;
       this.dmgReduction = this._brk.reduced;      // 当帧立即生效，不等下一帧
       this._breakFx();
       this._showBreakMark(true);
-      if (this.scene && typeof this.scene.floatText === 'function') {
-        this.scene.floatText(this.x, this.y - this.radius - 30, '破防！减伤 80%→30%', 0x9fdcff);
-      }
-      if (this.scene && typeof this.scene.banner === 'function') {
-        this.scene.banner('水晶史莱姆破防！5 秒输出窗口', 0x9fdcff);
-      }
     }
 
     /* 破防特效：冰晶碎裂/爆散 —— 双层扩散冰环 + 12 片冰晶碎片 + 中心白闪 */
@@ -379,18 +373,28 @@
       });
     }
 
-    /* 破防期间身上的脉动冰环（提示这是 5 秒输出窗口） */
+    /* 破防期间：只在【头顶】画一个脉动的小图标提示 5 秒输出窗口，
+       绝不在史莱姆本体上叠加任何覆盖层 —— 原来的描边冰环正好与本体轮廓
+       重合（半径≈本体），会把视频贴图"框"成一颗蓝色圆圈，看起来像贴图丢失。
+       破防期本体保持原视频/贴图动画不变。 */
     _showBreakMark(on) {
       if (on) {
         if (this._breakGfx || !this.scene) return;
         const g = this.scene.add.graphics();
-        const r = this.radius + 6;
-        g.lineStyle(2.5, 0x9fdcff, 0.95).strokeCircle(0, 0, r);
-        g.lineStyle(1.2, 0xffffff, 0.7).strokeCircle(0, 0, r + 3);
+        const y0 = -this.radius - 26;   // 头顶（避让本体，与元素印记同高度区）
+        const R = 7;                    // 小图标半径
+        g.fillStyle(0x9fdcff, 0.92).fillCircle(0, y0, R);
+        g.lineStyle(1.6, 0xffffff, 0.95).strokeCircle(0, y0, R);
+        /* 白色裂痕（“破防”符号） */
+        g.beginPath();
+        g.moveTo(-2.8, y0 - 3.4);
+        g.lineTo(0.6, y0 - 0.4);
+        g.lineTo(-1.0, y0 + 3.2);
+        g.strokePath();
         this.add(g);
         this._breakGfx = g;
         this._breakTween = this.scene.tweens.add({
-          targets: g, alpha: 0.35, duration: 380, yoyo: true, repeat: -1
+          targets: g, alpha: 0.4, duration: 380, yoyo: true, repeat: -1
         });
       } else if (this._breakGfx) {
         if (this._breakTween) { try { this._breakTween.stop(); } catch (_) {} this._breakTween = null; }
@@ -595,7 +599,7 @@
       this.magmaTimer = this._ph.magmaInterval;   // 首圈满 5s 后第一次爆发
       this.__splitting = false;         // 分裂流程防重入
       this.__noSplit = false;           // 聚合体标记：不再二次分裂
-      /* 岩盾配色覆写（实例级）：熔岩橙光环 + 「岩盾击破！」专属文案 */
+      /* 岩盾配色覆写（实例级）：熔岩橙光环（破盾提示改为纯特效，不再弹文字） */
       this.shieldColor = function () { return 0xff8c3a; };
       /* 开局即拥有血量盾（盾不破本体不受伤害） */
       this.applyShield({ type: 'hp', hp: this._ph.shieldHp });
@@ -615,9 +619,6 @@
           this.refreshShieldView();
         } else if (!this.shield) {
           this.applyShield({ type: 'hp', hp: this._ph.shieldHp });
-          if (typeof this.scene.floatText === 'function') {
-            this.scene.floatText(this.x, this.y - this.radius - 42, '岩盾凝聚！', 0xffb27a);
-          }
         }
       }
 
@@ -663,17 +664,12 @@
       const GRAY_MID = 0x70757a;    // 深灰：冲击环 / 全屏罩闪
       const GRAY_LIGHT = 0xdfe3e6;  // 浅灰：内芯高光 / 文字
 
-      /* 沉默：半径内所有防御塔 2 秒内无法攻击 */
-      let hit = 0;
+      /* 沉默：半径内所有防御塔 2 秒内无法攻击（状态由塔身灰化/特效体现，不弹文字） */
       const towers = s.towers || [];
       for (const tw of towers) {
         if (!tw || tw.removed) continue;
         if (Phaser.Math.Distance.Between(this.x, this.y, tw.x, tw.y) <= R) {
           s.silenceTower(tw, this._ph.magmaSilence);
-          hit++;
-          if (typeof s.floatText === 'function') {
-            s.floatText(tw.x, tw.y - 36, '沉默', GRAY_LIGHT);
-          }
         }
       }
       /* 以 BOSS 为中心的灰色冲击环 */
@@ -694,23 +690,12 @@
         targets: veil, alpha: 0, duration: 420,
         onComplete: () => { try { veil.destroy(); } catch (_) {} }
       });
-      if (typeof s.floatText === 'function') {
-        s.floatText(this.x, this.y - this.radius - 46, '岩浆爆发！', GRAY_LIGHT);
-      }
-      if (hit > 0 && typeof s.banner === 'function') {
-        s.banner('岩浆爆发！防御塔被沉默 ' + this._ph.magmaSilence + ' 秒', 0x9aa0a6);
-      }
     }
 
     /* 阶段二：移速 +50%（跟班已移除 —— 不再召唤任何自爆泥怪） */
     enterPhase2() {
       this.lvPhase = 2;
       this.baseSpeed *= this._ph.p2SpeedMul;
-      const s = this.scene;
-      if (typeof s.banner === 'function') s.banner('熔岩巨兽进入狂暴阶段！', 0xff7a3c);
-      if (typeof s.floatText === 'function') {
-        s.floatText(this.x, this.y - this.radius - 44, '移速 +50%', 0xff7a3c);
-      }
     }
 
     /* 阶段三：移速再 +30%（火焰路径技能已移除：BOSS 只做普通移动，
@@ -718,20 +703,12 @@
     enterPhase3() {
       this.lvPhase = 3;
       this.baseSpeed *= this._ph.p3SpeedMul;
-      const s = this.scene;
-      if (typeof s.banner === 'function') s.banner('熔岩巨兽加速冲锋！', 0xff7a3c);
-      if (typeof s.floatText === 'function') {
-        s.floatText(this.x, this.y - this.radius - 44, '移速再 +30%', 0xff7a3c);
-      }
     }
 
-    /* 破盾文案专属化：岩盾击破（熔岩橙爆裂），其余同基类流程 */
+    /* 破盾：熔岩橙爆裂扩散特效（提示由特效体现，不弹文字） */
     breakShield() {
       const s = this.shield;
       if (!s) return;
-      if (this.scene && typeof this.scene.floatText === 'function') {
-        this.scene.floatText(this.x, this.y - this.radius - 34, '岩盾击破！', 0xffb27a);
-      }
       if (this.scene && typeof this.scene.makePortalBurst === 'function') {
         this.scene.makePortalBurst(this.x, this.y, 0xff8c3a);
       }
@@ -808,9 +785,6 @@
         targets: veil, alpha: 0, duration: 550,
         onComplete: () => { try { veil.destroy(); } catch (_) {} }
       });
-      if (typeof s.floatText === 'function') {
-        s.floatText(this.x, this.y - 44, '风蚀增伤 +20%！', 0xbfeaff);
-      }
     }
   }
 

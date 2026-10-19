@@ -39,12 +39,6 @@
     }
   }
 
-  function floatText(scene, x, y, text, color) {
-    if (scene && typeof scene.floatText === 'function') {
-      scene.floatText(x, y, text, color);
-    }
-  }
-
   /** 判断是否 BOSS（大 BOSS / 小 BOSS），眩晕类状态对其免疫 */
   function isBoss(e) {
     return !!(e && ((e.cfg && e.cfg.boss) || e.bossMini));
@@ -193,7 +187,6 @@
       const fresh = !(st.burn && st.burn.timer > 0);
       if (fresh) {
         st.burn = { timer: cfg.duration, acc: 0, pct: cfg.hpPerSecPct, minDamage: cfg.minDamage, element: 'fire' };
-        floatText(this.scene, e.x, e.y - e.radius - 14, '灼烧', 0xff9a4d);
       } else {
         st.burn.timer = cfg.duration; // 多座火塔命中：只刷新持续时间
       }
@@ -212,7 +205,6 @@
       if (st.cold.stacks < cfg.stacksToTrigger) return;
       st.cold.stacks = 0; // 触发即清空，可被多座冰塔快速回充
       st.coldState = { timer: cfg.duration, acc: 0, pct: cfg.hpPerSecPct, minDamage: 1, element: 'ice' };
-      floatText(this.scene, e.x, e.y - e.radius - 14, '寒冷', 0x9fd8ff);
       duckApplyStatus(e, 'chill', {
         duration: cfg.duration, hpPerSecPct: cfg.hpPerSecPct,
         defReduce: cfg.defReduce, element: 'ice'
@@ -233,9 +225,6 @@
         stacks: st.wet.length, perStackAmp: cfg.perStackAmp,
         excludeElement: cfg.excludeElement, stackDuration: cfg.duration
       });
-      if (st.wet.length === cfg.maxStacks) {
-        floatText(this.scene, e.x, e.y - e.radius - 14, '潮湿满层', 0x35e0d0);
-      }
     }
 
     /** 雷塔4：单次链击命中后的麻痹判定 + 麻痹值叠层（cfg: chance/duration/maxStacks/stackDuration/defReducePerStack/hpPerSecPctPerStack） */
@@ -256,7 +245,6 @@
       const p = st.para = st.para || { timers: [], acc: 0, pct: cfg.hpPerSecPctPerStack, def: cfg.defReducePerStack, dur: cfg.stackDuration };
       if (p.timers.length >= cfg.maxStacks) return;
       p.timers.push(cfg.stackDuration);
-      floatText(this.scene, e.x, e.y - e.radius - 14, '麻痹×' + p.timers.length, 0xffe23b);
       duckApplyStatus(e, 'paralysisStack', {
         stacks: p.timers.length,
         perStackDefReduce: cfg.defReducePerStack,
@@ -273,7 +261,6 @@
       if (e.freezeTimer > 0) return; // 冰冻中不重复定身，避免视觉/判定冲突
       const handled = duckApplyStatus(e, 'stun', { duration: cfg.duration });
       if (!handled && typeof e.applySlow === 'function') e.applySlow(0, cfg.duration, null, true);
-      floatText(this.scene, e.x, e.y - e.radius - 14, '眩晕', 0xd9b3ff);
     }
 
     /** 风塔4：命中时尝试全屏风蚀增伤（10 秒共享冷却；不叠加=重复施加刷新时长） */
@@ -336,11 +323,9 @@
         mgr.applyWet(this.target, lv4.wet);
       }
 
-      /* 风塔4：飓风眼 —— 命中即尝试全屏风蚀增伤（共享 10 秒冷却） */
+      /* 风塔4：飓风眼 —— 命中即尝试全屏风蚀增伤（共享 10 秒冷却，状态由特效体现） */
       if (t.isWind && lv4.aero && !vsObstacle) {
-        if (mgr.tryWindAero(lv4.aero)) {
-          floatText(scene, t.x, t.y - 46, '飓风眼！', 0x8fffc0);
-        }
+        mgr.tryWindAero(lv4.aero);
       }
     };
 
