@@ -15,10 +15,11 @@
   'use strict';
 
   const KEY = 'td_levels_progress_v1';
-  const TOTAL_LEVELS = 8;
-  /* 当前已设计完成的关卡数：第 1～8 关可游玩（第 8 关=风蚀荒原·熔岩巨兽）。
-     第 1～8 关全部开放自由进入（见 isUnlocked）。 */
-  const TOTAL_DESIGNED = 8;
+  const TOTAL_LEVELS = 9;
+  /* 当前已设计完成的关卡数：第 1～9 关可游玩（第 8 关=风蚀荒原·熔岩巨兽，
+     第 9 关=元素狂暴图腾·蓝色圣殿守卫）。第 1～8 关全部开放自由进入；
+     第 9 关需通关第 8 关后解锁（见 isUnlocked）。 */
+  const TOTAL_DESIGNED = 9;
 
   const storage = {
     /**
@@ -81,13 +82,15 @@
       this.refreshTowerUnlocks();
     },
 
-    /** 某关是否可进入：第 1~8 关全部开放、自由进入，不依赖上一关
-     *  是否通关；未设计关卡恒不可进入（敬请期待）。
+    /** 某关是否可进入：第 1~8 关全部开放、自由进入，不依赖上一关是否通关；
+     *  第 9 关（元素狂暴图腾）需通关第 8 关后解锁；
+     *  未设计关卡恒不可进入（敬请期待）。
      *  通关进度 completed 仍正常记录并用于塔解锁。 */
     isUnlocked(level) {
       if (level < 1 || level > TOTAL_LEVELS) return false;
       if (this.__debugAllUnlocked) return true; // 调试态：全关卡放行（不落盘）
       if (level > TOTAL_DESIGNED) return false; // 未设计关卡：敬请期待，不可进入
+      if (level === 9) return this.isCompleted(8); // 第 9 关：通关第 8 关自动解锁
       return true; // 已设计关卡（第 1~8 关）全部开放
     },
 

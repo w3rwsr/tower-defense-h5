@@ -1056,6 +1056,68 @@ window.TD_CONFIG = {
         /* 聚合：分裂体全灭 → 聚合成 BOSS 并恢复该比例生命 */
         "mergeHealRatio": 0.5
       }
+    },
+
+    /* 蓝色圣殿守卫 —— 第 9 关「元素狂暴图腾」终极 BOSS（TempleGuard 子类实现）。
+       贴图统一：强制使用「蓝史莱姆 Boss」贴图（boss_blue，entry.bossTex，
+       与第 8 关熔岩巨兽强制灰贴图同一套机制），noVariant=true 不接金/蓝/灰
+       数值变体（移速/金币走本配置，血量仍 = 同波小怪 × bossHpFactor）。
+       机制（全部 JSON 驱动，见 guard 段）：
+         · 光环减伤：本体存活期间，全场【小怪】受击伤害 ×(1-auraReduce)，
+           多只守卫不叠加（取同一系数）；auraIncludeBoss 可让光环也罩住 BOSS。
+         · 血量盾：开局即有 5000 血「圣盾」，每 shieldInterval(5s) 刷新一次，
+           盾不破本体不掉血（复用 Enemy 既有 hp 盾结算）。
+         · 狂暴：血量降到 rageHpRatio(30%) 触发，吞噬周围 devourCount 只小怪
+           恢复 rageHealRatio(10%) 最大生命，并进入 rageInvuln(2s) 无敌。 */
+    "templeGuard": {
+      "name": "蓝色圣殿守卫",
+      "hp": 2480,           // 兜底占位（实际由 spawnEnemy 按波次公式覆盖）
+      "speed": 36,
+      "radius": 30,
+      "reward": 500,
+      "leakDamage": 3,
+      "color": 0x4aa8ff,
+      "darkColor": 0x2f6bb3,
+      "boss": true,
+      "noVariant": true,
+      "barThickness": 8,
+      "art": { "h": 78 },   // 显示高度 78（与金/蓝/灰 BOSS 一致，可见宽 ≤ 路宽）
+      /* 圣殿守卫机制参数（JSON 驱动，TempleGuard 读取） */
+      "guard": {
+        "shieldHp": 5000,          // 圣盾血量（开局即有，每 5s 刷新）
+        "shieldInterval": 5,       // 圣盾刷新周期（秒）
+        "auraReduce": 0.5,         // 光环减伤 50%（作用于小怪；多只不叠加）
+        "auraIncludeBoss": false,  // 光环是否也作用于 BOSS 本体（默认否，BOSS 自带圣盾）
+        "rageHpRatio": 0.30,       // 狂暴触发血线（30%）
+        "rageHealRatio": 0.10,     // 狂暴吞噬回血 = 最大生命的 10%
+        "rageInvuln": 2.0,         // 狂暴无敌时长（秒）
+        "devourRadius": 150,       // 吞噬半径（像素，以 BOSS 为圆心）
+        "devourCount": 4           // 最多吞噬的小怪数量
+      }
+    },
+
+    /* 元素盾绿史莱姆 —— 第 9 关新增特殊小怪（ElementShieldSlime 子类实现）。
+       外观：绿史莱姆贴图（slimeVideo green 段 / 静态降级 slime_static_green），
+             art.h 比普通快怪大 → 体型稍大；applyShield 自带的元素光环即「光圈」。
+       机制（全部 JSON 驱动）：出场即携带随机元素护盾（火/冰/水/雷），每 10 秒
+             切换成随机另一种元素；护盾期间免疫该元素的伤害与负面效果，必须用
+             其它元素打元素反应消耗盾值破盾；盾破后变回普通史莱姆（体型缩回、
+             不再挂盾）。 */
+    "shieldSlime": {
+      "name": "元素盾绿史莱姆",
+      "hp": 70,             // 基础血量（按波次 hpGrowth 复合成长）
+      "speed": 82,          // 中快（介于快怪 98 与慢怪 45 之间）
+      "radius": 17,
+      "reward": 22,
+      "leakDamage": 1,
+      "color": 0x6be26b,
+      "darkColor": 0x2e7d1c,
+      "art": { "h": 54, "superSample": 2 },   // 体型稍大于普通快怪（46）
+      /* 绿史莱姆贴图接管（与 enemyX 同段视频/静态贴图，观感一致） */
+      "slimeVideo": { "frame": "green", "hopHeight": 7 },
+      /* 元素护盾：切换周期 10s + 盾值（非免疫元素命中按反应 cost 消耗） */
+      "shieldSwitch": { "interval": 10, "value": 18 },
+      "shieldElements": ["fire", "ice", "water", "thunder"]
     }
   },
 
@@ -2215,6 +2277,326 @@ window.TD_CONFIG = {
               "bossHpFactor": 100, "bossVariantPattern": ["gold"] },
             { "type": "lavaBoss", "count": 2, "interval": 2.5, "delay": 66,
               "bossHpFactor": 30, "bossTex": "boss_gray" } ]
+        ]
+      }
+    },
+
+    /* ============================================================
+     * 第 9 关「元素狂暴图腾」——双螺旋交叉路线 · 四元素狂暴图腾 ·
+     *   蓝色圣殿守卫（蓝史莱姆 Boss 贴图 + 光环减伤 + 圣盾 + 30% 狂暴）
+     * ------------------------------------------------------------
+     * 地图：两条「双螺旋」路线（route 0/1）从左缘上下两个出怪口进入，
+     *   在中间反复交错（3 处真正的十字交叉 + 汇合），最后并入同一段
+     *   y=270 主路通向右侧唯一终点大门。交叉点（几何实测）：
+     *     route0 底线 × route1 竖线 → (300,430) / (740,430)
+     *     route0 顶线 × route1 竖线 → (520,110)
+     *   两路相错处道路同色叠加无痕，全 90° 直角、拐角圆角过渡。
+     *   长度差用 routeBonus.speedMul 补偿（两路同时出怪到达终点时间一致）。
+     * 元素狂暴图腾（JSON 驱动 totems，Level9Enemies.js 实现）：地图上 4 个
+     *   不可破坏的图腾（火/冰/水/雷），每 interval(15s) 随机选一个，给
+     *   【全屏小怪】附加对应元素的「元素护盾」（复用 Enemy 既有 element 值盾：
+     *   同元素伤害被免疫，必须用其他元素（水/冰等）打元素反应消耗盾值破盾）。
+     * BOSS：蓝色圣殿守卫（templeGuard，强制 boss_blue 蓝史莱姆 Boss 贴图）：
+     *   光环减伤 50%（存活期间全场小怪受击减半，多只不叠加）+ 5000 血圣盾
+     *   （每 5s 刷新）+ 30% 血线狂暴（吞噬周围 4 只小怪回 10% 血 + 2s 无敌）。
+     * 难度：8 波、hpGrowth=1.8（每波 +80%）、出怪量与波次节奏完全参照第 8 关
+     *   （逐组照搬第 8 关 list，仅把 BOSS 组换成 templeGuard）；清波奖励沿用
+     *   第 8 关；初始金币 1200。解锁条件：通关第 8 关后自动解锁（storage.js）。
+     * ============================================================ */
+    "9": {
+      "economy": { "startGold": 1200, "startLives": 20 },
+      "killRewardAdjust": 5,          // 小怪击杀金币对齐第 8 关（略高于前 7 关）
+      "upgradeWaveGate": 1,           // 开局即可升级 4 级塔
+      "allTowersAvailable": true,     // 元素护盾需全元素协同破盾 → 全部塔可选
+      "build": {
+        "cell": 52,
+        "roadGap": 56,
+        "minSpacing": 60,
+        "minPathDistance": 52,
+        /* 手工补点：左侧单行道两侧、向下延伸段两侧与新传送门周围、
+           右侧两条长岔路内外侧、汇合走廊两侧。
+           非法点（距路 <52 或与前点重复）会被 buildHotspots 自动剔除 */
+        "extraSpots": [
+          { "x": 60,  "y": 180 }, { "x": 240, "y": 180 }, { "x": 60,  "y": 320 },
+          { "x": 200, "y": 320 },                                                    // 左侧单行道两侧
+          { "x": 84,  "y": 300 }, { "x": 196, "y": 300 },                            // 向下延伸段两侧
+          { "x": 84,  "y": 390 }, { "x": 196, "y": 390 },                            // 向下延伸段两侧
+          { "x": 84,  "y": 470 }, { "x": 196, "y": 470 },                            // 新传送门（左下）周围
+          { "x": 440, "y": 130 }, { "x": 440, "y": 410 },                            // 两个出口传送门附近
+          { "x": 420, "y": 140 }, { "x": 420, "y": 400 },                            // 岔路外侧
+          { "x": 600, "y": 140 }, { "x": 600, "y": 400 },                            // 上/下岔路内弯
+          { "x": 740, "y": 140 }, { "x": 740, "y": 400 },                            // 岔路外侧
+          { "x": 600, "y": 270 }, { "x": 700, "y": 270 },                            // 两岔路之间
+          { "x": 860, "y": 180 }, { "x": 860, "y": 360 }                             // 汇合走廊两侧
+        ]
+      },
+      /* 默认折角渲染（与第 1~8 关一致）：粗线 + 拐角同色圆点 →
+         内角圆润、外角平滑过渡，不出现尖锐刺眼的直角 */
+      "path": {
+        "borderColor": 0xc99a54,
+        "fillColor": 0xeac58f,
+        "hideSpawnPortal": true    // 不画左侧出怪口绿色圆标：怪物直接从左侧道路边缘生成
+      },
+      /* ===== 第 9 关地图（v20261020f：左右长度重新配平 + 火力点常显）=====
+         route 0 / route 1：【完全相同的单行道】——视觉上只有一条路（左侧无出怪圆标）。
+         左侧单行道【保持出怪口不变，向下延伸】：出怪口仍为 (-40,110)，走到一半
+         （(300,250)→(140,250) 之后）继续向下方延伸一段纵向道路 (140,250)→(140,430)，
+         传送门入口因此从「中左侧」移到【左下方 (140,430)】；单行道全长 ≈820px。
+         route 2：下岔路【长】——出口传送门 (380,470) 起，走 3 次 S 型上下折返
+                  （470→340→470→回到中线 270），6 段直线、每段 130~200px，全长 ≈1006px；
+                  终点前汇合走廊 (800,270)→(926,270) 为 126px。
+         route 3：上岔路 —— 出口传送门 (380,70) 的镜像（70→200→70→回到中线）。
+         汇合点 (800,270)：两条岔路在此并成一条主路通向唯一终点大门。
+         拐角保持默认折角渲染（粗线 + 同色圆点）→ 圆润的 90° 直角，无锐角。
+         相邻折返排距均 ≥130px（≥ 塔位所需的 52×2）→ 每段路的两侧都能布置火力点。
+         火力点默认【隐藏不可见】：点选商店里的塔或点击草地空白处才高亮显示
+         （沿用全局既有逻辑，未做任何改动）。
+         出怪量/波次节奏/传送分流逻辑与上一版完全一致（spawnRoutes [0,1]）。 */
+      "paths": [
+        [
+          { "x": -40, "y": 110 },    // 出怪口（在左侧道路外沿 → 怪物从道路边缘生成）
+          { "x": 300, "y": 110 },    // ① 右（340）
+          { "x": 300, "y": 250 },    // ② 下（140）—— U 型弯
+          { "x": 140, "y": 250 },    // ③ 左（160）—— 「走到一半」的位置
+          { "x": 140, "y": 430 }     // ④ 向下延伸（180）= 末端 = 传送门入口（左下方）
+        ],
+        [
+          { "x": -40, "y": 110 },    // 与 route 0 完全相同的单行道（叠加渲染，视觉上一条路）
+          { "x": 300, "y": 110 },
+          { "x": 300, "y": 250 },
+          { "x": 140, "y": 250 },
+          { "x": 140, "y": 430 }     // 同一个传送门入口
+        ],
+        [
+          { "x": 380, "y": 470 },    // 下岔：出口传送门
+          { "x": 520, "y": 470 },    // ① 右（140）
+          { "x": 520, "y": 340 },    // ② 上（130）
+          { "x": 660, "y": 340 },    // ③ 右（140）—— S 型折返 1
+          { "x": 660, "y": 470 },    // ④ 下（130）
+          { "x": 800, "y": 470 },    // ⑤ 右（140）—— S 型折返 2
+          { "x": 800, "y": 270 },    // ⑥ 回到中线（200）→ 汇合点
+          { "x": 1000, "y": 270 }    // 共用主路通向右侧唯一终点大门（钳制在 926,270）
+        ],
+        [
+          { "x": 380, "y": 70 },     // 上岔：出口传送门（关于 y=270 镜像）
+          { "x": 520, "y": 70 },
+          { "x": 520, "y": 200 },
+          { "x": 660, "y": 200 },
+          { "x": 660, "y": 70 },
+          { "x": 800, "y": 70 },
+          { "x": 800, "y": 270 },    // 同一个汇合点
+          { "x": 1000, "y": 270 }    // 共用同一终点大门
+        ]
+      ],
+      /* 传送门（沿用第 4 关的成熟机制，JSON 驱动）：
+         a=入口（route 0/1 的向下延伸段末端 (140,430)，同一坐标 → 视觉只画一个入口传送门）
+         b=出口（下岔 / 上岔的起点 (380,470)/(380,70)，各画一个发光旋转传送门） */
+      "portals": {
+        "invulnTime": 0.5,
+        "pairs": [
+          { "id": "l9dn", "direction": "oneway",
+            "a": { "route": 0, "waypoint": 4 }, "b": { "route": 2, "waypoint": 0 } },
+          { "id": "l9up", "direction": "oneway",
+            "a": { "route": 1, "waypoint": 4 }, "b": { "route": 3, "waypoint": 0 } }
+        ]
+      },
+      /* 童话草地装饰（仅本关）：已按要求去除所有水池/水面，只保留灌木/花丛/小树 */
+      "decor": {
+        "extra": 26
+      },
+
+      /* 两条岔路共用同一终点：任一路漏怪扣同一条命（route 0/1 是单行道，
+         怪物在末端被传送走、不会走到路的尽头，因此不列入 goals） */
+      "goals": [
+        { "route": 2 },
+        { "route": 3 }
+      ],
+      "waves": {
+        "intermission": 20,
+        "spawnRoutes": [0, 1],       // 两条单行道同坐标叠加 → 视觉上仍是单一出怪口 + 单条直道（出怪量不变）
+        "hpGrowth": 1.8,             // 每波小怪血量 +80%（复合）
+        "finalWaveSpecial": false,   // 末波不额外翻倍，严格 1.8 复合成长
+        "finalBossHpFactor": 30,     // 兜底（每波 BOSS 由 per-group bossHpFactor 显式驱动）
+        "clearBonus": [150, 260, 400, 560, 760, 1000, 1300, 2000],
+        "bossVariantHpMul": false,   // BOSS 血量严格「小怪血 × bossFactor」，不吃变体微调
+        /* 两路长度完全相等（各 1142px，见 paths 注释）→ 无需速度补偿，
+           不再配置 routeBonus（避免给等长两路引入人工速度差） */
+        /* 波次节奏与出怪量完全参照第 8 关（逐组照搬，总量不变），仅做两处替换：
+           ① BOSS 组替换为蓝色圣殿守卫 templeGuard（bossHpFactor 沿用第 8 关，
+              强制 boss_blue 贴图）；② 从第 2 波起每波把一批普通小怪替换为
+              【元素盾绿史莱姆】shieldSlime（第 2 波 4 只 / 第 3、4、6、8 波各 3 只 /
+              第 5 波 5+5=10 只 / 第 7 波 3×4=12 只，第 5、7 波大量出现） */
+        "list": [
+          /* ===== 第 1 波（照搬第 8 关）：每路 5 + 5 = 10 只（无元素盾怪）===== */
+          [ { "type": "enemyX", "count": 5,  "interval": 0.85, "delay": 0 },
+            { "type": "enemyX", "count": 5,  "interval": 0.85, "delay": 5 } ],
+          /* ===== 第 2 波（照搬第 8 关出怪量：每路仍 27 只）：
+             第三批 9 只快怪拆成「元素盾绿史莱姆 4 + 快怪 5」===== */
+          [ { "type": "enemyX", "count": 9,  "interval": 0.60, "delay": 0 },
+            { "type": "enemyX", "count": 9,  "interval": 0.60, "delay": 6 },
+            { "type": "shieldSlime", "count": 4, "interval": 0.90, "delay": 12 },
+            { "type": "enemyX", "count": 5,  "interval": 0.60, "delay": 12 } ],
+          /* ===== 第 3 波（照搬第 8 关，BOSS = 2 只蓝守卫 ×30 血）：
+             一批水晶史莱姆（delay 12）替换为 3 只元素盾绿史莱姆 ===== */
+          [ { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 0 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 4 },
+            { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 8 },
+            { "type": "shieldSlime", "count": 3, "interval": 1.00, "delay": 12 },
+            { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 16 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.55, "delay": 24 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 28 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 30 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 18 },
+            { "type": "templeGuard", "count": 2, "interval": 4, "delay": 32,
+              "bossHpFactor": 30, "bossTex": "boss_blue" } ],
+          /* ===== 第 4 波（照搬第 8 关，BOSS = 2 只蓝守卫 ×40 血）：
+             一批自爆泥怪（delay 13）替换为 3 只元素盾绿史莱姆 ===== */
+          [ { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 0 },
+            { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 3 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 7 },
+            { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 10 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 14 },
+            { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 17 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 21 },
+            { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 24 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 28 },
+            { "type": "bomberSlime", "count": 5, "interval": 0.80, "delay": 31 },
+            { "type": "crystalSlime", "count": 4, "interval": 1.10, "delay": 34 },
+            { "type": "crystalSlime", "count": 4, "interval": 1.10, "delay": 38 },
+            { "type": "shieldSlime", "count": 3, "interval": 1.00, "delay": 13 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 27 },
+            { "type": "templeGuard", "count": 2, "interval": 4, "delay": 36,
+              "bossHpFactor": 40, "bossTex": "boss_blue" } ],
+          /* ===== 第 5 波（照搬第 8 关，BOSS = 3 只蓝守卫 ×50 血）：
+             两批水晶史莱姆（delay 16 / 45）各替换为 5 只元素盾绿史莱姆
+             → 本波共 10 只，大量出现 ===== */
+          [ { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 0 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 2 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 8 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 10 },
+            { "type": "shieldSlime", "count": 5, "interval": 0.90, "delay": 16 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 18 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 24 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 26 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 32 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 34 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 40 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 42 },
+            { "type": "shieldSlime", "count": 5, "interval": 0.90, "delay": 45 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 48 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 51 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 13 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 27 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 41 },
+            { "type": "templeGuard", "count": 3, "interval": 3, "delay": 48,
+              "bossHpFactor": 50, "bossTex": "boss_blue" } ],
+          /* ===== 第 6 波（照搬第 8 关，BOSS = 4 只蓝守卫 ×60 血）：
+             一批自爆泥怪（delay 8）替换为 3 只元素盾绿史莱姆 ===== */
+          [ { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 0 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 2 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 5 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 7 },
+            { "type": "shieldSlime", "count": 3, "interval": 1.00, "delay": 8 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 10 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 12 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 15 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 17 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 20 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 22 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 25 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 27 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 30 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 32 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 35 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 37 },
+            { "type": "enemyX", "count": 10, "interval": 0.42, "delay": 40 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 42 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 44 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 47 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 50 },
+            { "type": "crystalSlime", "count": 5, "interval": 1.10, "delay": 53 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 20 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 32 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 44 },
+            { "type": "templeGuard", "count": 4, "interval": 3, "delay": 48,
+              "bossHpFactor": 60, "bossTex": "boss_blue" } ],
+          /* ===== 第 7 波（照搬第 8 关，BOSS = 4 只蓝守卫 ×80 血）：
+             4 批水晶史莱姆（delay 45/49/53/57）替换为 3 只元素盾绿史莱姆
+             → 本波共 12 只，大量出现 ===== */
+          [ { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 0,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 2 },
+            { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 10,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 12 },
+            { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 20,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 22 },
+            { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 30,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 32 },
+            { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 40,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 42 },
+            { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 50,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 52 },
+            { "type": "enemyX", "count": 4,  "interval": 1.60, "delay": 60,
+              "elite": true, "eliteHpMul": 4, "eliteScale": 1.4, "eliteGoldBonus": 20 },
+            { "type": "enemyX", "count": 8,  "interval": 0.50, "delay": 62 },
+            { "type": "shieldSlime", "count": 3, "interval": 1.00, "delay": 45 },
+            { "type": "shieldSlime", "count": 3, "interval": 1.00, "delay": 49 },
+            { "type": "shieldSlime", "count": 3, "interval": 1.00, "delay": 53 },
+            { "type": "shieldSlime", "count": 3, "interval": 1.00, "delay": 57 },
+            { "type": "crystalSlime", "count": 3, "interval": 1.40, "delay": 61 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 8 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 21 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 34 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 47 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.70, "delay": 60 },
+            { "type": "templeGuard", "count": 4, "interval": 3, "delay": 70,
+              "bossHpFactor": 80, "bossTex": "boss_blue" } ],
+
+          /* ===== 第 8 波（终极波，照搬第 8 关出怪量与节奏，总量不变）：
+             一批自爆泥怪（delay 40）替换为 3 只元素盾绿史莱姆；
+             4 只蓝守卫 ×100 血 + 2 只蓝守卫 ×30 血（替代第 8 关的金 BOSS + 熔岩巨兽）===== */
+          [ { "type": "enemyX", "count": 6,  "interval": 0.50, "delay": 0 },
+            { "type": "enemyX", "count": 6,  "interval": 0.50, "delay": 4 },
+            { "type": "enemyX", "count": 6,  "interval": 0.50, "delay": 8 },
+            { "type": "enemyX", "count": 6,  "interval": 0.50, "delay": 12 },
+            { "type": "enemyX", "count": 6,  "interval": 0.50, "delay": 16 },
+            { "type": "enemyX", "count": 6,  "interval": 0.50, "delay": 20 },
+            { "type": "enemyX", "count": 6,  "interval": 0.50, "delay": 24 },
+            { "type": "enemyX", "count": 6,  "interval": 0.50, "delay": 28 },
+            { "type": "enemyX", "count": 6,  "interval": 0.50, "delay": 32 },
+            { "type": "enemyX", "count": 6,  "interval": 0.50, "delay": 2 },
+            { "type": "enemyX", "count": 6,  "interval": 0.50, "delay": 18 },
+            { "type": "enemyX", "count": 6,  "interval": 0.50, "delay": 34 },
+            { "type": "enemyY", "count": 5,  "interval": 0.80, "delay": 6 },
+            { "type": "enemyY", "count": 5,  "interval": 0.80, "delay": 15 },
+            { "type": "enemyY", "count": 5,  "interval": 0.80, "delay": 27 },
+            { "type": "enemyY", "count": 5,  "interval": 0.80, "delay": 39 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 36 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 42 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 48 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 54 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 60 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 33 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 45 },
+            { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 57 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 8 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 21 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 34 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 47 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 60 },
+            { "type": "bomberSlime", "count": 3, "interval": 0.50, "delay": 14 },
+            { "type": "shieldSlime", "count": 3, "interval": 1.00, "delay": 40 },
+            /* —— BOSS：4 只蓝守卫（×100）+ 2 只蓝守卫（×30），全部蓝史莱姆 Boss 贴图 —— */
+            { "type": "templeGuard", "count": 4, "interval": 2, "delay": 52,
+              "bossHpFactor": 100, "bossTex": "boss_blue" },
+            { "type": "templeGuard", "count": 2, "interval": 2.5, "delay": 66,
+              "bossHpFactor": 30, "bossTex": "boss_blue" } ]
         ]
       }
     }

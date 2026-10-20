@@ -181,6 +181,20 @@ class GameScene extends Phaser.Scene {
     if (this.levelCfg.windEyes && typeof Level8Controller !== 'undefined') {
       this.level8 = new Level8Controller(this);
     }
+
+    /* 第 9 关「元素狂暴图腾 / 8 字双交叉」：蓝色圣殿守卫（光环减伤 / 圣盾 /
+       狂暴）+ 元素盾绿史莱姆。仅当本关出怪表含这两种专属怪时创建控制器
+       （同时预生成第 8 关小怪代码贴图，保证照搬第 8 关波次的出怪贴图正常）。
+       注：原「元素狂暴图腾」机制已移除，不再依赖 levelCfg.totems。 */
+    const usesLevel9 = (function () {
+      try {
+        const s = JSON.stringify(this.levelCfg.waves || {});
+        return s.indexOf('templeGuard') >= 0 || s.indexOf('shieldSlime') >= 0;
+      } catch (e) { return false; }
+    }).call(this);
+    if (usesLevel9 && typeof Level9Controller !== 'undefined') {
+      this.level9 = new Level9Controller(this);
+    }
   }
 
   /* ============================================================
@@ -194,8 +208,16 @@ class GameScene extends Phaser.Scene {
    * ============================================================ */
   _deferredLevelMedia() {
     const hasBoss = (function () {
-      try { return JSON.stringify(this.levelCfg.waves).indexOf('enemyBoss') >= 0; }
-      catch (e) { return false; }
+      try {
+        const list = (this.levelCfg.waves && this.levelCfg.waves.list) || [];
+        for (const grp of list) {
+          for (const en of (grp || [])) {
+            const ec = en && en.type && TD_CONFIG.enemies[en.type];
+            if (ec && ec.boss) return true;   // 按敌人配置的 boss 标记判定（含 templeGuard/lavaBoss 等非 enemyBoss 类型）
+          }
+        }
+        return false;
+      } catch (e) { return false; }
     }).call(this);
     const bossKeys = hasBoss ? this._bossKeysInLevel() : [];
     const windUsable = (function () {
@@ -286,6 +308,12 @@ class GameScene extends Phaser.Scene {
         if (!entry || !entry.type) return;
         const ec = (TD_CONFIG.enemies && TD_CONFIG.enemies[entry.type]) || null;
         if (!ec || !ec.boss) return;
+        /* noVariant 专属 BOSS（第 8 关熔岩巨兽灰贴图 / 第 9 关圣殿守卫蓝贴图）：
+           贴图由 entry.bossTex 显式覆盖，按其解析变体 key（与 spawnEnemy 口径一致） */
+        if (ec.noVariant) {
+          if (entry.bossTex) add(String(entry.bossTex).replace('boss_', ''));
+          return;
+        }
         const pattern = entry.bossVariantPattern;
         if (pattern && pattern.length) {
           const n = Math.max(1, entry.count || 1);
@@ -298,6 +326,64 @@ class GameScene extends Phaser.Scene {
       });
     });
     return out;
+  }
+
+  /* ============================================================
+   * 【平滑拐角】把折线路径的每个内部拐角替换成一段真正的圆弧。
+   * 仅由 levelCfg.path.smooth=true 触发（当前只有第 9 关），第 1~8 关不调用。
+   * 做法：在每个拐角点 B 处，沿两侧边各后退 R（R = min(smoothRadius, 短边/2)）
+   * 得到切点 P1/P2，再用【二次贝塞尔（控制点 = B）】在 P1→P2 之间插入
+   * 4 个中间点 → 折线在拐角处贴合一条平滑曲线；配合 drawPath 的
+   * 「粗线 + 同色拐角圆点」，渲染出来就是圆润的曲线（无直角、无尖角）。
+   * 首/末路径点不参与（出怪口与终点大门位置精确不变）；
+   * 敌人的寻路（pathPointAt）与火力点生成（buildHotspots）都基于同一份
+   * 平滑后的路径点，因此「画的曲线」与「怪物走的路线」完全一致。
+   * ============================================================ */
+  roundPathCorners(wp, R0) {
+    if (!wp || wp.length < 3) return wp;
+    const out = [wp[0]];
+    const N = 4;
+    for (let i = 1; i < wp.length - 1; i++) {
+      const a = wp[i - 1], b = wp[i], c = wp[i + 1];
+      const v1x = a.x - b.x, v1y = a.y - b.y;
+      const v2x = c.x - b.x, v2y = c.y - b.y;
+      const l1 = Math.sqrt(v1x * v1x + v1y * v1y);
+      const l2 = Math.sqrt(v2x * v2x + v2y * v2y);
+      if (l1 < 1e-6 || l2 < 1e-6) { out.push({ x: b.x, y: b.y }); continue; }
+      const u1x = v1x / l1, u1y = v1y / l1;
+      const u2x = v2x / l2, u2y = v2y / l2;
+      const cross = u1x * u2y - u1y * u2x;
+      const dot = u1x * u2x + u1y * u2y;
+      /* 共线（无拐角：继续直行或原路折返）→ 原样保留该点 */
+      if (dot <= -0.999 || dot >= 0.999 || Math.abs(cross) < 1e-6) {
+        out.push({ x: b.x, y: b.y });
+        continue;
+      }
+      /* 圆弧半径：不超过 R0，且两侧各留 ≥10px 直线段（避免相邻两个拐角的
+         圆弧端点重合产生零长线段 / 尖点） */
+      const R = Math.max(10, Math.min(R0, l1 / 2 - 10, l2 / 2 - 10));
+      const t1 = R / l1, t2 = R / l2;
+      const p1 = { x: b.x + u1x * l1 * t1, y: b.y + u1y * l1 * t1 };
+      const p2 = { x: b.x + u2x * l2 * t2, y: b.y + u2y * l2 * t2 };
+      out.push(p1);
+      for (let k = 1; k < N; k++) {
+        const t = k / N;
+        const it = 1 - t;
+        out.push({
+          x: it * it * p1.x + 2 * it * t * b.x + t * t * p2.x,
+          y: it * it * p1.y + 2 * it * t * b.y + t * t * p2.y
+        });
+      }
+      out.push(p2);
+    }
+    out.push(wp[wp.length - 1]);
+    /* 兜底：合并重合点（避免零长线段 → 寻路方向 NaN → 怪物在拐角卡住） */
+    const res = [out[0]];
+    for (let i = 1; i < out.length; i++) {
+      const p = out[i], q = res[res.length - 1];
+      if (Math.abs(p.x - q.x) > 0.8 || Math.abs(p.y - q.y) > 0.8) res.push(p);
+    }
+    return res;
   }
 
   /* ============================================================
@@ -319,7 +405,7 @@ class GameScene extends Phaser.Scene {
     const m = 34;
     this.routeGeoms = routeWpLists.map((rawWp) => {
       /* 复制路径点，避免直接改动关卡配置里的原数组 */
-      const wp = rawWp.map((w) => ({ x: w.x, y: w.y }));
+      let wp = rawWp.map((w) => ({ x: w.x, y: w.y }));
       const n = wp.length;
       if (n >= 2) {
         const q = wp[n - 2], p = wp[n - 1];
@@ -337,6 +423,16 @@ class GameScene extends Phaser.Scene {
             p.x = cx; p.y = cy;
           }
         }
+      }
+      /* 【平滑拐角】仅当 levelCfg.path.smooth=true（当前只有第 9 关）：
+         把每个内部路径点替换成一段真正的圆弧（二次贝塞尔，控制点=拐角点），
+         道路在拐角处呈现圆润曲线，而不是「直角 + 同色圆点遮盖」。
+         首/末路径点保持不动（出怪口与大门门扇位置精确不变）。
+         默认关闭 → 第 1~8 关的路径点、线段、道路渲染、火力点生成零变化。 */
+      if (this.levelCfg.path && this.levelCfg.path.smooth) {
+        const R0 = (this.levelCfg.path.smoothRadius != null)
+          ? this.levelCfg.path.smoothRadius : 40;
+        wp = this.roundPathCorners(wp, R0);
       }
       const segments = [];
       let totalLength = 0;
@@ -641,32 +737,66 @@ class GameScene extends Phaser.Scene {
        实现圆润过渡（圆点与路面同色，视觉不可见，不产生多余圆圈）。
        多路线汇合/交叉处同色叠加无痕、无断层。
        先画全部描边层（更粗 w+10：线+点），再画全部路面层（更窄 w：线+点），
-       描边在路面之下形成 5px 边缘。 */
-    for (const rg of this.routeGeoms) {
-      const wp = rg.waypoints;
-      g.lineStyle(w + 10, borderColor, 1);
-      g.beginPath();
-      g.moveTo(wp[0].x, wp[0].y);
-      for (let i = 1; i < wp.length; i++) g.lineTo(wp[i].x, wp[i].y);
-      g.strokePath();
-      g.fillStyle(borderColor, 1);
-      for (let i = 0; i < wp.length; i++) g.fillCircle(wp[i].x, wp[i].y, (w + 10) / 2);
-    }
-    for (const rg of this.routeGeoms) {
-      const wp = rg.waypoints;
-      g.lineStyle(w, fillColor, 1);
-      g.beginPath();
-      g.moveTo(wp[0].x, wp[0].y);
-      for (let i = 1; i < wp.length; i++) g.lineTo(wp[i].x, wp[i].y);
-      g.strokePath();
-      g.fillStyle(fillColor, 1);
-      for (let i = 0; i < wp.length; i++) g.fillCircle(wp[i].x, wp[i].y, w / 2);
+       描边在路面之下形成 5px 边缘。
+
+       pcfg.squareCorners=true（仅第 9 关）：改用「轴对齐矩形铺路」，
+       转角是真正的 90° 方角（无圆角、无斜角），宽度严格一致；
+       非轴对齐段（本关不会出现）自动兜底为细线。 */
+    if (pcfg.squareCorners) {
+      const paintRoads = (color, width) => {
+        const h = width / 2;
+        for (const rg of this.routeGeoms) {
+          const wp = rg.waypoints;
+          for (let i = 0; i < wp.length - 1; i++) {
+            const a = wp[i], b = wp[i + 1];
+            if (Math.abs(a.y - b.y) < 0.5) {          // 水平段
+              g.fillStyle(color, 1);
+              g.fillRect(Math.min(a.x, b.x) - h, a.y - h, Math.abs(b.x - a.x) + width, width);
+            } else if (Math.abs(a.x - b.x) < 0.5) {    // 垂直段
+              g.fillStyle(color, 1);
+              g.fillRect(a.x - h, Math.min(a.y, b.y) - h, width, Math.abs(b.y - a.y) + width);
+            } else {
+              g.lineStyle(width, color, 1);
+              g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.strokePath();
+            }
+          }
+          /* 直角补角方块：保证转角是方角且宽度一致（无圆角） */
+          g.fillStyle(color, 1);
+          for (let i = 0; i < wp.length; i++) g.fillRect(wp[i].x - h, wp[i].y - h, width, width);
+        }
+      };
+      paintRoads(borderColor, w + 10);
+      paintRoads(fillColor, w);
+    } else {
+      for (const rg of this.routeGeoms) {
+        const wp = rg.waypoints;
+        g.lineStyle(w + 10, borderColor, 1);
+        g.beginPath();
+        g.moveTo(wp[0].x, wp[0].y);
+        for (let i = 1; i < wp.length; i++) g.lineTo(wp[i].x, wp[i].y);
+        g.strokePath();
+        g.fillStyle(borderColor, 1);
+        for (let i = 0; i < wp.length; i++) g.fillCircle(wp[i].x, wp[i].y, (w + 10) / 2);
+      }
+      for (const rg of this.routeGeoms) {
+        const wp = rg.waypoints;
+        g.lineStyle(w, fillColor, 1);
+        g.beginPath();
+        g.moveTo(wp[0].x, wp[0].y);
+        for (let i = 1; i < wp.length; i++) g.lineTo(wp[i].x, wp[i].y);
+        g.strokePath();
+        g.fillStyle(fillColor, 1);
+        for (let i = 0; i < wp.length; i++) g.fillCircle(wp[i].x, wp[i].y, w / 2);
+      }
     }
 
     /* 起点（绿色传送门）：每条【出怪】路线各画一个（多出怪点）；
        waves.spawnRoutes 之外的路线（第 4 关传送后汇合段 route 2/3）
-       不画出怪点，避免与传送门出口视觉冲突。缺省 = 全部路线（1~3 关兼容） */
+       不画出怪点，避免与传送门出口视觉冲突。缺省 = 全部路线（1~3 关兼容）
+       path.hideSpawnPortal=true（仅第 9 关）：完全不画绿色出怪圆标 ——
+       怪物直接从左侧道路边缘生成（第 1~8 关不设该标志 → 渲染零变化） */
     const spawnRoutes = (this.levelCfg.waves && this.levelCfg.waves.spawnRoutes) || null;
+    if (pcfg.hideSpawnPortal) return;
     for (let ri = 0; ri < this.routeGeoms.length; ri++) {
       if (spawnRoutes && spawnRoutes.indexOf(ri) === -1) continue;
       const st = this.routeGeoms[ri].waypoints[0];
@@ -1057,7 +1187,12 @@ class GameScene extends Phaser.Scene {
         });
       }
       /* 视觉端点去重（双向时 A/B 各只画一次）；同对入口/出口同色，不再带字母标签 */
-      const ka = a.route + ':' + a.waypoint, kb = b.route + ':' + b.waypoint;
+      /* 视觉端点按【世界坐标】去重（同一坐标的入口/出口只画一个传送门）：
+         第 9 关两条单行道坐标完全相同、共用同一个入口传送门 →
+         若按「路线:路径点」去重会重叠画两遍（双层光圈），故改用坐标去重。
+         第 4 关各端点坐标互不相同 → 行为与旧版完全一致。 */
+      const ka = Math.round(a.x) + ',' + Math.round(a.y);
+      const kb = Math.round(b.x) + ',' + Math.round(b.y);
       if (!drawn[ka]) { drawn[ka] = 1; this.portalEndpoints.push({ x: a.x, y: a.y, role: 'a', color: color }); }
       if (!drawn[kb]) { drawn[kb] = 1; this.portalEndpoints.push({ x: b.x, y: b.y, role: 'b', color: color }); }
     });
@@ -1228,6 +1363,38 @@ class GameScene extends Phaser.Scene {
       img.setScale(0.8 + rnd() * 0.5);
       img.setAlpha(0.95);
     }
+
+    /* ===== 第 9 关：童话草地装饰（小水池 / 小树 / 花丛）=====
+       仅当 levelCfg.decor 存在时执行（第 1~8 关不设该字段 → 装饰布局零变化）。
+       统一避让：界内、不压路面（<52）、不压障碍物、不压火力点方格。 */
+    const dc = this.levelCfg.decor;
+    if (!dc) return;
+    const free = (x, y, r) => {
+      if (x < 30 || x > this.W - 30 || y < 30 || y > this.H - 30) return false;
+      if (this.distToPath(x, y) < 52) return false;
+      for (const o of this.obstacles) {
+        if (Math.hypot(o.x - x, o.y - y) < o.radius + r) return false;
+      }
+      for (const h of this.hotspots) {
+        if (Math.hypot(h.x - x, h.y - y) < r + 14) return false;
+      }
+      return true;
+    };
+    for (const p of (dc.ponds || [])) {
+      const rx = p.rx || 34, ry = p.ry || 22;
+      if (!free(p.x, p.y, rx)) continue;
+      const pond = this.add.image(p.x, p.y, 'decor_pond').setDepth(2);
+      pond.setDisplaySize(rx * 2, ry * 2);
+    }
+    const extraKeys = ['decor_bush', 'decor_flower', 'decor_flower', 'decor_tree_small', 'decor_rock'];
+    for (let i = 0; i < (dc.extra || 0); i++) {
+      const x = 24 + rnd() * (this.W - 48);
+      const y = 24 + rnd() * (this.H - 48);
+      if (!free(x, y, 20)) continue;
+      const img = this.add.image(x, y, extraKeys[Math.floor(rnd() * extraKeys.length)]).setDepth(2);
+      img.setScale(0.85 + rnd() * 0.45);
+      img.setAlpha(0.96);
+    }
   }
 
   /* ============================================================
@@ -1260,6 +1427,9 @@ class GameScene extends Phaser.Scene {
 
       /* 第 8 关：风眼计时 / 风蚀增伤倒计时（暂停即冻结） */
       if (this.level8) this.level8.tick(dt);
+
+      /* 第 9 关：图腾计时（元素护盾派发）+ 蓝色圣殿守卫光环减伤计算 */
+      if (this.level9) this.level9.tick(dt);
 
       const ctx = {
         enemies: this.enemies,
@@ -1545,9 +1715,13 @@ class GameScene extends Phaser.Scene {
        第 3/4/5 波(索引 2/3/4) = 金/蓝/灰 BOSS，同关内三种依次登场 */
     const isBossType = !!(TD_CONFIG.enemies[typeKey] && TD_CONFIG.enemies[typeKey].boss);
     /* 第 8 关新增怪物类注册表（Level8Enemies.js）：命中则用专属子类
-       （代码绘制外观 + 专属机制/状态机）；其余关卡与类型通配 Enemy，零影响 */
+       （代码绘制外观 + 专属机制/状态机）；第 9 关专属实体（Level9Enemies.js：
+       蓝色圣殿守卫）同理；其余关卡与类型通配 Enemy，零影响 */
     const Cls = (typeof LEVEL8_ENEMY_CLASSES !== 'undefined' && LEVEL8_ENEMY_CLASSES[typeKey])
-      ? LEVEL8_ENEMY_CLASSES[typeKey] : Enemy;
+      ? LEVEL8_ENEMY_CLASSES[typeKey]
+      : (typeof LEVEL9_ENEMY_CLASSES !== 'undefined' && LEVEL9_ENEMY_CLASSES[typeKey])
+        ? LEVEL9_ENEMY_CLASSES[typeKey]
+        : Enemy;
     /* noVariant=true（熔岩巨兽）：不接入金/蓝/灰 BOSS 变体
        （贴图/移速/金币走 lavaBoss 自身配置，血量仍按小怪×bossFactor） */
     const noVariant = !!(TD_CONFIG.enemies[typeKey] && TD_CONFIG.enemies[typeKey].noVariant);

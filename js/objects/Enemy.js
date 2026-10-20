@@ -555,11 +555,17 @@ class Enemy extends Phaser.GameObjects.Container {
       ? this.shield : null;
     if (hpShield && opts && opts.percent) dmg *= 0.5;
     if (hpShield) {
+      /* 【强制拦截】strict 口径（第 9 关圣殿守卫圣盾，requirements 第 1~3 条）：
+         只要盾还在（hp>0），任何形式的伤害（单体 / 溅射 / 电链 / 真伤 /
+         百分比）一律由盾吸收，本体血量【绝不】被扣；即便本击把盾打爆，
+         破盾当帧的溢出部分也全部丢弃，不得穿透到本体。 */
+      const strict = !!hpShield.strict;
       const absorbed = Math.min(hpShield.hp, dmg);
       hpShield.hp -= absorbed;
       this.refreshShieldView(false);
       if (hpShield.hp > 1e-6) return; // 本击被护盾完全吸收：本体无任何变化
       this.breakShield();
+      if (strict) return;             // strict：溢出伤害丢弃，绝不打到本体
       const rest = dmg - absorbed;
       if (rest <= 0) return;
       this.hp -= rest;
@@ -711,6 +717,8 @@ class Enemy extends Phaser.GameObjects.Container {
     if (this.dead || this.invulnTimer > 0) return;
     const hpShield = (this.shield && this.shield.type === 'hp' && this.shield.hp > 0)
       ? this.shield : null;
+    /* strict 口径与 takeDamage 完全一致：盾在则本体绝不掉血（含 DOT 溢出） */
+    const strict = !!hpShield && !!hpShield.strict;
     const inDmg = (hpShield && opts && opts.percent) ? amount * 0.5 : amount;
     if (hpShield) {
       const absorbed = Math.min(hpShield.hp, inDmg);
@@ -718,6 +726,7 @@ class Enemy extends Phaser.GameObjects.Container {
       this.refreshShieldView(false);
       if (hpShield.hp > 1e-6) return; // 本跳被护盾完全吸收
       this.breakShield();
+      if (strict) return;             // strict：溢出丢弃，绝不打到本体
       const rest = inDmg - absorbed;
       if (rest <= 0) return;
       this.hp -= rest;
@@ -965,7 +974,14 @@ class Enemy extends Phaser.GameObjects.Container {
       hp: def.hp || 0,
       maxHp: def.hp || 0,
       value: isValue ? def.value : null,
-      maxValue: isValue ? def.value : null
+      maxValue: isValue ? def.value : null,
+      /* compact=true（第 9 关图腾小怪元素盾）：只画元素光环，不画盾条/盾值
+         文字（小怪数量多，避免糊屏）；旧关卡从不传此字段 → 行为零变化 */
+      compact: !!def.compact,
+      /* strict=true（第 9 关圣殿守卫圣盾）：强制拦截口径 —— 盾存续期间本体
+         绝不受任何形式的伤害（含固定/溅射/电链/百分比），破盾当帧的溢出
+         伤害也一律丢弃；旧关卡从不传此字段 → 保留原有「溢出继续结算本体」口径 */
+      strict: !!def.strict
     };
     this.showShieldGfx();
     this.refreshShieldView(true);
@@ -976,6 +992,13 @@ class Enemy extends Phaser.GameObjects.Container {
   shieldBlocks(element) {
     const s = this.shield;
     return !!(s && s.type === 'element' && element && s.element === element);
+  }
+
+  /* 是否持有【生效中的血量护盾】（hp 盾且盾值 > 0）。
+     供 BOSS/子类与外部（如圣殿守卫狂暴判定）统一查询：只要返回 true，
+     takeDamage / applyDot 的 strict 口径就保证本体一滴血都不会掉。 */
+  hasShield() {
+    return !!(this.shield && this.shield.type === 'hp' && this.shield.hp > 0);
   }
 
   /* 元素值盾被其他元素攻击时的消耗量：严格参照防御塔之间的元素反应
@@ -1009,13 +1032,14 @@ class Enemy extends Phaser.GameObjects.Container {
     this.clearShieldGfx();
   }
 
-  /* 护盾颜色：火=橙红 / 雷=紫 / 冰=浅蓝 / 血量=金 */
+  /* 护盾颜色：火=橙红 / 雷=紫 / 水=蓝 / 冰=浅蓝 / 血量=金 */
   shieldColor() {
     const s = this.shield;
     if (!s) return 0xffffff;
     if (s.type === 'hp') return 0xffe27a;
     if (s.element === 'fire') return 0xff7a3c;
     if (s.element === 'thunder') return 0xb58bff;
+    if (s.element === 'water') return 0x4a90e2;   // 水盾（第 9 关图腾）：天蓝，与冰盾区分
     return 0x7fdcff;
   }
 
@@ -1060,6 +1084,9 @@ class Enemy extends Phaser.GameObjects.Container {
     if (!this.scene) return;
     const s = this.shield;
     if (!s) { this.clearShieldGfx(); return; }
+    /* 紧凑盾（第 9 关图腾小怪元素盾）：只保留 showShieldGfx 的元素光环，
+       不创建盾条与小字（layer 数量可控，不糊屏）。旧关卡无此字段，零影响 */
+    if (s.compact) return;
     const y0 = -this.radius - 22;
     if (!this.shieldBar) {
       this.shieldBar = this.scene.add.graphics();

@@ -182,7 +182,8 @@ class LevelSelectScene extends Phaser.Scene {
       { name: '迷域回廊', desc: '传送穿梭·三阶BOSS', emoji: '🔮' },
       { name: '三路会师', desc: '三线交叉·共享终点', emoji: '⚔️' },
       { name: '双途重围', desc: '双线汇合·护盾BOSS', emoji: '🛡️' },
-      { name: '风蚀荒原', desc: '双路S廊·风眼增伤·熔岩巨兽', emoji: '🌋' }
+      { name: '风蚀荒原', desc: '双路S廊·风眼增伤·熔岩巨兽', emoji: '🌋' },
+      { name: '元素狂暴图腾', desc: '8字交叉·元素盾怪·圣殿守卫', emoji: '🔱' }
     ];
 
     const positions = this.computeCardPositions(vl);
@@ -300,7 +301,18 @@ class LevelSelectScene extends Phaser.Scene {
       card.add([badge, check]);
     }
 
-    /* 锁定图标与拦截逻辑已彻底移除：第 1~8 关全部直接开放，自由进入 */
+    /* 未解锁关卡（目前仅第 9 关：需通关第 8 关）显示锁图标并拦截进入；
+       第 1~8 关恒 unlocked=true，不显示锁标 */
+    if (!unlocked) {
+      const lx = w / 2 - 16, ly = -h / 2 + 16;
+      const lock = this.add.graphics();
+      lock.fillStyle(0x8a8378, 1).fillCircle(lx, ly, 12);
+      lock.lineStyle(2, 0x5d554d, 1).strokeCircle(lx, ly, 12);
+      const lockIcon = this.add.text(lx, ly, '🔒', {
+        fontSize: 13 + 'px', resolution: TD_TEXT_RES
+      }).setOrigin(0.5);
+      card.add([lock, lockIcon]);
+    }
 
     /* 触控热区略大于卡片（>=44px 规范由卡片尺寸保证）。
        手势状态机（按下/抬起/滑出）：
@@ -342,7 +354,11 @@ class LevelSelectScene extends Phaser.Scene {
       this.showToast('敬请期待', x, y);
       return;
     }
-    /* 第 1~8 关全部直接开放：不再有任何解锁拦截 */
+    /* 未解锁关卡（第 9 关：需通关第 8 关）：提示解锁条件，不进入游戏 */
+    if (!unlocked) {
+      this.showToast('通关第 8 关解锁', x, y);
+      return;
+    }
     this.scene.start('GameScene', { levelId: level });
   }
 

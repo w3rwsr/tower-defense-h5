@@ -191,6 +191,21 @@ class BootScene extends Phaser.Scene {
       g.fillStyle(0xbdbdbd, 1);
       g.fillEllipse(10, 9, 10, 6);
     });
+    /* 小水池（第 9 关童话草地装饰）：沙边 + 水面 + 高光，显示尺寸由关卡配置缩放 */
+    this.makeTexture('decor_pond', 68, 44, (g) => {
+      g.fillStyle(0xe4d7a8, 1); g.fillEllipse(34, 22, 68, 44);      // 沙岸
+      g.fillStyle(0x3aa9d8, 1); g.fillEllipse(34, 22, 58, 35);     // 水面
+      g.fillStyle(0x6fd0ee, 1); g.fillEllipse(34, 24, 48, 26);     // 浅水
+      g.fillStyle(0xffffff, 0.35); g.fillEllipse(24, 16, 16, 6);   // 高光
+    });
+    /* 小树（第 9 关童话草地装饰，纯装饰不可破坏）：树干 + 三层圆冠 */
+    this.makeTexture('decor_tree_small', 34, 40, (g) => {
+      g.fillStyle(0x000000, 0.13); g.fillEllipse(17, 36, 22, 7);
+      g.fillStyle(0x8a5a33, 1); g.fillRect(14, 22, 6, 14);
+      g.fillStyle(0x3f8f31, 1); g.fillCircle(17, 20, 13);
+      g.fillStyle(0x54ad3f, 1); g.fillCircle(12, 16, 9); g.fillCircle(23, 17, 8);
+      g.fillStyle(0x6ccd55, 1); g.fillCircle(15, 12, 6);
+    });
 
     /* ---------- 障碍物（放塔无效区：石头 / 树木 / 木桶，可被塔摧毁） ---------- */
     this.makeTexture('obst_rock', 52, 42, (g) => {
