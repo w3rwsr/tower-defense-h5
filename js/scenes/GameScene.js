@@ -517,6 +517,11 @@ class GameScene extends Phaser.Scene {
   buildHotspots() {
     const b = this.buildCfg;
     const gap = (b.roadGap != null) ? b.roadGap : 62;
+    /* 第二圈采样半径（可选，仅第 9 关这样需要高密度塔位的关卡配置）：
+       在 ±gap 之外再按 ±gap2 采一圈 → 每条路两侧各多出一排整齐塔位，
+       塔位数量成倍增加；不配置的关卡（第 1~8 关）行为完全不变。
+       gap2 仍受 minPathDistance 硬校验约束，绝不压路面。 */
+    const gap2 = (b.roadGap2 != null) ? b.roadGap2 : 0;
     const step = (this.levelId === 1 && b.tutorialCell) ? b.tutorialCell : b.cell;
     const minSpacing = b.minSpacing || 56;
     const raw = [];
@@ -530,6 +535,10 @@ class GameScene extends Phaser.Scene {
         const nx = -(s.y2 - s.y1) * inv, ny = (s.x2 - s.x1) * inv;
         raw.push({ x: px + nx * gap, y: py + ny * gap });
         raw.push({ x: px - nx * gap, y: py - ny * gap });
+        if (gap2 > 0) {
+          raw.push({ x: px + nx * gap2, y: py + ny * gap2 });
+          raw.push({ x: px - nx * gap2, y: py - ny * gap2 });
+        }
       }
     }
     /* 全局筛选：画面边界内 + 避路硬校验 + HUD 安全禁区 + 最小间距去重 */
@@ -1548,13 +1557,19 @@ class GameScene extends Phaser.Scene {
   expandWaveSpawns(groups, routeIds, sideDef) {
     const list = [];
     groups.forEach((grp) => {
-      for (const r of routeIds) {
+      /* grp.routes（可选，JSON 驱动）：把该组限定到指定路线；
+         不写时=全部 spawnRoutes 路线（旧关卡行为完全不变，零影响） */
+      const rs = grp.routes || routeIds;
+      for (const r of rs) {
         for (let i = 0; i < grp.count; i++) {
           list.push({
             t: grp.delay + i * grp.interval,
             type: grp.type,
             route: r,
             bossHpFactor: grp.bossHpFactor,
+            /* 第 9 关：BOSS 移速倍率 / 逐组分裂标记（缺省不影响旧关卡） */
+            bossSpeedMul: grp.bossSpeedMul,
+            bossPhases: grp.bossPhases,
             hpWaveIndex: sideDef ? sideDef.hpWaveIndex : null,
             /* 第 7 关：组内序号 + BOSS 变体图案（金/蓝/灰按出怪序号分配，
                左右两路各自独立从 pattern[0] 开始）；旧关卡无此字段恒 null */
@@ -1753,9 +1768,13 @@ class GameScene extends Phaser.Scene {
       }
       e.leakDamage = TD_CONFIG.enemies.enemyX.leakDamage *
         ((bv && bv.leakMul != null) ? bv.leakMul : bossCfg.leakMultiplier);
+      /* 第 9 关：逐组 BOSS 移速倍率（entry.bossSpeedMul，如金色分裂 BOSS
+         比其他 BOSS 快 50% → 1.5）；旧关卡组无此字段 → 移速不变 */
+      if (entry.bossSpeedMul) e.baseSpeed = Math.round(e.baseSpeed * entry.bossSpeedMul);
       /* 三阶段 BOSS（第 5/7 关，JSON 驱动 waves.bossPhases）：仅末波 BOSS
-         标记一阶段（血量阈值分裂），其他波 BOSS 与无配置关卡不参与、零影响 */
-      if (wcfg.bossPhases && this.waveIndex === wcfg.list.length - 1) {
+         标记一阶段（血量阈值分裂）；第 9 关可逐组开关（entry.bossPhases），
+         其他波 BOSS 与无配置关卡不参与、零影响 */
+      if (entry.bossPhases || (wcfg.bossPhases && this.waveIndex === wcfg.list.length - 1)) {
         e.bossPhase = 1;
       }
       /* BOSS 护盾（JSON 驱动 waves.bossShields）：

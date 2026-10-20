@@ -287,13 +287,19 @@
         const dy = e.y - t.y;
         const d2 = dx * dx + dy * dy;
 
-        /* 小怪过滤：nonBoss 模式下 BOSS（cfg.boss===true）免疫吸引；
-           第 7 关绿色史莱姆分身带 bossMini 标记，同样免疫吸引。
-           BOSS 的减速 Debuff 不在循环里处理 —— 统一由 _bossSlowCheck() 每帧
-           独立判定（不依赖牵引窗口/不依赖有无可吸小怪），此处只负责
-           「BOSS 永不位移」这一件事。 */
-        if (this.smallOnly && ((e.cfg && e.cfg.boss) || e.bossMini)) {
-          continue;                                 // BOSS 永不位移
+        /* 【修复】BOSS 不再被整段跳过：只跳过「牵引位移」，攻击判定照常。
+           之前这里对 BOSS 直接 continue → 塔既不瞄准也不计入目标，玩家
+           看起来就是"引力塔完全不攻击 BOSS"。现在把 BOSS 计入 targets /
+           primary（炮头会瞄准 BOSS、脉冲动画会命中它），但不写 pullBack
+           → BOSS 位置永不位移；其减速 Debuff 仍由 _bossSlowCheck() 每帧
+           独立挂载（10% / 4 级 15%）。 */
+        const isBossTarget = !!((e.cfg && e.cfg.boss) || e.bossMini);
+        if (this.smallOnly && isBossTarget) {
+          if (d2 <= r2) {
+            this.targets.push(e);
+            if (d2 < primaryD2) { primaryD2 = d2; primary = e; }
+          }
+          continue;                                 // BOSS 永不位移（攻击判定已计入）
         }
         if (d2 > r2) continue; // 射程外：不标记，Enemy 首帧烘焙位移后继续前进
 

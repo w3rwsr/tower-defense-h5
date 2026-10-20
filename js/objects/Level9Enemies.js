@@ -94,8 +94,11 @@
         el = els[(els.indexOf(el) + 1) % els.length];
       }
       this._element = el;
-      /* compact=true：小怪数量多，只画元素光环不画盾条/文字 */
-      this.applyShield({ type: 'element', element: el, value: this._ss.value, compact: true });
+      /* 元素盾改为【头顶盾量条】（与下方血条同宽、同款式）：
+         不再用 compact 紧凑光圈 —— refreshShieldView 会在血条上方画一条
+         平行盾量条，颜色由 shieldColor() 按元素取（火红/冰蓝/水青/雷紫），
+         长度 = 剩余盾值比例（被克制元素打掉时实时缩短），破盾后自动消失 */
+      this.applyShield({ type: 'element', element: el, value: this._ss.value });
     }
 
     update(dt) {
