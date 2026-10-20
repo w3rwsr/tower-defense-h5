@@ -15,11 +15,11 @@
   'use strict';
 
   const KEY = 'td_levels_progress_v1';
-  const TOTAL_LEVELS = 9;
-  /* 当前已设计完成的关卡数：第 1～9 关可游玩（第 8 关=风蚀荒原·熔岩巨兽，
-     第 9 关=元素狂暴图腾·蓝色圣殿守卫）。第 1～8 关全部开放自由进入；
-     第 9 关同样默认开放（可自由进入，见 isUnlocked）。 */
-  const TOTAL_DESIGNED = 9;
+  const TOTAL_LEVELS = 10;
+  /* 当前已设计完成的关卡数：第 1～10 关可游玩（第 8 关=风蚀荒原·熔岩巨兽，
+     第 9 关=元素狂暴图腾·蓝色圣殿守卫，
+     第 10 关=无尽蛇径·超长单线无尽模式）。第 1～10 关全部开放自由进入。 */
+  const TOTAL_DESIGNED = 10;
 
   const storage = {
     /**

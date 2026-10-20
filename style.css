@@ -217,6 +217,37 @@ html, body {
    （由 GameScene 进入时加 class，仅隐藏该 chip，金币/波次不受影响） */
 .chip-lives.hidden-by-gate { display: none !important; }
 
+/* ---------------- 无尽模式波次计数器（第 10 关） ----------------
+   顶部居中、金橙渐变 + 白色描边 + 光晕，明显区别于其它 chip；
+   仅无尽模式显示（GameScene.syncHud 切 hidden 类），纯展示不接收点击 */
+#endless-counter {
+  position: absolute;
+  left: 50%;
+  top: calc(6px + env(safe-area-inset-top));
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: clamp(14px, 2.5vmin, 19px);
+  font-weight: 900;
+  color: #6b2f00;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 25;
+  background: linear-gradient(180deg, #ffe066 0%, #ffb32e 100%);
+  border: 3px solid #fff6cf;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, .22), 0 0 18px rgba(255, 196, 64, .6);
+}
+#endless-counter b {
+  font-size: 1.45em;
+  color: #b2240b;
+  margin: 0 3px;
+  text-shadow: 0 1px 0 #fff6cf;
+}
+#endless-counter.hidden { display: none !important; }
+
 .btn-ctrl {
   min-width: 56px;
   min-height: 44px;

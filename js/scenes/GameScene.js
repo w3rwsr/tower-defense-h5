@@ -1501,7 +1501,12 @@ class GameScene extends Phaser.Scene {
     if (this.state !== 'ready') return;
     this.clearPlacementHighlight();   // 点"开始波次"按钮（DOM UI）时清掉残留高亮
     const wcfg = this.levelCfg.waves;
-    const groups = wcfg.list[this.waveIndex];
+    /* 第 10 关无尽模式：波次表由 buildEndlessWave 按当前波号程序化生成
+       （length 无上限，list 仅作媒体探测占位）；其他关卡照旧读静态 list */
+    const endlessGroups = this.getEndlessCfg()
+      ? this.buildEndlessWave(this.waveIndex + 1)
+      : null;
+    const groups = endlessGroups || wcfg.list[this.waveIndex];
     /* 第 8 关：BOSS 护盾数组按出怪顺序分配，每波开始重置计数 */
     this._bossShieldIdx = 0;
     const routeCount = this.routeGeoms.length;
@@ -1516,6 +1521,19 @@ class GameScene extends Phaser.Scene {
     }
     if (this.waveIndex === 0 && wcfg.firstWaveRouteOnly) routeIds = routeIds.slice(0, 1);
     this.spawnList = this.expandWaveSpawns(groups, routeIds, null);
+    /* 第 10 关无尽模式：移速随波数成长 —— 每 speedEveryWaves 波，全体敌人
+       基础移速 +speedStep（复合）：第 6~10 波 ×1.05、第 11~15 波 ×1.05² …
+       通过既有 entry.speedBonus 通道生效（对主波所有敌人一视同仁）。 */
+    const ecSpeed = this.getEndlessCfg();
+    if (ecSpeed) {
+      const every = (ecSpeed.speedEveryWaves != null) ? ecSpeed.speedEveryWaves : 5;
+      const step = (ecSpeed.speedStep != null) ? ecSpeed.speedStep : 0.05;
+      const tier = Math.floor(this.waveIndex / every);
+      if (tier > 0) {
+        const sb = Math.pow(1 + step, tier) - 1;
+        this.spawnList.forEach((en) => { en.speedBonus = (en.speedBonus || 0) + sb; });
+      }
+    }
     /* 第 4 关「右侧岔路追加批次」（JSON 驱动 waves.branchSpawns）：
        从 startWave（2）起，每波主波出怪表上再追加一批仅走岔路 routes 的
        小怪（第 1 波 list[0]=null 不追加）。与主波同场出怪、同场清场；
@@ -1582,7 +1600,10 @@ class GameScene extends Phaser.Scene {
             eliteScale: grp.eliteScale,
             eliteGoldBonus: grp.eliteGoldBonus,
             /* 第 8 关：组级 BOSS 贴图覆盖（熔岩巨兽强制灰史莱姆 Boss 贴图） */
-            bossTex: grp.bossTex || null
+            bossTex: grp.bossTex || null,
+            /* 第 10 关：组级 BOSS 赏金覆盖（无尽模式击杀 BOSS 掉落 2000 金币）；
+               旧关卡组无 reward 字段 → undefined，零影响 */
+            bossReward: (grp.reward != null) ? grp.reward : null
           });
         }
       }
@@ -1626,15 +1647,89 @@ class GameScene extends Phaser.Scene {
     this.countdown = this.levelCfg.waves.intermission;
   }
 
+  /* 无尽模式配置（第 10 关 waves.endless 存在时非空；其他关卡恒 null）。
+     波次表由 buildEndlessWave 程序化生成，没有固定 length。 */
+  getEndlessCfg() {
+    const w = this.levelCfg && this.levelCfg.waves;
+    return (w && w.endless) ? w.endless : null;
+  }
+
+  /** 无尽模式波次生成：按【波号(1 起)】返回本波出怪 groups（expandWaveSpawns 消费）。
+   *  前 basicWaves 波普通基础怪 → 第 denseFromWave 波起出怪量拉满并随波数增密
+   *  → 第 bossFromWave 波起每波 2~4 只随机 BOSS（金/灰/蓝）。 */
+  buildEndlessWave(waveNo) {
+    const ec = this.getEndlessCfg() || {};
+    const g = [];
+    const cap = (v, m) => Math.min(Math.round(v), m);
+
+    /* ---- 前 3 波：普通基础怪（熟悉地形 + 铺塔） ---- */
+    if (waveNo <= (ec.basicWaves != null ? ec.basicWaves : 3)) {
+      const k = waveNo - 1;
+      g.push({ type: 'enemyX', count: 6 + k * 4,
+        interval: Math.max(0.45, 0.95 - k * 0.15), delay: 0 });
+      if (waveNo >= 2) {
+        g.push({ type: 'enemyY', count: 2 + k * 2, interval: 1.25, delay: 4 });
+      }
+      return g;
+    }
+
+    /* ---- 第 4 波起：出怪量拉满（怪海连绵不断），密度随波数继续攀升 ---- */
+    const denseFrom = (ec.denseFromWave != null ? ec.denseFromWave : 4);
+    const t = waveNo - denseFrom;                       // 0 起
+    const dens = 1 + t * 0.10;                          // 数量倍率（随波数上升）
+    const iv = Math.max(0.18,                              // 出怪间隔（越来越短）
+      (ec.denseInterval != null ? ec.denseInterval : 0.5) - t * 0.015);
+    let cursor = 0;
+    const push = (type, count, interval) => {
+      g.push({ type, count, interval, delay: cursor });
+      cursor = cursor + count * interval + 0.5;         // 下一批接着上一批，连绵不断
+    };
+
+    /* 快怪潮（2~4 批） */
+    const fastBatches = Math.min(2 + Math.floor(t / 2), 4);
+    for (let i = 0; i < fastBatches; i++) push('enemyX', cap((10 + i * 3) * dens, 40), iv);
+    /* 肉盾慢怪 */
+    push('enemyY', cap((4 + t) * dens, 24), Math.max(0.6, iv + 0.3));
+    /* 水晶史莱姆（高减伤） */
+    push('crystalSlime', cap(3 + Math.floor(t / 2), 12), Math.max(0.45, iv + 0.25));
+    /* 元素盾绿史莱姆 */
+    push('shieldSlime', cap(3 + Math.floor(t / 2), 12), Math.max(0.45, iv + 0.15));
+    /* 自爆泥怪（极快 + 自爆禁言塔） */
+    push('bomberSlime', cap(3 + Math.floor(t / 2), 12), Math.max(0.35, iv + 0.05));
+
+    /* ---- BOSS：第 bossFromWave 波起每波 2~4 只（金/灰/蓝随机组合） ---- */
+    if (waveNo >= (ec.bossFromWave != null ? ec.bossFromWave : 6)) {
+      const min = (ec.bossCountMin != null) ? ec.bossCountMin : 2;
+      const max = (ec.bossCountMax != null) ? ec.bossCountMax : 4;
+      const n = min + Math.floor(Math.random() * (max - min + 1));
+      const pool = ['gold', 'gray', 'blue'];
+      const pattern = [];
+      for (let i = 0; i < n; i++) pattern.push(pool[Math.floor(Math.random() * pool.length)]);
+      g.push({
+        type: 'enemyBoss', count: n, interval: 3, delay: cursor,
+        bossHpFactor: (ec.bossHpFactor != null) ? ec.bossHpFactor : 20,
+        bossVariantPattern: pattern,
+        reward: (ec.bossReward != null) ? ec.bossReward : 2000
+      });
+    }
+    return g;
+  }
+
   onWaveCleared() {
     const wcfg = this.levelCfg.waves;
-    const bonus = wcfg.clearBonus[this.waveIndex] || 0;
+    const ec = this.getEndlessCfg();
+    /* 无尽模式清波奖励随波数递增（base + perWave × 已清波数） */
+    const bonus = ec
+      ? ((ec.clearBonusBase != null ? ec.clearBonusBase : 200) +
+         (ec.clearBonusPerWave != null ? ec.clearBonusPerWave : 120) * this.waveIndex)
+      : (wcfg.clearBonus[this.waveIndex] || 0);
     this.gold += bonus;
     /* 第 1 波结束额外一次性奖励（JSON 驱动 firstWaveClearBonus，仅第 1 波触发） */
-    const firstBonus = (this.waveIndex === 0 && wcfg.firstWaveClearBonus) ? wcfg.firstWaveClearBonus : 0;
+    const firstBonus = (!ec && this.waveIndex === 0 && wcfg.firstWaveClearBonus) ? wcfg.firstWaveClearBonus : 0;
     if (firstBonus) this.gold += firstBonus;
     this.waveIndex++;
-    if (this.waveIndex >= wcfg.list.length) {
+    /* 无尽模式没有通关结算：波次永不结束，只有生命扣光才在 endGame(false) 失败 */
+    if (!ec && this.waveIndex >= wcfg.list.length) {
       this.endGame(true);
       return;
     }
@@ -1647,7 +1742,9 @@ class GameScene extends Phaser.Scene {
     }
     this.state = 'ready';
     this.countdown = wcfg.intermission;
-    if (firstBonus) {
+    if (ec) {
+      this.banner('无尽第 ' + this.waveIndex + ' 波清场  +' + bonus + ' 金币', 0xbef78a);
+    } else if (firstBonus) {
       this.banner('清场 +' + bonus + '  首波通关 +' + firstBonus + ' 金币', 0xbef78a);
     } else {
       this.banner('清场奖励 +' + bonus + ' 金币', 0xbef78a);
@@ -1667,6 +1764,19 @@ class GameScene extends Phaser.Scene {
     const total = wcfg.list.length;
     const growth = (wcfg.hpGrowth != null ? wcfg.hpGrowth : 1.5);
     const wi = (idxOverride != null) ? idxOverride : this.waveIndex;
+    /* 无尽模式（第 10 关）：前 hpRampWaves 波按 hpGrowth 复合成长；
+       【第 10 波之后】改为每波在【上一波】基础上再 × hpGrowthAfterRamp
+       （默认 1.4 = 每一波怪物的血量比上一波增加 40%，复合累乘）。 */
+    const ec = wcfg.endless;
+    if (ec && idxOverride == null) {
+      const ramp = (ec.hpRampWaves != null) ? ec.hpRampWaves : 10;
+      const after = (ec.hpGrowthAfterRamp != null) ? ec.hpGrowthAfterRamp : 1.4;
+      /* wi < ramp：第 1~10 波（索引 0~9），纯 hpGrowth 复合 */
+      if (wi < ramp) return Math.round(baseHp * Math.pow(growth, wi));
+      /* wi >= ramp：第 11 波起，以第 10 波(索引 ramp-1)血量为基准再累乘 */
+      return Math.round(baseHp * Math.pow(growth, ramp - 1) *
+        Math.pow(after, wi - (ramp - 1)));
+    }
     const special = (wcfg.finalWaveSpecial !== false); // 缺省 true：末波走特例翻倍
     if (special && total >= 2 && wi === total - 1) {
       const prevHp = Math.round(baseHp * Math.pow(growth, wi - 1));
@@ -1768,6 +1878,9 @@ class GameScene extends Phaser.Scene {
       }
       e.leakDamage = TD_CONFIG.enemies.enemyX.leakDamage *
         ((bv && bv.leakMul != null) ? bv.leakMul : bossCfg.leakMultiplier);
+      /* 第 10 关无尽模式：组级 BOSS 赏金覆盖（2000 金币/只），保证后期有足够
+         金币把全图火力点升满 4 级塔；其他关卡组无 reward 字段 → 零影响 */
+      if (entry.bossReward != null) e.reward = Math.max(0, entry.bossReward);
       /* 第 9 关：逐组 BOSS 移速倍率（entry.bossSpeedMul，如金色分裂 BOSS
          比其他 BOSS 快 50% → 1.5）；旧关卡组无此字段 → 移速不变 */
       if (entry.bossSpeedMul) e.baseSpeed = Math.round(e.baseSpeed * entry.bossSpeedMul);
@@ -2230,8 +2343,13 @@ class GameScene extends Phaser.Scene {
     }
 
     const ov = document.getElementById('overlay-end');
+    const endlessCfg = this.getEndlessCfg();
     document.getElementById('end-title').textContent = win ? '🎉 胜利！' : '💀 防线告破';
-    document.getElementById('end-desc').textContent = win
+    /* 无尽模式（第 10 关）：没有通关，失败时结算坚持的波数 */
+    document.getElementById('end-desc').textContent = (!win && endlessCfg)
+      ? ('♾ 无尽模式：坚持到了第 ' + (this.waveIndex + 1) + ' 波！' +
+         (this.levelId === 10 ? ' 已建造 ' + this.towers.length + ' 座防御塔。' : ''))
+      : win
       ? ('第 ' + this.levelId + ' 关通过！' +
          (this.levelId === 1
            ? ' 教程完成，🔓 新塔「塔D·范围吸引控场」已解锁，第 2 关起即可使用！'
@@ -4702,8 +4820,21 @@ class GameScene extends Phaser.Scene {
     }
     document.getElementById('hud-gold').textContent = this.gold;
     document.getElementById('hud-lives').textContent = this.lives;
-    document.getElementById('hud-wave').textContent =
-      Math.min(this.waveIndex + 1, this.levelCfg.waves.list.length) + '/' + this.levelCfg.waves.list.length;
+    /* 无尽模式（第 10 关）波次无上限 → 顶部 chip 只显示当前波号；
+       普通关卡仍显示「当前/总波数」。 */
+    const endlessNow = !!this.getEndlessCfg();
+    document.getElementById('hud-wave').textContent = endlessNow
+      ? ((this.waveIndex + 1) + ' 波')
+      : (Math.min(this.waveIndex + 1, this.levelCfg.waves.list.length) + '/' + this.levelCfg.waves.list.length);
+    /* 无尽波次计数器（顶部居中醒目横幅，仅无尽模式显示） */
+    const ecBox = document.getElementById('endless-counter');
+    if (ecBox) {
+      ecBox.classList.toggle('hidden', !endlessNow);
+      if (endlessNow) {
+        const ecNum = document.getElementById('endless-wave');
+        if (ecNum) ecNum.textContent = this.waveIndex + 1;
+      }
+    }
 
     // 商店按钮：未解锁显示锁定态（保持可点击以弹出解锁条件提示，
     // 不用 disabled——禁用按钮不派发 click）；已解锁则按金币置灰 / 选中高亮
@@ -4736,7 +4867,8 @@ class GameScene extends Phaser.Scene {
       waveBtn.disabled = false;
       if (this.countdown === null) {
         info.textContent = '准备就绪';
-        waveBtn.textContent = '开始第 1 波';
+        waveBtn.textContent = endlessNow
+          ? ('开始第 ' + (this.waveIndex + 1) + ' 波') : '开始第 1 波';
       } else {
         info.textContent = '下一波 ' + Math.ceil(this.countdown) + 's';
         waveBtn.textContent = '⏩ 提前开始';

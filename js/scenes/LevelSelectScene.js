@@ -183,7 +183,8 @@ class LevelSelectScene extends Phaser.Scene {
       { name: '三路会师', desc: '三线交叉·共享终点', emoji: '⚔️' },
       { name: '双途重围', desc: '双线汇合·护盾BOSS', emoji: '🛡️' },
       { name: '风蚀荒原', desc: '双路S廊·风眼增伤·熔岩巨兽', emoji: '🌋' },
-      { name: '元素狂暴图腾', desc: '8字交叉·元素盾怪·圣殿守卫', emoji: '🔱' }
+      { name: '元素狂暴图腾', desc: '8字交叉·元素盾怪·圣殿守卫', emoji: '🔱' },
+      { name: '无尽蛇径', desc: '超长单线·无尽波次·随机BOSS', emoji: '♾' }
     ];
 
     const positions = this.computeCardPositions(vl);
