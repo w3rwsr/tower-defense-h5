@@ -542,6 +542,17 @@ class GameScene extends Phaser.Scene {
       }
     }
     /* 全局筛选：画面边界内 + 避路硬校验 + HUD 安全禁区 + 最小间距去重 */
+    /* 【按行定制方格尺寸】JSON：build.rowSpotSize = [{ y, size, tol }]
+       命中某一行（|y - 行y| ≤ tol）的塔位改用该尺寸，其余用 spotSize。
+       第 10 关用它把最底部那一排固定为较小尺寸，上方各排统一放大。 */
+    const rowSizeOf = (y) => {
+      const rs = b.rowSpotSize;
+      if (!rs || !rs.length) return 0;
+      for (const r of rs) {
+        if (Math.abs(y - r.y) <= (r.tol != null ? r.tol : 24)) return r.size || 0;
+      }
+      return 0;
+    };
     this.hotspots = [];
     for (const p of raw) {
       if (p.x < b.edgeMargin || p.x > this.W - b.edgeMargin ||
@@ -555,7 +566,7 @@ class GameScene extends Phaser.Scene {
       }
       if (dup) continue;
       const rx = Math.round(p.x), ry = Math.round(p.y);
-      this.hotspots.push({ x: rx, y: ry, key: rx + '_' + ry, kind: 'road' });
+      this.hotspots.push({ x: rx, y: ry, key: rx + '_' + ry, kind: 'road', size: rowSizeOf(ry) });
     }
 
     /* 关卡专属额外火力点（JSON 驱动 build.extraSpots，仅部分关卡如第 3 关）：
@@ -574,7 +585,7 @@ class GameScene extends Phaser.Scene {
       }
       if (dup) continue;
       const rx = Math.round(p.x), ry = Math.round(p.y);
-      this.hotspots.push({ x: rx, y: ry, key: rx + '_' + ry, kind: 'road' });
+      this.hotspots.push({ x: rx, y: ry, key: rx + '_' + ry, kind: 'road', size: p.size || rowSizeOf(ry) });
     }
   }
 
@@ -707,8 +718,12 @@ class GameScene extends Phaser.Scene {
     const g = this.placementGridGfx;
     g.clear();
     const b = this.buildCfg;
-    const size = b.spotSize || 36, r = b.spotRadius || 10;
+    const baseSize = b.spotSize || 36, baseR = b.spotRadius || 10;
+    /* 每个塔位可自带尺寸（build.rowSpotSize 按行定制），缺省用本关统一尺寸 */
+    const sizeOf = (h) => h.size || baseSize;
+    const radiusOf = (h) => (h.size ? Math.max(4, Math.round(h.size * 0.3)) : baseR);
     const drawSpot = (h, st) => {
+      const size = sizeOf(h), r = radiusOf(h);
       const x0 = h.x - size / 2, y0 = h.y - size / 2;
       g.fillStyle(st.fill, st.fillAlpha);
       g.fillRoundedRect(x0, y0, size, size, r);
@@ -716,7 +731,7 @@ class GameScene extends Phaser.Scene {
       g.strokeRoundedRect(x0, y0, size, size, r);
       /* 中心白色高光点，让方格更立体醒目（卡通感） */
       g.fillStyle(0xffffff, 0.85);
-      g.fillCircle(h.x, h.y, 4);
+      g.fillCircle(h.x, h.y, Math.max(2.5, size * 0.14));
     };
     for (const h of this.hotspots) {
       if (!this.canBuildAt(h.x, h.y, h.key)) continue;
@@ -860,9 +875,13 @@ class GameScene extends Phaser.Scene {
     return out;
   }
 
-  /** 终点大门是否与左下角波次按钮区（保守矩形）重叠：重叠则需让按钮上移 */
+  /** 终点大门是否与左下角波次按钮区（保守矩形）重叠：重叠则需让按钮上移。
+   *  关卡可用 levelCfg.hudAvoid.btnZone 覆盖全局值（例如第 10 关把大门尽量
+   *  贴近左边缘时，改用与实际按钮等宽的窄禁区，避免误触发按钮上移）。 */
   _detectGateHudClash() {
-    const z = (TD_CONFIG.castleGate.hudAvoid || {}).btnZone || { x: 0, y: 400, w: 300, h: 140 };
+    const lv = this.levelCfg.hudAvoid;
+    const glob = (TD_CONFIG.castleGate.hudAvoid || {});
+    const z = (lv && lv.btnZone) || glob.btnZone || { x: 0, y: 400, w: 300, h: 140 };
     for (const g of this._gateWorldRects()) {
       if (g.x < z.x + z.w && g.x + g.w > z.x && g.y < z.y + z.h && g.y + g.h > z.y) return true;
     }
@@ -2948,7 +2967,8 @@ class GameScene extends Phaser.Scene {
 
     // 放置点提示（与放置网格同款圆角方格，非法时半透明红描边）
     const b = this.buildCfg;
-    const size = b.spotSize || 36, sr = b.spotRadius || 10;
+    const size = h.size || b.spotSize || 36;
+    const sr = h.size ? Math.max(4, Math.round(h.size * 0.3)) : (b.spotRadius || 10);
     g.fillStyle(0xffffff, 0.22);
     g.fillRoundedRect(cx - size / 2, cy - size / 2, size, size, sr);
     g.lineStyle(3, color, 0.95);
@@ -3376,8 +3396,8 @@ class GameScene extends Phaser.Scene {
     g.clear();
     g.setAlpha(1);
     const b = this.buildCfg;
-    const size = (b.spotSize || 36) + 10;
-    const r = (b.spotRadius || 10) + 3;
+    const size = (h.size || b.spotSize || 36) + 10;
+    const r = (h.size ? Math.max(4, Math.round(h.size * 0.3)) : (b.spotRadius || 10)) + 3;
     g.fillStyle(0xffe27a, 0.16);
     g.fillRoundedRect(h.x - size / 2, h.y - size / 2, size, size, r);
     g.lineStyle(3.5, 0xffe27a, 0.95);
@@ -3439,8 +3459,7 @@ class GameScene extends Phaser.Scene {
     const pk = (b.picker && b.picker.otherSpots) || {};
     const sizeBonus = pk.sizeBonus != null ? pk.sizeBonus : 6;
     const radiusBonus = pk.radiusBonus != null ? pk.radiusBonus : 2;
-    const size = (b.spotSize || 36) + sizeBonus;
-    const r = (b.spotRadius || 10) + radiusBonus;
+    const baseSize = b.spotSize || 36, baseR = b.spotRadius || 10;
     const fill = pk.fill != null ? pk.fill : 0x7CFC00;
     const fillA = pk.fillAlpha != null ? pk.fillAlpha : 0.16;
     const border = pk.border != null ? pk.border : 0x2e7d1c;
@@ -3450,6 +3469,9 @@ class GameScene extends Phaser.Scene {
     for (const h of this.hotspots) {
       if (activeKey && h.key === activeKey) continue;        // 跳过当前点击点
       if (!this.canBuildAt(h.x, h.y, h.key)) continue;        // 仅可放且未占用
+      /* 每个塔位按自身尺寸描边（第 10 关最底排较小、上方各排较大） */
+      const size = (h.size || baseSize) + sizeBonus;
+      const r = (h.size ? Math.max(4, Math.round(h.size * 0.3)) : baseR) + radiusBonus;
       const x0 = h.x - size / 2, y0 = h.y - size / 2;
       g.fillStyle(fill, fillA);
       g.fillRoundedRect(x0, y0, size, size, r);
@@ -3917,8 +3939,13 @@ class GameScene extends Phaser.Scene {
 
     bindOnce('btn-pause', 'click', () => window.__tdScene && window.__tdScene.togglePause());
     bindOnce('btn-resume', 'click', () => window.__tdScene && window.__tdScene.togglePause());
-    /* 暂停菜单「返回选关」：退出当前关卡回选关页（进度不保存，goToLevelSelect 统一处理） */
-    bindOnce('btn-pause-levels', 'click', () => window.__tdScene && window.__tdScene.goToLevelSelect());
+    /* 暂停菜单「返回选关」：退出当前关卡回选关页（进度不保存，goToLevelSelect 统一处理）。
+       __tdScene 在选关场景会被改指向 LevelSelectScene，这里做方法存在性检查，
+       避免「返回选关」按钮在场景切换的瞬间抛出 TypeError（控制台红字）。 */
+    bindOnce('btn-pause-levels', 'click', () => {
+      const s = window.__tdScene;
+      if (s && typeof s.goToLevelSelect === 'function') s.goToLevelSelect();
+    });
     bindOnce('btn-speed', 'click', () => window.__tdScene && window.__tdScene.toggleSpeed());
     /* ---- 移动端「暂停 + 倍速」合并菜单（电脑端 #mobile-menu 隐藏，绑定无副作用） ---- */
     bindOnce('btn-mobile-menu', 'click', (ev) => {
@@ -3963,7 +3990,11 @@ class GameScene extends Phaser.Scene {
       const s = window.__tdScene;
       if (s) s.scene.restart({ levelId: s.levelId });
     });
-    bindOnce('btn-to-levels', 'click', () => window.__tdScene && window.__tdScene.goToLevelSelect());
+    /* 结算页「返回选关」：同样做方法存在性检查（见上） */
+    bindOnce('btn-to-levels', 'click', () => {
+      const s = window.__tdScene;
+      if (s && typeof s.goToLevelSelect === 'function') s.goToLevelSelect();
+    });
 
     document.querySelectorAll('.btn-tower').forEach((btn) => {
       if (btn.dataset.bound) return;
@@ -4821,20 +4852,12 @@ class GameScene extends Phaser.Scene {
     document.getElementById('hud-gold').textContent = this.gold;
     document.getElementById('hud-lives').textContent = this.lives;
     /* 无尽模式（第 10 关）波次无上限 → 顶部 chip 只显示当前波号；
-       普通关卡仍显示「当前/总波数」。 */
+       普通关卡仍显示「当前/总波数」。顶部居中的金色横幅已移除，
+       波次只在左上角 chip 显示，避免遮挡视线。 */
     const endlessNow = !!this.getEndlessCfg();
     document.getElementById('hud-wave').textContent = endlessNow
       ? ((this.waveIndex + 1) + ' 波')
       : (Math.min(this.waveIndex + 1, this.levelCfg.waves.list.length) + '/' + this.levelCfg.waves.list.length);
-    /* 无尽波次计数器（顶部居中醒目横幅，仅无尽模式显示） */
-    const ecBox = document.getElementById('endless-counter');
-    if (ecBox) {
-      ecBox.classList.toggle('hidden', !endlessNow);
-      if (endlessNow) {
-        const ecNum = document.getElementById('endless-wave');
-        if (ecNum) ecNum.textContent = this.waveIndex + 1;
-      }
-    }
 
     // 商店按钮：未解锁显示锁定态（保持可点击以弹出解锁条件提示，
     // 不用 disabled——禁用按钮不派发 click）；已解锁则按金币置灰 / 选中高亮

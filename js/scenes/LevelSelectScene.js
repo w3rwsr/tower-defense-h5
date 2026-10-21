@@ -76,6 +76,11 @@ class LevelSelectScene extends Phaser.Scene {
     this._deferredVideoInit();
   }
 
+  /* 与 GameScene 同名的安全桩：HUD/暂停菜单按钮的回调绑定的是
+     window.__tdScene，返回选关后该引用指向本场景；此时若再触发回调，
+     缺少该方法会在控制台抛 TypeError。选关页本身就是选关，直接 no-op。 */
+  goToLevelSelect() { return false; }
+
   /* 选关页后台“按需”预载：只预载【马上就可能用到】的视频，其余进关再加载。
      - 史莱姆视频（~2.2MB）：第 1 关就有史莱姆小怪，选关页空闲时预载；
      - 风塔视频（~2.3MB）：仅当风元素塔（通关第 3 关解锁）在本存档可用时预载；
