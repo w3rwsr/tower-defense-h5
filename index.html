@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>卡通塔防 H5（Phaser 3）</title>
-  <link rel="stylesheet" href="style.css?v=20261021a" />
+  <link rel="stylesheet" href="style.css?v=20261021b" />
   <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js）。
        全部脚本 defer：浏览器先渲染加载提示层，再并行下载、按序执行，消除手机端白屏 -->
   <script defer src="vendor/phaser.min.js?v=20260920h"></script>
@@ -68,6 +68,7 @@
             <div class="m-speed-row">
               <button id="m-menu-speed1" class="m-item" type="button">1x</button>
               <button id="m-menu-speed2" class="m-item" type="button">2x</button>
+              <button id="m-menu-speed4" class="m-item" type="button">4x</button>
             </div>
           </div>
         </div>
@@ -88,6 +89,27 @@
         <h2>⏸ 已暂停</h2>
         <button id="btn-resume" class="btn btn-resume" type="button">▶ 继续游戏</button>
         <button id="btn-pause-levels" class="btn btn-to-levels btn-pause-levels" type="button">🗺 返回选关</button>
+      </div>
+    </div>
+
+    <!-- 无尽模式：暂停后点「返回选关」时的保存确认（仅第 10 关） -->
+    <div id="overlay-endless-quit" class="overlay hidden">
+      <div class="overlay-card">
+        <h2>💾 保存无尽进度？</h2>
+        <p id="endless-quit-desc"></p>
+        <button id="btn-endless-save-quit" class="btn btn-resume" type="button">💾 保存并退出</button>
+        <button id="btn-endless-quit-direct" class="btn btn-to-levels" type="button">🚪 不保存直接退出</button>
+        <button id="btn-endless-quit-cancel" class="btn btn-to-levels" type="button">↩ 取消（继续游戏）</button>
+      </div>
+    </div>
+
+    <!-- 无尽模式：选关页检测到存档时的续档确认 -->
+    <div id="overlay-endless-resume" class="overlay hidden">
+      <div class="overlay-card">
+        <h2>♾ 检测到无尽存档</h2>
+        <p id="endless-resume-desc"></p>
+        <button id="btn-endless-resume" class="btn btn-resume" type="button">▶ 继续上次进度</button>
+        <button id="btn-endless-restart" class="btn btn-to-levels" type="button">🔄 重新开始</button>
       </div>
     </div>
 
@@ -121,11 +143,11 @@
   <!-- ===== 脚本按依赖顺序加载（全部 defer：按文档顺序执行，下载并行） =====
        FireBurnData.js（~600KB 内嵌燃烧视频）不在此同步加载——由 main.js 在
        Phaser 启动前后台动态注入，选关页先行进入，视频数据就绪后自动挂接 -->
-  <script defer src="js/config.js?v=20261021e"></script>
+  <script defer src="js/config.js?v=20261021f"></script>
   <!-- 4 级塔配置（唯一来源根目录 TowerConfig.json；file:// 无法 fetch JSON，
        故加载内嵌副本并注入 TD_CONFIG：maxLevel/lv4Cost/waveGate + cfg.lv4） -->
   <script defer src="js/TowerConfigData.js?v=20261018b"></script>
-  <script defer src="js/storage.js?v=20261020b"></script>
+  <script defer src="js/storage.js?v=20261021c"></script>
   <!-- 媒体加载统一调度（串行队列 + 进度条 + 10s 超时跳过 + Cache API 缓存）：
        必须早于各视频模块执行，供其按需排进加载队列 -->
   <script defer src="js/MediaLoader.js?v=20261018b"></script>
@@ -165,8 +187,8 @@
   <script defer src="js/objects/Tower.js?v=20261019a"></script>
   <script defer src="js/objects/ThunderArc.js?v=20261012m"></script>
   <script defer src="js/scenes/BootScene.js?v=20261020a"></script>
-  <script defer src="js/scenes/LevelSelectScene.js?v=20261020c"></script>
-  <script defer src="js/scenes/GameScene.js?v=20261021c"></script>
+  <script defer src="js/scenes/LevelSelectScene.js?v=20261021d"></script>
+  <script defer src="js/scenes/GameScene.js?v=20261021e"></script>
   <script defer src="js/main.js?v=20261019a"></script>
   <script>
     /* 启动进度条 + 失败自动重试（放在所有 defer 脚本之后：

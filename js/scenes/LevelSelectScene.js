@@ -36,6 +36,12 @@ class LevelSelectScene extends Phaser.Scene {
     /* 选关界面隐藏游戏 HUD，保持画面干净 */
     document.getElementById('hud-top').style.display = 'none';
     document.getElementById('hud-bottom').style.display = 'none';
+    /* 清掉可能残留的遮罩（暂停/结算/无尽存档弹窗），避免盖住选关页 */
+    ['overlay-pause', 'overlay-end', 'overlay-endless-quit', 'overlay-endless-resume']
+      .forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+      });
     window.__tdScene = this;
 
     /* 图鉴状态重置：场景实例会被复用（返回选关不会 new 新实例），
@@ -365,7 +371,39 @@ class LevelSelectScene extends Phaser.Scene {
       this.showToast('通关第 8 关解锁', x, y);
       return;
     }
+    /* 第 10 关（无尽）：有存档时先弹「继续 / 重新开始」，不直接进关 */
+    if (level === 10) {
+      const sv = TDStorage.loadEndlessSave();
+      if (sv) {
+        this.showEndlessResumeDialog(sv);
+        return;
+      }
+    }
     this.scene.start('GameScene', { levelId: level });
+  }
+
+  /** 无尽续档确认框（DOM 遮罩，位于选关页上方）：
+   *  继续 → 带 resume:true 进关（GameScene.restoreEndlessSave 重建塔阵）；
+   *  重新开始 → 清档后按初始 2500 金币开局。 */
+  showEndlessResumeDialog(sv) {
+    const ov = document.getElementById('overlay-endless-resume');
+    const go = (resume) => {
+      if (ov) ov.classList.add('hidden');
+      if (!resume) TDStorage.clearEndlessSave();
+      this.scene.start('GameScene', { levelId: 10, resume: !!resume });
+    };
+    if (!ov) { go(true); return; }   // DOM 缺失兜底：直接续档
+    const desc = document.getElementById('endless-resume-desc');
+    if (desc) {
+      desc.textContent = '检测到无尽模式存档（第 ' + (sv.wave || 1) + ' 波）' +
+        ' · 🪙 ' + (sv.gold || 0) + ' · ❤️ ' + (sv.lives || 0) +
+        ' · 防御塔 ' + ((sv.towers && sv.towers.length) || 0) + ' 座。是否继续上次的进度？';
+    }
+    const btnGo = document.getElementById('btn-endless-resume');
+    const btnNew = document.getElementById('btn-endless-restart');
+    if (btnGo) btnGo.onclick = () => go(true);
+    if (btnNew) btnNew.onclick = () => go(false);
+    ov.classList.remove('hidden');
   }
 
   showToast(msg, x, y) {

@@ -28,6 +28,11 @@ class GameScene extends Phaser.Scene {
     /* 当前关卡编号（来自关卡选择场景），默认第 1 关 */
     this.levelId = (data && data.levelId) || 1;
 
+    /* 无尽续档：选关页确认「继续上次进度」时带 resume:true 进关，
+       这里只读取一次快照，create 末尾统一重建（见 restoreEndlessSave） */
+    this._resumeSave = (data && data.resume && this.levelId === 10)
+      ? TDStorage.loadEndlessSave() : null;
+
     /* 关卡独立配置：Level 1 回退到顶层 path/waves/economy（零改动保持已正常体验）；
        第 5 关等部分配置关卡（仅有 enemyHpMul 等覆盖字段）与顶层基础合并，
        缺省字段从顶层取，覆盖字段叠加 */
@@ -173,6 +178,9 @@ class GameScene extends Phaser.Scene {
 
     /* 第 1 关 = 新手教程关，启动引导提示 */
     if (this.levelId === 1) this.startTutorial();
+
+    /* 无尽续档：重建存档里的塔阵、金币、生命与波次，随后自动进入下一波倒计时 */
+    if (this._resumeSave) this.restoreEndlessSave();
 
     /* 第 8 关「风蚀荒原」：风眼装饰 + 风蚀增伤
        （仅本关配置 levelCfg.windEyes 时创建；同时预生成三种新怪的
@@ -1447,8 +1455,10 @@ class GameScene extends Phaser.Scene {
     try { if (typeof BOMB_SLIME_VIDEO !== 'undefined') BOMB_SLIME_VIDEO.tick(); } catch (e) {}
     // 暂停或结算时冻结全部逻辑（画面保持）
     const rawDt = Math.min(delta, 50) / 1000;
+    /* 单帧步长上限 0.12s：4x 下 60fps 时 dt≈0.067 可跑满 4 倍速；
+       低帧率时自动收敛到 3~3.6 倍，避免大步长让弹道/寻路穿模。 */
     const dt = (this.paused || this.state === 'won' || this.state === 'lost')
-      ? 0 : rawDt * this.speedMul;
+      ? 0 : Math.min(rawDt * this.speedMul, 0.12);
 
     if (dt > 0) {
       this.updateWaves(dt);
@@ -1716,20 +1726,37 @@ class GameScene extends Phaser.Scene {
     /* 自爆泥怪（极快 + 自爆禁言塔） */
     push('bomberSlime', cap(3 + Math.floor(t / 2), 12), Math.max(0.35, iv + 0.05));
 
-    /* ---- BOSS：第 bossFromWave 波起每波 2~4 只（金/灰/蓝随机组合） ---- */
+    /* ---- BOSS：第 bossFromWave 波起每波 2~4 只（金/灰/蓝随机组合） ----
+       颜色必须绑定到【真正的 BOSS 类型】，否则只是换贴图的血牛：
+         gold → enemyBoss + bossVariantPattern['gold'] + bossPhases（低血分裂）
+                + bossSpeedMul 1.5（比其他 BOSS 快 50%）
+         gray → lavaBoss（熔岩巨兽：5000 血岩盾每 5s 刷新 + 岩浆爆发沉默 2s）
+         blue → templeGuard（圣殿守卫：全屏 50% 减伤光环 + 5000 圣盾 + 30% 狂暴回血）
+       每只单独成组，各自带波次血量倍率与 2000 金币赏金。 */
     if (waveNo >= (ec.bossFromWave != null ? ec.bossFromWave : 6)) {
       const min = (ec.bossCountMin != null) ? ec.bossCountMin : 2;
       const max = (ec.bossCountMax != null) ? ec.bossCountMax : 4;
       const n = min + Math.floor(Math.random() * (max - min + 1));
+      const hpF = (ec.bossHpFactor != null) ? ec.bossHpFactor : 20;
+      const rw = (ec.bossReward != null) ? ec.bossReward : 2000;
       const pool = ['gold', 'gray', 'blue'];
-      const pattern = [];
-      for (let i = 0; i < n; i++) pattern.push(pool[Math.floor(Math.random() * pool.length)]);
-      g.push({
-        type: 'enemyBoss', count: n, interval: 3, delay: cursor,
-        bossHpFactor: (ec.bossHpFactor != null) ? ec.bossHpFactor : 20,
-        bossVariantPattern: pattern,
-        reward: (ec.bossReward != null) ? ec.bossReward : 2000
-      });
+      for (let i = 0; i < n; i++) {
+        const kind = pool[Math.floor(Math.random() * pool.length)];
+        const delay = cursor + i * 2.5;
+        if (kind === 'gray') {
+          /* 灰 = 熔岩巨兽：强制灰史莱姆 BOSS 贴图（与第 8 关同一口径） */
+          g.push({ type: 'lavaBoss', count: 1, interval: 2.5, delay,
+            bossHpFactor: hpF, bossTex: 'boss_gray', reward: rw });
+        } else if (kind === 'blue') {
+          /* 蓝 = 圣殿守卫：强制蓝史莱姆 BOSS 贴图（与第 9 关同一口径） */
+          g.push({ type: 'templeGuard', count: 1, interval: 2.5, delay,
+            bossHpFactor: hpF, bossTex: 'boss_blue', reward: rw });
+        } else {
+          g.push({ type: 'enemyBoss', count: 1, interval: 2.5, delay,
+            bossHpFactor: hpF, bossVariantPattern: ['gold'],
+            bossPhases: true, bossSpeedMul: 1.5, reward: rw });
+        }
+      }
     }
     return g;
   }
@@ -2359,6 +2386,13 @@ class GameScene extends Phaser.Scene {
     /* 胜利 → 保存关卡进度 */
     if (win) {
       TDStorage.markCompleted(this.levelId);
+    }
+    /* 无尽模式失败：自动清档（防止反复读取死档），并把本局波次写进最高记录 */
+    if (!win && this.getEndlessCfg()) {
+      try {
+        TDStorage.recordEndlessBest(this.waveIndex + 1);
+        TDStorage.clearEndlessSave();
+      } catch (e) {}
     }
 
     const ov = document.getElementById('overlay-end');
@@ -3939,12 +3973,39 @@ class GameScene extends Phaser.Scene {
 
     bindOnce('btn-pause', 'click', () => window.__tdScene && window.__tdScene.togglePause());
     bindOnce('btn-resume', 'click', () => window.__tdScene && window.__tdScene.togglePause());
-    /* 暂停菜单「返回选关」：退出当前关卡回选关页（进度不保存，goToLevelSelect 统一处理）。
+    /* 暂停菜单「返回选关」：
+       —— 第 10 关（无尽）先弹「是否保存进度」三选一，不直接退出；
+       —— 其余关卡保持原行为（直接回选关页）。
        __tdScene 在选关场景会被改指向 LevelSelectScene，这里做方法存在性检查，
        避免「返回选关」按钮在场景切换的瞬间抛出 TypeError（控制台红字）。 */
     bindOnce('btn-pause-levels', 'click', () => {
       const s = window.__tdScene;
+      if (!s) return;
+      if (typeof s.askEndlessSaveAndQuit === 'function' && s.getEndlessCfg && s.getEndlessCfg()) {
+        s.askEndlessSaveAndQuit();
+        return;
+      }
+      if (typeof s.goToLevelSelect === 'function') s.goToLevelSelect();
+    });
+    /* 无尽存档弹窗三选一 */
+    bindOnce('btn-endless-save-quit', 'click', () => {
+      const s = window.__tdScene;
+      const ov = document.getElementById('overlay-endless-quit');
+      if (ov) ov.classList.add('hidden');
+      if (s && typeof s.saveEndlessRun === 'function') s.saveEndlessRun(false);
       if (s && typeof s.goToLevelSelect === 'function') s.goToLevelSelect();
+    });
+    bindOnce('btn-endless-quit-direct', 'click', () => {
+      const s = window.__tdScene;
+      const ov = document.getElementById('overlay-endless-quit');
+      if (ov) ov.classList.add('hidden');
+      /* 不写入本局进度；已有的旧存档保留（那是玩家上一次主动保存的进度） */
+      if (s && typeof s.goToLevelSelect === 'function') s.goToLevelSelect();
+    });
+    bindOnce('btn-endless-quit-cancel', 'click', () => {
+      const ov = document.getElementById('overlay-endless-quit');
+      if (ov) ov.classList.add('hidden');
+      /* 取消 = 留在关卡内继续游玩（仍保持暂停状态，玩家自己点继续） */
     });
     bindOnce('btn-speed', 'click', () => window.__tdScene && window.__tdScene.toggleSpeed());
     /* ---- 移动端「暂停 + 倍速」合并菜单（电脑端 #mobile-menu 隐藏，绑定无副作用） ---- */
@@ -3959,16 +4020,22 @@ class GameScene extends Phaser.Scene {
       const menu = document.getElementById('mobile-menu');
       if (menu) menu.classList.remove('open');
     });
-    /* 1x/2x：仅在与当前倍速不同时切换（toggleSpeed 在 1↔2 间翻转），随后收起面板 */
+    /* 1x/2x/4x：移动端合并菜单（4x 仅无尽模式开放，其它关卡按钮隐藏） */
     bindOnce('m-menu-speed1', 'click', () => {
       const s = window.__tdScene;
-      if (s && s.speedMul !== 1) s.toggleSpeed();
+      if (s && typeof s.setSpeed === 'function') s.setSpeed(1);
       const menu = document.getElementById('mobile-menu');
       if (menu) menu.classList.remove('open');
     });
     bindOnce('m-menu-speed2', 'click', () => {
       const s = window.__tdScene;
-      if (s && s.speedMul !== 2) s.toggleSpeed();
+      if (s && typeof s.setSpeed === 'function') s.setSpeed(2);
+      const menu = document.getElementById('mobile-menu');
+      if (menu) menu.classList.remove('open');
+    });
+    bindOnce('m-menu-speed4', 'click', () => {
+      const s = window.__tdScene;
+      if (s && typeof s.setSpeed === 'function') s.setSpeed(4);
       const menu = document.getElementById('mobile-menu');
       if (menu) menu.classList.remove('open');
     });
@@ -4698,11 +4765,102 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  /* ============================================================
+   * 第 10 关无尽模式存档（只存塔，不存怪）
+   * ============================================================ */
+
+  /** 打包当前进度：波次 / 金币 / 生命 / 全部塔（坐标+类型+等级）+ 最高记录。
+   *  注意：绝不序列化 this.enemies —— 后期怪物成百上千，写档会卡死。 */
+  packEndlessSave() {
+    const towers = (this.towers || []).map((t) => ({
+      x: Math.round(t.x), y: Math.round(t.y),
+      t: t.typeKey, l: Math.max(1, t.level || 1)
+    }));
+    const wave = this.waveIndex + 1;
+    return {
+      v: 1, level: 10,
+      wave, lives: this.lives, gold: this.gold,
+      towers, best: TDStorage.recordEndlessBest(wave), ts: Date.now()
+    };
+  }
+
+  /** 写入存档（silent=true 时静默，用于暂停自动保存） */
+  saveEndlessRun(silent) {
+    if (!this.getEndlessCfg() || this.state === 'lost') return false;
+    const ok = TDStorage.saveEndlessRun(this.packEndlessSave());
+    if (ok && !silent) this.banner('💾 无尽进度已保存（第 ' + (this.waveIndex + 1) + ' 波）', 0x9adcff);
+    return ok;
+  }
+
+  /** 暂停 →「返回选关」：先弹三选一确认框（保存并退出 / 不保存 / 取消） */
+  askEndlessSaveAndQuit() {
+    const ov = document.getElementById('overlay-endless-quit');
+    if (!ov) {
+      /* DOM 缺失兜底：直接静默保存后退出，绝不吞进度 */
+      this.saveEndlessRun(true);
+      this.goToLevelSelect();
+      return;
+    }
+    const desc = document.getElementById('endless-quit-desc');
+    if (desc) {
+      desc.textContent = '当前：第 ' + (this.waveIndex + 1) + ' 波 · 🪙 ' + this.gold +
+        ' · ❤️ ' + this.lives + ' · 防御塔 ' + this.towers.length + ' 座';
+    }
+    ov.classList.remove('hidden');
+  }
+
+  /** 重建存档：清空地图 → 放回金币/血量 → 按坐标与类型重建塔阵并升到存档等级
+   *  → 波次回到存档波次，直接进入下一波倒计时（不恢复任何怪物）。 */
+  restoreEndlessSave() {
+    const sv = this._resumeSave;
+    this._resumeSave = null;
+    if (!sv || !this.getEndlessCfg()) return;
+
+    /* 波次：存档 wave=已打到第 N 波 → waveIndex = N-1，下一波即 N */
+    this.waveIndex = Math.max(0, (sv.wave || 1) - 1);
+    const targetGold = (sv.gold != null) ? Math.max(0, Math.round(sv.gold)) : this.gold;
+    const targetLives = (sv.lives != null) ? Math.max(1, Math.round(sv.lives)) : this.lives;
+
+    /* 重建塔：先把金币临时拉满，落塔/升级不因余额中断，最后再写回存档金币 */
+    this.gold = 1e9;
+    let built = 0;
+    for (const t of sv.towers || []) {
+      if (!t || !t.t) continue;
+      if (!TD_CONFIG.towers[t.t]) continue;
+      const x = Math.round(t.x), y = Math.round(t.y);
+      const key = x + '_' + y;
+      if (this.occupied.has(key)) continue;
+      if (!this.placeTower(x, y, key, t.t)) continue;
+      const tw = this.occupied.get(key);
+      if (!tw) continue;
+      const lv = Math.max(1, Math.min(t.l || 1, tw.maxLevel));
+      while (tw.level < lv) {
+        if (!tw.upgrade()) { tw.level = lv; tw.recalcStats(); break; }
+      }
+      if (tw.badge) tw.badge.setText('Lv' + tw.level);
+      built++;
+    }
+    this.gold = targetGold;
+    this.lives = targetLives;
+    /* 门旁血量牌同步（create 时按初始 20 点建的） */
+    for (const g of this.castleGates || []) {
+      if (g && g.badge) g.badge.setText(String(this.lives));
+    }
+
+    /* 直接进入下一波倒计时：倒计时跑完自动 startWave（无需玩家点按钮） */
+    this.state = 'ready';
+    this.countdown = (this.levelCfg.waves && this.levelCfg.waves.intermission) || 20;
+    this.syncHud();
+    this.banner('♾ 已恢复第 ' + (this.waveIndex + 1) + ' 波进度 · ' + built + ' 座防御塔', 0x9adcff);
+  }
+
   /** 返回关卡选择界面 */
   goToLevelSelect() {
     /* 清理本场景产生的 DOM 遮罩，避免带到选关界面 */
     document.getElementById('overlay-end').classList.add('hidden');
     document.getElementById('overlay-pause').classList.add('hidden');
+    const _q = document.getElementById('overlay-endless-quit');
+    if (_q) _q.classList.add('hidden');
     if (this.tutorialOverlay) this.tutorialOverlay.setVisible(false);
     this.closeTowerPicker(true);
     this.setPaused(false);
@@ -4818,6 +4976,10 @@ class GameScene extends Phaser.Scene {
     this.tweens.timeScale = v ? 0 : this.speedMul;
     document.getElementById('overlay-pause').classList.toggle('hidden', !v);
     if (v) this.clearPlacementHighlight();   // 暂停时关闭可能残留的放塔高亮
+    /* 无尽模式：每次点暂停即时静默覆盖存档（防浏览器崩溃丢进度） */
+    if (v) {
+      try { this.saveEndlessRun(true); } catch (e) {}
+    }
     /* 火塔燃烧视频随暂停停播/恢复（省电；共享解码器由引用计数统一调度） */
     try { FIRE_BURN.setPaused(v); } catch (e) {}
     /* 风塔龙卷风视频同步暂停/恢复 */
@@ -4834,9 +4996,25 @@ class GameScene extends Phaser.Scene {
     try { if (typeof BOMB_SLIME_VIDEO !== 'undefined') BOMB_SLIME_VIDEO.setPaused(v); } catch (e) {}
   }
 
-  toggleSpeed() {
-    this.speedMul = this.speedMul === 1 ? 2 : 1;
+  /* 倍速档位：无尽模式（第 10 关）后期血量/数量极高，开放 1x/2x/4x 三档；
+     其余关卡维持原来的 1x/2x 两档，行为不变。 */
+  speedSteps() {
+    return this.getEndlessCfg() ? [1, 2, 4] : [1, 2];
+  }
+
+  /** 设定倍速：怪物移动、塔攻击节奏（都用 dt = rawDt × speedMul）
+   *  与全部 tween 特效（tweens.timeScale）同步加速。 */
+  setSpeed(v) {
+    const steps = this.speedSteps();
+    this.speedMul = (steps.indexOf(v) >= 0) ? v : 1;
     if (!this.paused) this.tweens.timeScale = this.speedMul;
+    this.syncHud();
+  }
+
+  toggleSpeed() {
+    const steps = this.speedSteps();
+    const i = steps.indexOf(this.speedMul);
+    this.setSpeed(steps[(i + 1) % steps.length]);
   }
 
   syncHud() {
@@ -4873,15 +5051,21 @@ class GameScene extends Phaser.Scene {
     document.getElementById('btn-pause').textContent = this.paused ? '▶ 继续' : '⏸ 暂停';
     const speedBtn = document.getElementById('btn-speed');
     speedBtn.textContent = this.speedMul + 'x';
-    speedBtn.classList.toggle('on', this.speedMul === 2);
+    speedBtn.classList.toggle('on', this.speedMul > 1);
 
-    // 移动端合并菜单：暂停/继续文案 + 1x/2x 当前档高亮（元素不存在于旧 DOM 时跳过）
+    // 移动端合并菜单：暂停/继续文案 + 1x/2x/4x 当前档高亮
+    // （4x 仅无尽模式出现；其它关卡按钮隐藏，元素不存在时跳过）
     const mPause = document.getElementById('m-menu-pause');
     if (mPause) mPause.textContent = this.paused ? '▶ 继续' : '⏸ 暂停';
     const mSp1 = document.getElementById('m-menu-speed1');
     const mSp2 = document.getElementById('m-menu-speed2');
+    const mSp4 = document.getElementById('m-menu-speed4');
     if (mSp1) mSp1.classList.toggle('active', this.speedMul === 1);
     if (mSp2) mSp2.classList.toggle('active', this.speedMul === 2);
+    if (mSp4) {
+      mSp4.classList.toggle('active', this.speedMul === 4);
+      mSp4.style.display = this.getEndlessCfg() ? '' : 'none';
+    }
 
     // 波次控制区
     const info = document.getElementById('wave-info');

@@ -345,6 +345,9 @@ html, body {
 
 /* 暂停遮罩：内部「继续」按钮需可点击，整层保持默认可交互 */
 #overlay-pause { pointer-events: auto; }
+/* 无尽存档弹窗（暂停退出确认 / 选关续档确认）同样需要可点击 */
+#overlay-endless-quit,
+#overlay-endless-resume { pointer-events: auto; }
 
 /* 「继续」按钮：与结算按钮同款样式，绿色主色 */
 .btn-resume {
@@ -377,6 +380,18 @@ html, body {
   color: #234708;
 }
 .end-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+/* 无尽模式存档弹窗：三/两个按钮纵向排列，间距统一、主次分明 */
+#overlay-endless-quit .overlay-card .btn,
+#overlay-endless-resume .overlay-card .btn {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+}
+#overlay-endless-quit .overlay-card,
+#overlay-endless-resume .overlay-card {
+  min-width: min(78vw, 360px);
+}
 .btn-to-levels {
   min-height: 48px;
   padding: 12px 28px;

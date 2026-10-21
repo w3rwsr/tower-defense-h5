@@ -2811,9 +2811,24 @@ window.TD_CONFIG = {
           "clearBonusBase": 200,     // 清波奖励基数
           "clearBonusPerWave": 120   // 每清一波额外 +120（随波数递增）
         },
+        /* 金色 BOSS 的低血分裂（buildEndlessWave 给金 BOSS 组带 bossPhases:true）：
+           血量降到 30% → 分裂 3 只绿色史莱姆小 BOSS（血量均分残余血量）；
+           全灭后聚合回父代 10% 血量。
+           miniSpeed = 98(enemyX) × 0.56(routeBonus) × 1.5 ≈ 82，
+           与本关整体速度口径一致（比同场绿史莱姆快 50%）。 */
+        "bossPhases": {
+          "splitAtHpRatio": 0.30,
+          "splitCount": 3,
+          "miniType": "enemyX",
+          "miniSpeed": 82,
+          "miniTint": false,
+          "mergeHpRatio": 0.10,
+          "mergeKeepParentStats": true
+        },
         /* 出怪表占位（无尽模式实际波次由 buildEndlessWave 程序化生成，
            本表只用于「本关媒体按需加载」的探测：确保水晶史莱姆/自爆泥怪
-           视频、BOSS 运动/死亡视频、以及元素盾史莱姆贴图控制器被正确预载） */
+           视频、BOSS 运动/死亡视频、熔岩巨兽/圣殿守卫贴图、以及元素盾
+           史莱姆贴图控制器被正确预载） */
         "list": [
           [ { "type": "enemyX", "count": 6,  "interval": 0.90, "delay": 0 } ],
           [ { "type": "enemyX", "count": 10, "interval": 0.70, "delay": 0 },
@@ -2823,10 +2838,14 @@ window.TD_CONFIG = {
           [ { "type": "crystalSlime", "count": 3, "interval": 0.90, "delay": 0 },
             { "type": "shieldSlime",  "count": 3, "interval": 0.90, "delay": 4 },
             { "type": "bomberSlime",  "count": 3, "interval": 0.60, "delay": 8 } ],
-          [ { "type": "enemyX", "count": 10, "interval": 0.50, "delay": 0 },
-            { "type": "enemyBoss", "count": 3, "interval": 3, "delay": 6,
-              "bossHpFactor": 20, "bossVariantPattern": ["gold", "gray", "blue"],
-              "reward": 2000 } ]
+          /* 三种 BOSS 各占一组（真类型绑定：金=enemyBoss 变体 / 灰=lavaBoss /
+             蓝=templeGuard），仅供媒体预载与贴图探测，实际出怪由 buildEndlessWave 生成 */
+          [ { "type": "enemyBoss", "count": 1, "interval": 3, "delay": 4,
+              "bossHpFactor": 20, "bossVariantPattern": ["gold"], "reward": 2000 },
+            { "type": "lavaBoss", "count": 1, "interval": 3, "delay": 6,
+              "bossHpFactor": 20, "bossTex": "boss_gray", "reward": 2000 },
+            { "type": "templeGuard", "count": 1, "interval": 3, "delay": 8,
+              "bossHpFactor": 20, "bossTex": "boss_blue", "reward": 2000 } ]
         ]
       }
     }

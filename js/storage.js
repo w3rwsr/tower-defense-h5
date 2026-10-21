@@ -15,6 +15,9 @@
   'use strict';
 
   const KEY = 'td_levels_progress_v1';
+  /* 第 10 关无尽模式：存档与历史最高波次（见文件末尾 saveEndlessRun 等） */
+  const ENDLESS_KEY = 'endless_save';
+  const ENDLESS_BEST_KEY = 'endless_best';
   const TOTAL_LEVELS = 10;
   /* 当前已设计完成的关卡数：第 1～10 关可游玩（第 8 关=风蚀荒原·熔岩巨兽，
      第 9 关=元素狂暴图腾·蓝色圣殿守卫，
@@ -161,6 +164,64 @@
     /** 重置全部进度（调试用） */
     reset() {
       try { localStorage.removeItem(KEY); } catch (e) {}
+    },
+
+    /* ============================================================
+     * 第 10 关无尽模式存档（核心原则：只存塔，不存怪）
+     *   endless_save = { v:1, level:10, wave, lives, gold,
+     *                    towers:[{x,y,t,l}], best, ts }
+     *   —— 绝不保存场上怪物的位置/状态/血量：后期怪物成百上千，
+     *      序列化会让存档膨胀到数 MB 并卡死主线程。
+     *   endless_best = 历史最高波次（跨局保留，失败也不清零）
+     * ============================================================ */
+    saveEndlessRun(data) {
+      try {
+        localStorage.setItem(ENDLESS_KEY, JSON.stringify(data));
+        return true;
+      } catch (e) {
+        /* 配额超限/隐私模式：静默失败，不影响游戏 */
+        return false;
+      }
+    },
+
+    /** 读取无尽存档；结构不合法（版本不符/字段缺失）时视为无档 */
+    loadEndlessSave() {
+      try {
+        const raw = localStorage.getItem(ENDLESS_KEY);
+        if (!raw) return null;
+        const d = JSON.parse(raw);
+        if (!d || d.v !== 1 || !Array.isArray(d.towers)) return null;
+        if (!(d.wave >= 1)) return null;
+        return d;
+      } catch (e) {
+        return null;
+      }
+    },
+
+    /** 清档（失败结算 / 选择重新开始时调用） */
+    clearEndlessSave() {
+      try { localStorage.removeItem(ENDLESS_KEY); } catch (e) {}
+    },
+
+    /** 历史最高无尽波次 */
+    getEndlessBest() {
+      try {
+        const n = parseInt(localStorage.getItem(ENDLESS_BEST_KEY) || '0', 10);
+        return n > 0 ? n : 0;
+      } catch (e) {
+        return 0;
+      }
+    },
+
+    /** 上报本局波次，刷新最高记录并返回最新值 */
+    recordEndlessBest(wave) {
+      const w = parseInt(wave, 10) || 0;
+      const cur = this.getEndlessBest();
+      if (w > cur) {
+        try { localStorage.setItem(ENDLESS_BEST_KEY, String(w)); } catch (e) {}
+        return w;
+      }
+      return cur;
     }
   };
 
