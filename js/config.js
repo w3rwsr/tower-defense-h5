@@ -2804,12 +2804,60 @@ window.TD_CONFIG = {
           "speedEveryWaves": 5,      // 每 5 波
           "speedStep": 0.05,         // 全体敌人移速 +5%（复合）
           "bossFromWave": 6,         // 第 6 波起每波都有 BOSS
-          "bossCountMin": 2,         // BOSS 数量下限
-          "bossCountMax": 4,         // BOSS 数量上限（金/灰/蓝随机组合）
+          "bossCountMin": 2,         // 第 6~9 波 BOSS 数量下限
+          "bossCountMax": 4,         // 第 6~9 波 BOSS 数量上限（金/灰/蓝随机组合）
+          /* 第 10 波起 BOSS 数量阶梯递增：第 bossScaleFromWave 波固定
+             bossCountBase 只，之后每过 bossCountStepEvery 波 +bossCountStep 只
+             （10 波 4 只 → 15 波 5 只 → 20 波 6 只 → 25 波 7 只 …） */
+          "bossScaleFromWave": 10,
+          "bossCountBase": 4,
+          "bossCountStepEvery": 5,
+          "bossCountStep": 1,
           "bossHpFactor": 20,        // BOSS 血量 = 当波小怪血 ×20（随波次成长）
           "bossReward": 2000,        // 击杀 BOSS 掉落金币
           "clearBonusBase": 200,     // 清波奖励基数
-          "clearBonusPerWave": 120   // 每清一波额外 +120（随波数递增）
+          "clearBonusPerWave": 120,  // 每清一波额外 +120（随波数递增）
+          /* ---- BOSS 极限回血（对抗百分比伤害，第 10 波起全部 BOSS）----
+             受到实际血量伤害（含百分比真伤）→ 在 healDuration 秒内回复
+             healPct(20%) 最大生命；burstWindow 秒内累计打出超过 burstPct(30%)
+             最大生命的伤害 → 回血被打断并压制 suppressDuration 秒；
+             血量低于 disableBelowHpRatio(10%) → 机制失效（防卡血不死）。
+             血条下方绿色闪烁细线 = 回血提示，提示玩家集火压制。 */
+          "bossExtremeHeal": {
+            "fromWave": 10,
+            "healPct": 0.20,
+            "healDuration": 3,
+            "burstPct": 0.30,
+            "burstWindow": 5,
+            "suppressDuration": 5,
+            "disableBelowHpRatio": 0.10
+          },
+          /* ---- 三大金币消耗机制（仅第 10 关无尽模式）----
+             祭坛：点击花 10000，全屏怪物受到伤害 +50%、移速 -50%，持续 10 秒，
+                   可重复花钱刷新（无冷却）。
+             买血：顶部生命旁按钮，5000 金币 +1 生命，无冷却无上限。
+             封印：右侧面板逐塔花 10000 永久解封（td_endless_seals_v1 本地存档）。 */
+          "buyLifeCost": 5000,
+          "altar": {
+            "cost": 10000,
+            "duration": 10,
+            "defenseBonus": 0.50,      // 降防 50% → 怪物受到伤害 ×1.5
+            "slowFactor": 0.50,        // 移速 ×0.5
+            /* 祭坛位置：均落在两排火力点之间的空地（创建时自动剔除附近塔位） */
+            "positions": [ { "x": 200, "y": 190 }, { "x": 730, "y": 345 } ]
+          },
+          /* 解封各塔（Lv4 生效；数值均集中在此，便于后续调整） */
+          "seals": {
+            "cost": 10000,
+            "towerA": { "burnUnlimited": true, "burnMinDamage": 10 },
+            "towerE": { "jumps": 20, "removeDecay": true, "truePct": 0.05, "trueCooldown": 3 },
+            "towerB": { "coldHpPerSecPct": 0.05, "bossFreezeDuration": 1, "bossFreezeCooldown": 5 },
+            "towerC": { "wetRadius": 100, "wetPerStackAmp": 0.20 },
+            "towerD": { "truePctPerSec": 0.05, "duration": 5, "cooldown": 10 },
+            "towerF": { "dmgAmp": 0.40 }
+          },
+          /* 火塔 Lv4 溅射（仅第 10 关覆盖：普通关卡仍为 TowerConfig 的 50%） */
+          "fireSplashRatio": 2.0
         },
         /* 金色 BOSS 的低血分裂（buildEndlessWave 给金 BOSS 组带 bossPhases:true）：
            血量降到 30% → 分裂 3 只绿色史莱姆小 BOSS（血量均分残余血量）；

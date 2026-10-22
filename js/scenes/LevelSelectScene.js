@@ -857,7 +857,7 @@ class LevelSelectScene extends Phaser.Scene {
    */
   codexLv4Feature(key) {
     const map = {
-      towerA: '攻击产生 50% 溅射，附加【灼烧】：每秒扣 1% 最大生命值（持续 5 秒）',
+      towerA: '攻击产生 50% 溅射（第10关无尽 200%，按火塔当前攻击力），附加【灼烧】：每秒扣 1% 最大生命值（持续 5 秒）',
       towerB: '攻击叠加【寒冷值】，满 5 层触发【寒冷】：降 20% 防御，每秒扣 2% 最大生命值',
       towerC: '攻击附加【潮湿】（最多 5 层），每层使非水元素塔对其伤害 +4%',
       towerD: '牵引结束造成 1 秒眩晕（对 BOSS 无效，5秒CD），对 BOSS 减速提升至 15%',

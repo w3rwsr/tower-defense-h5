@@ -18,6 +18,8 @@
   /* 第 10 关无尽模式：存档与历史最高波次（见文件末尾 saveEndlessRun 等） */
   const ENDLESS_KEY = 'endless_save';
   const ENDLESS_BEST_KEY = 'endless_best';
+  /* 第 10 关「解除封印」永久状态：{ towerA:true, towerE:true, ... } */
+  const ENDLESS_SEAL_KEY = 'td_endless_seals_v1';
   const TOTAL_LEVELS = 10;
   /* 当前已设计完成的关卡数：第 1～10 关可游玩（第 8 关=风蚀荒原·熔岩巨兽，
      第 9 关=元素狂暴图腾·蓝色圣殿守卫，
@@ -222,6 +224,39 @@
         return w;
       }
       return cur;
+    },
+
+    /* ---------------- 第 10 关「解除封印」永久状态 ---------------- */
+
+    /** 读取全部封印状态；损坏/无档返回空对象（不抛异常） */
+    loadEndlessSeals() {
+      try {
+        const raw = localStorage.getItem(ENDLESS_SEAL_KEY);
+        const d = raw ? JSON.parse(raw) : null;
+        if (!d || typeof d !== 'object' || Array.isArray(d)) return {};
+        const out = {};
+        ['towerA', 'towerB', 'towerC', 'towerD', 'towerE', 'towerF'].forEach((k) => {
+          if (d[k] === true) out[k] = true;
+        });
+        return out;
+      } catch (e) {
+        return {};
+      }
+    },
+
+    /** 某塔是否已永久解封 */
+    isEndlessSealUnlocked(typeKey) {
+      return this.loadEndlessSeals()[typeKey] === true;
+    },
+
+    /** 永久解封某塔（幂等写入，失败静默） */
+    unlockEndlessSeal(typeKey) {
+      if (!typeKey) return false;
+      const d = this.loadEndlessSeals();
+      if (d[typeKey] === true) return true;
+      d[typeKey] = true;
+      try { localStorage.setItem(ENDLESS_SEAL_KEY, JSON.stringify(d)); } catch (e) {}
+      return true;
     }
   };
 

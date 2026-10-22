@@ -28,6 +28,17 @@ class GameScene extends Phaser.Scene {
     /* 当前关卡编号（来自关卡选择场景），默认第 1 关 */
     this.levelId = (data && data.levelId) || 1;
 
+    /* 第 10 关无尽模式：解除封印状态（localStorage 永久保存）+ 金币机制状态。
+       前 9 关 sealState 恒空、祭坛/买血/封印 UI 全部隐藏，零影响。 */
+    this.sealState = (this.levelId === 10 && typeof TDStorage !== 'undefined' &&
+      typeof TDStorage.loadEndlessSeals === 'function')
+      ? TDStorage.loadEndlessSeals() : {};
+    this.altarBuffTimer = 0;
+    this.altarDamageMul = 1;
+    this.altarBuffSlow = 0.5;
+    this.altars = [];
+    this.windSealPermanent = false;
+
     /* 无尽续档：选关页确认「继续上次进度」时带 resume:true 进关，
        这里只读取一次快照，create 末尾统一重建（见 restoreEndlessSave） */
     this._resumeSave = (data && data.resume && this.levelId === 10)
@@ -86,10 +97,12 @@ class GameScene extends Phaser.Scene {
     this.lives = econ.startLives;
     /* 终点城堡大门（含点击热区与门旁血量牌；生命值已初始化） */
     this.drawCastleGates();
-    /* 顶部 HUD 的血量 chip 隐藏——血量已改为大门旁悬浮牌显示
-       （仅游戏中隐藏，不破坏选关场景对整个 hud-top 的 display 控制） */
+    /* 第 10 关无尽：金币祭坛（地图空地，点击消耗金币激活全屏减益） */
+    this.buildGoldAltars();
+    /* 顶部 HUD 的血量 chip：普通关卡隐藏（血量已改为大门旁悬浮牌）；
+       第 10 关无尽模式显示，并在旁边提供「金币买血」按钮 */
     const _livesChip = document.querySelector('.chip-lives');
-    if (_livesChip) _livesChip.classList.add('hidden-by-gate');
+    if (_livesChip) _livesChip.classList.toggle('hidden-by-gate', this.levelId !== 10);
     /* 波次按钮避让大门：冲突时给底部 HUD 加类上移（见 style.css .wave-clear-gate） */
     const _hudBottom = document.getElementById('hud-bottom');
     if (_hudBottom) _hudBottom.classList.toggle('wave-clear-gate', !!this.waveHudClearGate);
@@ -1469,6 +1482,9 @@ class GameScene extends Phaser.Scene {
       /* 第 9 关：图腾计时（元素护盾派发）+ 蓝色圣殿守卫光环减伤计算 */
       if (this.level9) this.level9.tick(dt);
 
+      /* 第 10 关无尽：金币祭坛增益倒计时 / 祭坛 UI */
+      if (this.levelId === 10) this.updateEndlessExtras(dt);
+
       const ctx = {
         enemies: this.enemies,
         fire: (tower, target) => this.fireProjectile(tower, target),
@@ -1683,6 +1699,53 @@ class GameScene extends Phaser.Scene {
     return (w && w.endless) ? w.endless : null;
   }
 
+  /** BOSS 极限回血参数（仅第 10 关无尽模式；第 fromWave 波起生效）。
+   *  未到起始波 / 非无尽关卡返回 null → Enemy 侧完全不启用，旧关卡零影响。 */
+  getBossExtremeHealCfg() {
+    const ec = this.getEndlessCfg();
+    if (!ec || !ec.bossExtremeHeal) return null;
+    const h = ec.bossExtremeHeal;
+    const fromWave = (h.fromWave != null) ? h.fromWave : 10;
+    if (this.waveIndex + 1 < fromWave) return null;
+    return h;
+  }
+
+  /* ============================================================
+   * 第 10 关「三大金币消耗机制」公共接口
+   * ------------------------------------------------------------
+   * 所有效果均只在 levelId===10 生效；前 9 关这些方法返回 false/null，
+   * 塔/怪物侧调用时自动走原逻辑，零影响。
+   * ============================================================ */
+
+  /** 某塔封印是否已解除（本地永久状态 + 当前关卡校验） */
+  isSealActive(typeKey) {
+    return this.levelId === 10 && !!(this.sealState && this.sealState[typeKey]);
+  }
+
+  /** 取某塔封印参数（仅已解封时返回，未解封/前 9 关返回 null） */
+  getSealCfg(typeKey) {
+    if (!this.isSealActive(typeKey)) return null;
+    const ec = this.getEndlessCfg();
+    return (ec && ec.seals && ec.seals[typeKey]) || {};
+  }
+
+  /** 第 10 关火塔 Lv4 溅射倍率（普通关卡返回 null → 使用 TowerConfig 原值） */
+  getFireSplashRatio() {
+    const ec = this.getEndlessCfg && this.getEndlessCfg();
+    if (!ec || ec.fireSplashRatio == null) return null;
+    return ec.fireSplashRatio;
+  }
+
+  /** 风塔封印：给单只怪物挂常驻 40% 风蚀增伤 */
+  applyWindSealToEnemy(e) {
+    if (!e || e.dead || e.removed) return;
+    const cfg = this.getSealCfg('towerF');
+    if (!cfg) return;
+    const amp = (cfg.dmgAmp != null) ? cfg.dmgAmp : 0.40;
+    e.statusWindAmp = Math.max(e.statusWindAmp || 0, amp);
+    e._windTimer = 1e9;   // 常驻：不参与到期清除
+  }
+
   /** 无尽模式波次生成：按【波号(1 起)】返回本波出怪 groups（expandWaveSpawns 消费）。
    *  前 basicWaves 波普通基础怪 → 第 denseFromWave 波起出怪量拉满并随波数增密
    *  → 第 bossFromWave 波起每波 2~4 只随机 BOSS（金/灰/蓝）。 */
@@ -1726,7 +1789,10 @@ class GameScene extends Phaser.Scene {
     /* 自爆泥怪（极快 + 自爆禁言塔） */
     push('bomberSlime', cap(3 + Math.floor(t / 2), 12), Math.max(0.35, iv + 0.05));
 
-    /* ---- BOSS：第 bossFromWave 波起每波 2~4 只（金/灰/蓝随机组合） ----
+    /* ---- BOSS：第 bossFromWave 波起每波 2~4 只（金/灰/蓝随机组合）；
+       第 bossScaleFromWave(10) 波起数量改为固定基数 + 阶梯递增：
+       每过 bossCountStepEvery(5) 波 +bossCountStep(1) 只
+       （第 10 波 4 只 → 15 波 5 只 → 20 波 6 只 → 25 波 7 只 …） ----
        颜色必须绑定到【真正的 BOSS 类型】，否则只是换贴图的血牛：
          gold → enemyBoss + bossVariantPattern['gold'] + bossPhases（低血分裂）
                 + bossSpeedMul 1.5（比其他 BOSS 快 50%）
@@ -1736,7 +1802,13 @@ class GameScene extends Phaser.Scene {
     if (waveNo >= (ec.bossFromWave != null ? ec.bossFromWave : 6)) {
       const min = (ec.bossCountMin != null) ? ec.bossCountMin : 2;
       const max = (ec.bossCountMax != null) ? ec.bossCountMax : 4;
-      const n = min + Math.floor(Math.random() * (max - min + 1));
+      const scaleFrom = (ec.bossScaleFromWave != null) ? ec.bossScaleFromWave : 10;
+      const scaleEvery = Math.max(1, (ec.bossCountStepEvery != null) ? ec.bossCountStepEvery : 5);
+      const scaleStep = (ec.bossCountStep != null) ? ec.bossCountStep : 1;
+      const baseCount = (ec.bossCountBase != null) ? ec.bossCountBase : max;
+      const n = (waveNo >= scaleFrom)
+        ? baseCount + Math.floor((waveNo - scaleFrom) / scaleEvery) * scaleStep
+        : min + Math.floor(Math.random() * (max - min + 1));
       const hpF = (ec.bossHpFactor != null) ? ec.bossHpFactor : 20;
       const rw = (ec.bossReward != null) ? ec.bossReward : 2000;
       const pool = ['gold', 'gray', 'blue'];
@@ -2019,6 +2091,13 @@ class GameScene extends Phaser.Scene {
     /* JSON 驱动加速（第 4 关 branchSpawns.speedBonus=0.10）：
        仅作用于右侧岔路追加怪（entry.speedBonus），主波出怪无此字段不加速 */
     if (entry.speedBonus) e.baseSpeed *= (1 + entry.speedBonus);
+    /* 第 10 关金币祭坛：持续期间新出怪同样享受 50% 减速 */
+    if (this.altarBuffTimer > 0 && typeof e.applySlow === 'function') {
+      e.applySlow(this.altarBuffSlow, this.altarBuffTimer, 'altar', true);
+    }
+    /* 第 10 关风塔封印：风蚀增伤常驻 40%（首次 Lv4 风塔命中后全场生效，
+       后续新出怪同样继承） */
+    if (this.windSealPermanent) this.applyWindSealToEnemy(e);
     this.enemies.push(e);
     return e;
   }
@@ -2162,7 +2241,7 @@ class GameScene extends Phaser.Scene {
       if (bp.miniTint !== false) mi.body.setTint(0xff9a3c);
       this.enemies.push(mi);
     }
-    this.banner('BOSS 分裂成 ' + n + ' 个小 BOSS！', 0x7be86b);
+    if (this.levelId !== 10) this.banner('BOSS 分裂成 ' + n + ' 个小 BOSS！', 0x7be86b);
     this.makePortalBurst(e.x, e.y, 0x7be86b);
     e.destroyImmediately();
   }
@@ -2228,8 +2307,10 @@ class GameScene extends Phaser.Scene {
     if (bp.finalScale) mb.setScale(bp.finalScale);
     if (!bp.mergeKeepParentStats) mb.body.setTint(0xff6666);
     this.enemies.push(mb);
-    this.banner(bp.mergeKeepParentStats ? '小 BOSS 重新聚合！' : 'BOSS 合体归来！',
-      bp.mergeKeepParentStats ? 0x7be86b : 0xff6666);
+    if (this.levelId !== 10) {
+      this.banner(bp.mergeKeepParentStats ? '小 BOSS 重新聚合！' : 'BOSS 合体归来！',
+        bp.mergeKeepParentStats ? 0x7be86b : 0xff6666);
+    }
     this.makePortalBurst(p.x, p.y, bp.mergeKeepParentStats ? 0x7be86b : 0xff6666);
   }
 
@@ -2254,9 +2335,11 @@ class GameScene extends Phaser.Scene {
     const gid = (this._lavaSplitSeq = (this._lavaSplitSeq || 0) + 1);
     this._lavaSplitGroups = this._lavaSplitGroups || {};
     const group = this._lavaSplitGroups[gid] = {
+      gid: gid,
       alive: n,
       total: n,
       done: false,
+      members: [],                 // 本组全部分裂体（聚合时统一兜底清理减伤标记）
       healRatio: ph.mergeHeal != null ? ph.mergeHeal : 0.5,
       lastRoute: boss.routeId,
       lastDist: boss.pathDist,
@@ -2275,17 +2358,26 @@ class GameScene extends Phaser.Scene {
     for (let i = 0; i < n; i++) {
       const e = this.spawnEnemy({ type: 'crystalSlime', route: boss.routeId });
       if (!e) continue;
-      /* 特殊分裂体：90% 常态减伤 + 40 次元素反应破防后减伤归零 */
-      e.armorBase = (ph.splitArmor != null) ? ph.splitArmor : 0.9;
-      e.dmgReduction = e.armorBase;
-      e._brk = {
-        need: (ph.splitNeed != null) ? ph.splitNeed : 40,
-        reduced: (ph.splitReduced != null) ? ph.splitReduced : 0,
-        duration: (ph.splitBreakDur != null) ? ph.splitBreakDur : 6
-      };
-      e.reactionCount = 0;    // 分裂体从 0 开始重新累计元素反应
-      e.breakTimer = 0;
-      e.__lavaSplitGid = gid;
+      /* 特殊分裂体：90% 常态减伤 + 40 次元素反应破防后减伤归零。
+         走 CrystalSlime.applyLavaSplitForm：把普通史莱姆配置暂存起来，
+         死亡/漏怪/聚合时由 clearLavaSplitForm 精确还原（减伤只属于
+         这一批分裂体，绝不残留到后续波次或污染其他怪物） */
+      if (typeof e.applyLavaSplitForm === 'function') {
+        e.applyLavaSplitForm(ph, gid);
+      } else {
+        /* 兜底（理论上不会走到）：旧口径字段覆写 */
+        e.armorBase = (ph.splitArmor != null) ? ph.splitArmor : 0.9;
+        e.dmgReduction = e.armorBase;
+        e._brk = {
+          need: (ph.splitNeed != null) ? ph.splitNeed : 40,
+          reduced: (ph.splitReduced != null) ? ph.splitReduced : 0,
+          duration: (ph.splitBreakDur != null) ? ph.splitBreakDur : 6
+        };
+        e.reactionCount = 0;    // 分裂体从 0 开始重新累计元素反应
+        e.breakTimer = 0;
+        e.__lavaSplitGid = gid;
+      }
+      group.members.push(e);
       const off = (i - (n - 1) / 2) * 26;   // 沿路前后错开，避免完全重叠
       e.pathDist = Phaser.Math.Clamp(boss.pathDist + off, 0, len);
       const p = this.pathPointAt(e.pathDist, e.routeId);
@@ -2293,17 +2385,25 @@ class GameScene extends Phaser.Scene {
       e.drawHpBar(1);
       this.makePortalBurst(p.x, p.y, 0x9fdcff);
     }
-    this.floatText(bx, by - boss.radius - 40, '熔岩巨兽分裂！', 0x9fdcff);
-    this.banner('熔岩巨兽分裂出 ' + n + ' 只水晶史莱姆（90% 减伤）！', 0x9fdcff);
+    /* 第 10 关界面极简：不弹「分裂 / 90% 减伤」等机制白字（仅保留元素特效） */
+    if (this.levelId !== 10) {
+      this.floatText(bx, by - boss.radius - 40, '熔岩巨兽分裂！', 0x9fdcff);
+      this.banner('熔岩巨兽分裂出 ' + n + ' 只水晶史莱姆（90% 减伤）！', 0x9fdcff);
+    }
     this.makePortalBurst(bx, by, 0xff8c3a);
     /* 本体消失：直接销毁（不走死亡流程，无金币/无爆炸动画） */
     boss.dead = true;
     boss.destroyImmediately();
   }
 
-  /** 分裂体死亡 / 漏怪计数：全部结束后同步聚合（保证清场判定前 BOSS 已在场） */
+  /** 分裂体死亡 / 漏怪计数：先清除该分裂体的 90% 减伤形态，
+   *  全部结束后同步聚合（保证清场判定前 BOSS 已在场） */
   _lavaSplitCountKill(e) {
-    const g = this._lavaSplitGroups && this._lavaSplitGroups[e.__lavaSplitGid];
+    const gid = e.__lavaSplitGid;   // 清理会重置组标记，必须先取
+    /* 分裂体已死亡/漏怪：立刻把 90% 减伤与破防状态还原为普通史莱姆口径，
+       保证减伤只在分裂体存活期间生效（重复调用幂等） */
+    if (e && typeof e.clearLavaSplitForm === 'function') e.clearLavaSplitForm();
+    const g = this._lavaSplitGroups && this._lavaSplitGroups[gid];
     if (!g || g.done) return;
     g.alive--;
     g.lastRoute = e.routeId;
@@ -2321,6 +2421,12 @@ class GameScene extends Phaser.Scene {
     const Cls = (typeof LEVEL8_ENEMY_CLASSES !== 'undefined' && LEVEL8_ENEMY_CLASSES.lavaBoss)
       ? LEVEL8_ENEMY_CLASSES.lavaBoss : null;
     if (!Cls) return;
+    /* 聚合前兜底清理整组分裂体的 90% 减伤形态（含已死亡但尚未销毁的实例），
+       保证减伤绝不随聚合体/后续波次残留 */
+    for (const m of (g.members || [])) {
+      if (m && typeof m.clearLavaSplitForm === 'function') m.clearLavaSplitForm();
+    }
+    if (this._lavaSplitGroups && g.gid != null) delete this._lavaSplitGroups[g.gid];
     const len = this.routeLength(g.lastRoute);
     const e = new Cls(this, 'lavaBoss', g.lastRoute,
       g.parent.tex ? { bossTexKey: g.parent.tex } : null);
@@ -2329,14 +2435,17 @@ class GameScene extends Phaser.Scene {
     e.baseSpeed = g.parent.speed;
     e.reward = g.parent.reward;
     e.leakDamage = g.parent.leak;
+    e.dmgReduction = 0;            // 聚合体不继承任何分裂期减伤
     e.__noSplit = true;            // 聚合体：不再二次分裂（防无限分裂循环）
     e.pathDist = Phaser.Math.Clamp(g.lastDist, 0, len);
     const p = this.pathPointAt(e.pathDist, g.lastRoute);
     e.setPosition(p.x, p.y);
     e.drawHpBar(e.hp / e.maxHp);
     this.enemies.push(e);
-    this.floatText(p.x, p.y - e.radius - 42, '聚合！恢复 50% 生命', 0xff8c3a);
-    this.banner('水晶史莱姆重新聚合为熔岩巨兽！', 0xff8c3a);
+    if (this.levelId !== 10) {
+      this.floatText(p.x, p.y - e.radius - 42, '聚合！恢复 50% 生命', 0xff8c3a);
+      this.banner('水晶史莱姆重新聚合为熔岩巨兽！', 0xff8c3a);
+    }
     this.makePortalBurst(p.x, p.y, 0xff8c3a);
   }
 
@@ -2375,6 +2484,7 @@ class GameScene extends Phaser.Scene {
 
   endGame(win) {
     this.state = win ? 'won' : 'lost';
+    this.hideEndlessUi();          // 结算时收起祭坛/封印等无尽 UI
     this.ghost.clear();
     this.hidePanel();
     this.closeTowerPicker(true);
@@ -3021,8 +3131,9 @@ class GameScene extends Phaser.Scene {
 
   /** 落子建塔。typeKey 显式传入时=选塔浮框直接放置（不进入/不依赖放置模式）；
    *  缺省时沿用旧放置模式（this.selectedType，底部栏移除后已无 UI 入口，保留兜底）。
+   *  instant=true（读档重建）：跳过入场缩放 Tween，避免与升级/设级产生二次缩放。
    *  返回是否放置成功。 */
-  placeTower(x, y, key, typeKey) {
+  placeTower(x, y, key, typeKey, instant) {
     const tk = typeKey || this.selectedType;
     if (!tk) return false;
     const cfg = TD_CONFIG.towers[tk];
@@ -3035,7 +3146,9 @@ class GameScene extends Phaser.Scene {
     tower.hotspotKey = key;            // 记录所占热区（出售时精确释放，主/交错晶格通用）
     this.towers.push(tower);
     this.occupied.set(key, tower);
-    this.tweens.add({ targets: tower, scale: { from: 0.4, to: 1 }, duration: 160, ease: 'Back.out' });
+    if (!instant) {
+      this.tweens.add({ targets: tower, scale: { from: 0.4, to: 1 }, duration: 160, ease: 'Back.out' });
+    }
     /* 放置后刷新可放置区域：被占的格子从图层中消失，无需手动清空 */
     if (this.selectedType) this.drawPlacementGrid();
     // 放置模式下金币不够再放一座时自动退出；选塔浮框每次点击只放一座
@@ -3141,10 +3254,12 @@ class GameScene extends Phaser.Scene {
     if (effType === 'pull') {
       p._stats.setText('类型 范围吸引·控场\n射程 ' + tower.stats.range + '   伤害 ' + tower.stats.damage);
     } else if (effType === 'chain') {
+      const sealE = this.getSealCfg('towerE');
+      const jumps = sealE ? ((sealE.jumps != null) ? sealE.jumps : 20) : tower.stats.jumps;
       p._stats.setText(
         '伤害 ' + tower.stats.damage +
         '   射程 ' + tower.stats.range +
-        '\n电链弹跳 ' + tower.stats.jumps + ' 次'
+        '\n电链弹跳 ' + jumps + ' 次' + (sealE ? ' · 真伤 5% / 3s' : '')
       );
     } else if (effType === 'windSpread') {
       const weff = tower.cfg.effect || {};
@@ -3154,10 +3269,13 @@ class GameScene extends Phaser.Scene {
         ' · 冷却 ' + (weff.spreadCooldown != null ? weff.spreadCooldown : 0) + 's'
       );
     } else {
+      /* 第 10 关火塔 Lv4 溅射 200%（普通关卡 50%），面板同步显示 */
+      const splashNote = (tower.isFire && tower.level >= 4 && this.levelId === 10)
+        ? ' · 溅射 200%' : '';
       p._stats.setText(
         '伤害 ' + tower.stats.damage +
         '   射程 ' + tower.stats.range +
-        '\n攻速 ' + (1 / tower.stats.cooldown).toFixed(2) + ' 次/秒'
+        '\n攻速 ' + (1 / tower.stats.cooldown).toFixed(2) + ' 次/秒' + splashNote
       );
     }
 
@@ -3885,9 +4003,13 @@ class GameScene extends Phaser.Scene {
       onComplete: () => spark.destroy()
     });
 
-    /* 反应名 + 倍率（冰冻无倍率；风塔扩散触发的反应 mult=0 也不显示倍率） */
-    const label = rule.label + (mult && mult > 1 ? ' ×' + mult : '');
-    this.floatText(x, y - enemy.radius - 14, label, p.color);
+    /* 反应名 + 倍率（冰冻无倍率；风塔扩散触发的反应 mult=0 也不显示倍率）。
+       第 10 关无尽模式界面极简：只保留元素特效，不再显示「融化/感电」等文字，
+       伤害反馈统一由头顶元素色伤害飘字承担。前 9 关保持原提示。 */
+    if (this.levelId !== 10) {
+      const label = rule.label + (mult && mult > 1 ? ' ×' + mult : '');
+      this.floatText(x, y - enemy.radius - 14, label, p.color);
+    }
   }
 
   /* 提前破冰特效：冰蓝碎块四溅 + 白色冰环 */
@@ -3935,6 +4057,53 @@ class GameScene extends Phaser.Scene {
     this.tweens.add({
       targets: t, y: y - 34, alpha: 0,
       duration: 800, ease: 'Cubic.out', onComplete: () => t.destroy()
+    });
+  }
+
+  /* ============================================================
+   * 第 10 关伤害飘字（元素颜色）
+   * ------------------------------------------------------------
+   * 火=橙红 / 冰=浅蓝 / 水=深蓝 / 雷=紫 / 真伤·百分比=金色。
+   * 位置在怪物头顶（血条上方）随机小幅偏移，快速上浮淡出，不遮挡道路与模型；
+   * 同一只怪同色伤害在 180ms 内合并成一个数字，避免高频弹幕/DOT 刷屏。
+   * 仅第 10 关显示；前 9 关直接 return，保持原界面。
+   * ============================================================ */
+  damageNumber(enemy, amount, element, isTrue) {
+    if (this.levelId !== 10 || !enemy || !(amount > 0)) return;
+    const now = (this.time && this.time.now) || 0;
+    const key = isTrue ? 'true' : (element || 'none');
+    const bag = enemy._dmgBag || (enemy._dmgBag = {});
+    const cur = bag[key];
+    const val = Math.max(1, Math.round(amount));
+    /* 180ms 内同色伤害合并：更新数字并轻微弹一下，不新建文本 */
+    if (cur && cur.text && cur.text.active && now - cur.t0 < 180) {
+      cur.amount += val;
+      cur.text.setText(String(Math.round(cur.amount)));
+      cur.text.setScale(1.08);
+      this.tweens.add({ targets: cur.text, scale: 1, duration: 80 });
+      return;
+    }
+    const colors = { fire: 0xff7a3d, ice: 0x9fe8ff, water: 0x2f7fff, thunder: 0xc084ff };
+    const color = isTrue ? 0xffe27a : (colors[element] || 0xffffff);
+    const x = Math.round(enemy.x + (Math.random() * 16 - 8));
+    const y = Math.round(enemy.y - (enemy.radius || 12) - 22 - Math.random() * 4);
+    const t = this.add.text(x, y, String(val), {
+      fontFamily: TD_FONT_STACK,
+      fontSize: '13px', fontStyle: 'bold',
+      color: '#' + color.toString(16).padStart(6, '0'),
+      resolution: TD_TEXT_RES
+    }).setOrigin(0.5).setDepth(710).setStroke('#1b1412', 2);
+    t.setScale(1.15);
+    const rec = { key: key, t0: now, amount: val, text: t };
+    bag[key] = rec;
+    this.tweens.add({ targets: t, scale: 1, duration: 90, ease: 'Cubic.out' });
+    this.tweens.add({
+      targets: t, y: y - 24, alpha: { from: 1, to: 0 },
+      duration: 560, ease: 'Cubic.out',
+      onComplete: () => {
+        if (bag[key] === rec) bag[key] = null;
+        try { t.destroy(); } catch (_) {}
+      }
     });
   }
 
@@ -4057,6 +4226,42 @@ class GameScene extends Phaser.Scene {
       const s = window.__tdScene;
       if (s) s.scene.restart({ levelId: s.levelId });
     });
+
+    /* ---- 第 10 关无尽：金币买血 / 解除封印面板（前 9 关隐藏） ---- */
+    const endlessNow = this.levelId === 10;
+    const buyLifeBtn = document.getElementById('btn-buy-life');
+    if (buyLifeBtn) buyLifeBtn.classList.toggle('show', endlessNow);
+    const sealToggle = document.getElementById('btn-seal-panel');
+    if (sealToggle) sealToggle.classList.toggle('show', endlessNow);
+    const sealPanelEl = document.getElementById('seal-panel');
+    if (sealPanelEl) {
+      if (!endlessNow) sealPanelEl.classList.add('hidden');
+      else this.refreshSealPanel();
+      if (!sealPanelEl.dataset.bound) {
+        sealPanelEl.dataset.bound = '1';
+        /* 事件委托：点击某个封印条目 → 花金币解封 */
+        sealPanelEl.addEventListener('click', (ev) => {
+          const item = ev.target && ev.target.closest ? ev.target.closest('[data-seal]') : null;
+          if (!item) return;
+          const s = window.__tdScene;
+          if (s && typeof s.unlockSeal === 'function') s.unlockSeal(item.dataset.seal);
+        });
+      }
+    }
+    bindOnce('btn-buy-life', 'click', () => {
+      const s = window.__tdScene;
+      if (s && typeof s.buyLife === 'function') s.buyLife();
+    });
+    bindOnce('btn-seal-panel', 'click', () => {
+      const s = window.__tdScene;
+      if (s && typeof s.toggleSealPanel === 'function') s.toggleSealPanel();
+    });
+    bindOnce('btn-seal-close', 'click', () => {
+      const s = window.__tdScene;
+      if (s && typeof s.toggleSealPanel === 'function') s.toggleSealPanel(false);
+    });
+    /* 场景关闭（返回选关 / 重开 / 结算）时收起无尽 UI，避免残留 */
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.hideEndlessUi());
     /* 结算页「返回选关」：同样做方法存在性检查（见上） */
     bindOnce('btn-to-levels', 'click', () => {
       const s = window.__tdScene;
@@ -4766,6 +4971,211 @@ class GameScene extends Phaser.Scene {
   }
 
   /* ============================================================
+   * 第 10 关无尽：金币祭坛 / 金币买血 / 解除封印
+   * ============================================================ */
+
+  /** 在地图空地生成金币祭坛（JSON positions；自动剔除祭坛附近的塔位）。
+   *  点击消耗金币 → 全屏怪物受到伤害 +50%、移速 -50%，持续 duration 秒，
+   *  可重复点击花钱刷新（无冷却）。 */
+  buildGoldAltars() {
+    const ec = this.getEndlessCfg();
+    if (!ec || !ec.altar || !ec.altar.positions) return;
+    const cfg = ec.altar;
+    this.altarCfg = cfg;
+    this._altarUiClock = 0;
+    (cfg.positions || []).forEach((p, idx) => {
+      if (!p || p.x == null || p.y == null) return;
+      /* 祭坛必须落在空地：离路太近则不建（避免压路/挡怪） */
+      if (typeof this.distToPath === 'function' && this.distToPath(p.x, p.y) < 38) return;
+      /* 剔除祭坛周围塔位，保证点击祭坛不会与选塔热区冲突 */
+      this.hotspots = (this.hotspots || []).filter(
+        (h) => Math.hypot(h.x - p.x, h.y - p.y) > 46);
+      const c = this.add.container(p.x, p.y).setDepth(14);
+      const g = this.add.graphics();
+      const icon = this.add.text(0, -2, '祭', {
+        fontFamily: TD_FONT_STACK, fontSize: '18px', fontStyle: 'bold',
+        color: '#5a3d16', resolution: TD_TEXT_RES
+      }).setOrigin(0.5);
+      const label = this.add.text(0, 28, '', {
+        fontFamily: TD_FONT_STACK, fontSize: '11px', fontStyle: 'bold',
+        color: '#ffe27a', resolution: TD_TEXT_RES
+      }).setOrigin(0.5).setStroke('#3a2a10', 3);
+      const zone = this.add.zone(0, 0, 58, 58).setInteractive({ useHandCursor: true });
+      zone.setData('ui', true);
+      zone.on('pointerdown', (p) => {
+        /* 阻止冒泡到场景级 onPointerDown，避免激活祭坛同时触发选塔/集火 */
+        if (p && p.event && p.event.stopPropagation) p.event.stopPropagation();
+        this.activateGoldAltar();
+      });
+      c.add([g, icon, label, zone]);
+      this.altars.push({ x: p.x, y: p.y, g, icon, label, zone, activeShown: false });
+    });
+    this.refreshAltarVisual();
+  }
+
+  /** 点击祭坛：扣 10000 → 全屏降防/减速 10 秒；金币不足则提示 */
+  activateGoldAltar() {
+    const cfg = this.altarCfg || (this.getEndlessCfg() && this.getEndlessCfg().altar);
+    if (!cfg || this.state === 'lost' || this.state === 'won') return false;
+    const cost = (cfg.cost != null) ? cfg.cost : 10000;
+    const dur = (cfg.duration != null) ? cfg.duration : 10;
+    const a0 = this.altars && this.altars[0];
+    if (this.gold < cost) {
+      if (a0) this.floatText(a0.x, a0.y - 42, '金币不足', 0xffd66b);
+      return false;
+    }
+    this.gold -= cost;
+    this.altarBuffTimer = dur;
+    this.altarBuffSlow = (cfg.slowFactor != null) ? cfg.slowFactor : 0.5;
+    this.altarDamageMul = 1 + ((cfg.defenseBonus != null) ? cfg.defenseBonus : 0.5);
+    /* 当前场上全部怪物立即挂 50% 减速（BOSS 免疫硬控但允许 >0 的减速） */
+    for (const e of this.enemies) {
+      if (!e || e.dead || e.removed) continue;
+      if (typeof e.applySlow === 'function') e.applySlow(this.altarBuffSlow, dur, 'altar', true);
+    }
+    this.syncHud();
+    this.refreshAltarVisual();
+    if (a0) this.floatText(a0.x, a0.y - 44, '全屏降防/减速 ' + dur + ' 秒', 0xffd66b);
+    return true;
+  }
+
+  /** 无尽金币机制每帧结算（仅 dt>0 时调用；暂停即冻结） */
+  updateEndlessExtras(dt) {
+    if (this.altarBuffTimer > 0) {
+      this.altarBuffTimer -= dt;
+      if (this.altarBuffTimer <= 0) {
+        this.altarBuffTimer = 0;
+        this.altarDamageMul = 1;
+      }
+    }
+    this._altarUiClock = (this._altarUiClock || 0) + dt;
+    if (this._altarUiClock >= 0.25) {
+      this._altarUiClock = 0;
+      this.refreshAltarVisual();
+    }
+  }
+
+  /** 祭坛视觉/文案：常态金色；生效期间绿色并显示剩余秒数 */
+  refreshAltarVisual() {
+    if (!this.altars || !this.altars.length) return;
+    const active = this.altarBuffTimer > 0;
+    const sec = active ? Math.max(0, Math.ceil(this.altarBuffTimer)) : 0;
+    const cost = (this.altarCfg && this.altarCfg.cost != null) ? this.altarCfg.cost : 10000;
+    for (const a of this.altars) {
+      a.g.clear();
+      a.g.fillStyle(0x000000, 0.18).fillEllipse(0, 6, 44, 16);
+      a.g.fillStyle(active ? 0x9be86b : 0xffd96a, 1).fillCircle(0, 0, 20);
+      a.g.lineStyle(3, active ? 0x4c9e2f : 0xa06b12, 1).strokeCircle(0, 0, 20);
+      a.g.lineStyle(2, 0xfff3c4, 0.9).strokeCircle(0, 0, 14);
+      a.icon.setColor(active ? '#1f4a10' : '#5a3d16');
+      a.label.setText(active ? ('祭坛生效 ' + sec + 's') : ('金币祭坛 ' + cost));
+      a.label.setColor(active ? '#7be86b' : '#ffe27a');
+      a.activeShown = active;
+    }
+  }
+
+  /** 金币买血：5000 金币 +1 生命，无冷却无上限（仅第 10 关） */
+  buyLife() {
+    const ec = this.getEndlessCfg();
+    if (!ec || this.state === 'lost' || this.state === 'won') return false;
+    const cost = (ec.buyLifeCost != null) ? ec.buyLifeCost : 5000;
+    if (this.gold < cost) return false;
+    this.gold -= cost;
+    this.lives += 1;
+    for (const g of this.castleGates || []) {
+      if (g && g.badge) g.badge.setText(String(this.lives));
+    }
+    this.syncHud();
+    const gate = this.castleGates && this.castleGates[0];
+    if (gate) this.floatText(gate.x, gate.y - 72, '+1 生命', 0xff8a8a);
+    return true;
+  }
+
+  /** 打开/关闭右上角「解除封印」面板 */
+  toggleSealPanel(show) {
+    const p = document.getElementById('seal-panel');
+    if (!p) return;
+    if (this.levelId !== 10) { p.classList.add('hidden'); return; }
+    const open = (show != null) ? !!show : p.classList.contains('hidden');
+    p.classList.toggle('hidden', !open);
+    if (open) this.refreshSealPanel();
+  }
+
+  /** 刷新封印面板：已解封置绿并禁用，未解封显示 10000 价格 */
+  refreshSealPanel() {
+    const p = document.getElementById('seal-panel');
+    const ec = this.getEndlessCfg();
+    if (!p || !ec || !ec.seals) return;
+    const cost = (ec.seals.cost != null) ? ec.seals.cost : 10000;
+    p.querySelectorAll('.seal-item').forEach((btn) => {
+      const key = btn.dataset.seal;
+      const on = this.isSealActive(key);
+      btn.classList.toggle('unlocked', on);
+      btn.disabled = on;
+      const price = btn.querySelector('.seal-price');
+      if (price) price.textContent = on ? '已解封' : String(cost);
+    });
+  }
+
+  /** 花 10000 解封某塔：写本地永久状态 → 更新面板 → 即时应用可立即生效的封印 */
+  unlockSeal(typeKey) {
+    const ec = this.getEndlessCfg();
+    if (!ec || !ec.seals || !ec.seals[typeKey]) return false;
+    if (this.isSealActive(typeKey)) return true;
+    const cost = (ec.seals.cost != null) ? ec.seals.cost : 10000;
+    if (this.gold < cost) {
+      this.flashSealMsg('金币不足，需要 ' + cost);
+      return false;
+    }
+    this.gold -= cost;
+    TDStorage.unlockEndlessSeal(typeKey);
+    this.sealState = TDStorage.loadEndlessSeals();
+    this.syncHud();
+    this.refreshSealPanel();
+    const names = {
+      towerA: '火塔', towerE: '雷塔', towerB: '冰塔',
+      towerC: '水塔', towerD: '引力塔', towerF: '风塔'
+    };
+    this.flashSealMsg('已解封：' + (names[typeKey] || typeKey), true);
+    this.applySealImmediate(typeKey);
+    return true;
+  }
+
+  /** 封印购买后的即时生效项：风塔若场上已有 Lv4 风塔，立即开启常驻 40% */
+  applySealImmediate(typeKey) {
+    if (typeKey !== 'towerF') return;
+    const hasLv4Wind = (this.towers || []).some(
+      (t) => t && t.typeKey === 'towerF' && t.level >= 4 && !t.removed);
+    if (!hasLv4Wind) return;
+    this.windSealPermanent = true;
+    for (const e of this.enemies) this.applyWindSealToEnemy(e);
+  }
+
+  /** 封印面板底部短提示（1.6 秒自动清除） */
+  flashSealMsg(text, ok) {
+    const el = document.getElementById('seal-msg');
+    if (!el) return;
+    el.textContent = text || '';
+    el.style.color = ok ? '#2e7d1c' : '#c0392b';
+    if (this._sealMsgTimer) clearTimeout(this._sealMsgTimer);
+    this._sealMsgTimer = setTimeout(() => {
+      if (el) el.textContent = '';
+    }, 1600);
+  }
+
+  /** 离开关卡/切场景时收起第 10 关专属 UI，避免残留到选关页或下一局 */
+  hideEndlessUi() {
+    const p = document.getElementById('seal-panel');
+    if (p) p.classList.add('hidden');
+    const b = document.getElementById('btn-buy-life');
+    if (b) b.classList.remove('show');
+    const t = document.getElementById('btn-seal-panel');
+    if (t) t.classList.remove('show');
+    const msg = document.getElementById('seal-msg');
+    if (msg) msg.textContent = '';
+  }
+
+  /* ============================================================
    * 第 10 关无尽模式存档（只存塔，不存怪）
    * ============================================================ */
 
@@ -4830,14 +5240,26 @@ class GameScene extends Phaser.Scene {
       const x = Math.round(t.x), y = Math.round(t.y);
       const key = x + '_' + y;
       if (this.occupied.has(key)) continue;
-      if (!this.placeTower(x, y, key, t.t)) continue;
+      if (!this.placeTower(x, y, key, t.t, true)) continue;
       const tw = this.occupied.get(key);
       if (!tw) continue;
+      /* 关键：先读存档等级，再立刻按该等级应用贴图/尺寸/属性。
+         不走 upgrade()（波次门控/费用/缩放 Tween 均不参与读档），
+         最后把容器 scale 固定回 1 —— 不会停留在 1 级默认尺寸，也不会二次缩放 */
       const lv = Math.max(1, Math.min(t.l || 1, tw.maxLevel));
-      while (tw.level < lv) {
-        if (!tw.upgrade()) { tw.level = lv; tw.recalcStats(); break; }
-      }
+      tw.setLevel(lv);
+      this.tweens.killTweensOf(tw);
+      tw.setScale(1);
       if (tw.badge) tw.badge.setText('Lv' + tw.level);
+      /* 出售返还基准：按升到存档等级的历史花费折算（与正常升级口径一致） */
+      let invest = tw.cfg.cost;
+      const upCfg = tw.cfg.upgrade || {};
+      const lvlFactor = (this.levelCfg && this.levelCfg.upgradeCostFactor) || 1;
+      for (let l = 1; l < tw.level; l++) {
+        if (upCfg.lv4Cost != null && l + 1 >= 4) invest += upCfg.lv4Cost;
+        else invest += Math.round(tw.cfg.cost * (upCfg.costFactor || 0) * l * lvlFactor);
+      }
+      tw.invested = invest;
       built++;
     }
     this.gold = targetGold;
@@ -5036,6 +5458,17 @@ class GameScene extends Phaser.Scene {
     document.getElementById('hud-wave').textContent = endlessNow
       ? ((this.waveIndex + 1) + ' 波')
       : (Math.min(this.waveIndex + 1, this.levelCfg.waves.list.length) + '/' + this.levelCfg.waves.list.length);
+
+    /* 金币买血按钮（仅第 10 关显示）：价格实时读取 JSON，金币不足置灰 */
+    const buyLifeBtn = document.getElementById('btn-buy-life');
+    if (buyLifeBtn) {
+      const ec = this.getEndlessCfg();
+      if (ec) {
+        const cost = (ec.buyLifeCost != null) ? ec.buyLifeCost : 5000;
+        buyLifeBtn.textContent = '买血 ' + cost;
+        buyLifeBtn.disabled = this.gold < cost;
+      }
+    }
 
     // 商店按钮：未解锁显示锁定态（保持可点击以弹出解锁条件提示，
     // 不用 disabled——禁用按钮不派发 click）；已解锁则按金币置灰 / 选中高亮

@@ -593,7 +593,37 @@ class Tower extends Phaser.GameObjects.Container {
     this.invested += cost;
     this.recalcStats();
     this.badge.setText('Lv' + this.level);
-    /* 火塔：升级切换美术贴图；燃烧视频已接管时只用视频，不重建静态动效 */
+    this._applyLevelArt();
+    // 升级小动画
+    this.scene.tweens.add({ targets: this, scale: 1.18, duration: 110, yoyo: true });
+    return cost;
+  }
+
+  /* ============================================================
+   * 读档重建 / 即时设级：直接写入等级并立刻应用对应贴图与尺寸
+   * ------------------------------------------------------------
+   * 与 upgrade() 的区别：
+   *   · 不检查波次门控、不扣金币、不增加 invested（存档已记录等级）；
+   *   · 不播放升级缩放 Tween，容器 scale 固定回 1 —— 读档时不会与
+   *     placeTower 的入场缩放叠加产生二次缩放或停在缩小状态。
+   * 关键：先写 level 再调 _applyLevelArt（贴图 key / displaySize /
+   *   缩放比例全部按新等级重新取），避免停留在 1 级默认尺寸。
+   * ============================================================ */
+  setLevel(lv) {
+    const target = Math.max(1, Math.min(Math.round(lv) || 1, this.maxLevel));
+    this.level = target;
+    this.recalcStats();
+    this.badge.setText('Lv' + this.level);
+    this._applyLevelArt();
+    this.setScale(1);
+    return target;
+  }
+
+  /* 按当前 this.level 立即应用美术贴图与显示尺寸（升级 / 读档重建共用）。
+     火塔：贴图 + 燃烧视频引用；冰/水/雷/引力/风塔：各自的等级贴图与尺寸；
+     4 级进化：额外叠加元素光环。 */
+  _applyLevelArt() {
+    /* 火塔：切换美术贴图；燃烧视频已接管时只用视频，不重建静态动效 */
     if (this.isFire) {
       this.turret.setTexture(this._fireTexKey());
       const ds = this._fireDisplaySize();
@@ -609,30 +639,28 @@ class Tower extends Phaser.GameObjects.Container {
         FIRE_BURN.whenReady(this._burnLv, (key) => this._showBurn(key));
       }
     }
-    /* 冰塔：升级同步切换冰晶贴图与显示尺寸（冰弹贴图由发射时等级决定，
+    /* 冰塔：切换冰晶贴图与显示尺寸（冰弹贴图由发射时等级决定，
        Projectile 读 sourceTower.level 自动对应，无需此处处理） */
     if (this.isIce) this._iceApplyArt();
-    /* 水塔：升级同步切换水枪贴图与显示尺寸（水弹贴图由发射时等级决定，
+    /* 水塔：切换水枪贴图与显示尺寸（水弹贴图由发射时等级决定，
        Projectile 读 sourceTower.level 自动对应，无需此处处理） */
     if (this.isWater) this._waterApplyArt();
-    /* 雷塔：升级同步切换本体贴图/缩放，并按新等级重建装饰层帧 */
+    /* 雷塔：切换本体贴图/缩放，并按新等级重建装饰层帧 */
     if (this.isThunder) {
       this._thunderApplyArt();
       if (this._thunderArc) this._thunderArc.setLevel(this.level);
     }
-    /* 引力塔：升级同步切换磁铁贴图与显示尺寸 */
+    /* 引力塔：切换磁铁贴图与显示尺寸 */
     if (this.isGravity) this._gravityApplyArt();
-    /* 风塔：升级同步切换静态贴图与显示尺寸；视频已接管时切换 crop
+    /* 风塔：切换静态贴图与显示尺寸；视频已接管时切换 crop
        到新等级段，未接管时按静态贴图 + 旋转兜底 */
     if (this.isWind) {
       this._windApplyArt();
       if (this._windVideoActive) this._applyWindVideoCrop();
     }
-    /* 4 级进化视觉：贴图沿用 3 级，塔底叠加「旋转 + 呼吸」的元素发光光环 */
+    /* 4 级进化视觉：贴图沿用 3 级，塔底叠加「旋转 + 呼吸」的元素发光光环
+       （_buildLv4Halo 内部幂等，重复调用不会叠加第二套光环） */
     if (this.level >= 4 && this.cfg.lv4) this._buildLv4Halo();
-    // 升级小动画
-    this.scene.tweens.add({ targets: this, scale: 1.18, duration: 110, yoyo: true });
-    return cost;
   }
 
   /* 4 级塔发光光环：三段圆弧（旋转可见）+ 外圈淡光，ADD 混合叠在底座上，

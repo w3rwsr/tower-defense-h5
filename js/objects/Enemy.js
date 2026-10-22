@@ -68,6 +68,7 @@ class Enemy extends Phaser.GameObjects.Container {
     /* 新反应模式字段 */
     this.elements = [];         // 元素槽（按附着先后排序）
     this.freezeTimer = 0;       // 冰冻剩余秒数（>0 时不可移动/不可被牵引）
+    this.bossFreezeTimer = 0;   // 冰塔封印强冻 BOSS 剩余秒数（绕过硬控免疫）
     this.freezeGfx = null;      // 冰冻冰晶 Graphics
     this.vulnStacks = [];       // 易伤层：[{timer}]，每层独立倒计时（仅小怪）
     this.vulnText = null;       // 易伤层数文字
@@ -95,6 +96,7 @@ class Enemy extends Phaser.GameObjects.Container {
     this.statusAmpExclude = 'water'; // 潮湿增幅的排除元素（非该元素才生效）
     this._chillTimer = 0;         // 寒冷状态剩余时长（水晶史莱姆减伤敏感）
     this._windTimer = 0;          // 风蚀剩余时长
+    this._gravitySealDot = 0;     // 引力塔解封：5% 真伤/秒剩余时长
     this._paraHold = 0;           // 麻痹值保活窗口（层未到期不衰减）
 
     /* ---- 三阶段 BOSS（第 5 关，JSON 驱动） ---- */
@@ -205,6 +207,137 @@ class Enemy extends Phaser.GameObjects.Container {
     this.setDepth(20);
     scene.add.existing(this);
     this.drawHpBar(1);
+
+    /* ---- BOSS 极限回血（第 10 关无尽模式第 10 波起；其余关卡恒 null）----
+       仅 cfg.boss 实体启用；分裂体 / bossMini / 小怪不继承。
+       参数全部由 GameScene.getBossExtremeHealCfg()（JSON bossExtremeHeal）驱动。 */
+    this._ehCfg = null;
+    this._ehHealTimer = 0;       // 当前回血剩余秒数（受到伤害时刷新为 healDuration）
+    this._ehHealRate = 0;        // 回血速率（最大生命 × healPct / healDuration，每秒）
+    this._ehHits = [];           // 爆发窗口内的实际血量伤害记录 [{t: ms, d: 伤害}]
+    this._ehSuppressTimer = 0;   // 回血压制剩余秒数
+    this._ehExpired = false;     // 血量跌破 10% 后永久失效标记
+    this._ehGfx = null;          // 血条下方绿色回血提示
+    this._ehTween = null;
+    this._initExtremeHeal(scene);
+    /* 第 10 关风塔封印：风蚀增伤常驻 40%（创建时即继承，覆盖分裂/聚合体） */
+    if (scene && scene.windSealPermanent && typeof scene.applyWindSealToEnemy === 'function') {
+      scene.applyWindSealToEnemy(this);
+    }
+  }
+
+  /* ============================================================
+   * BOSS 极限回血（对抗百分比伤害，仅第 10 关无尽模式第 10 波起）
+   * ------------------------------------------------------------
+   * 规则（JSON: endless.bossExtremeHeal）：
+   *   · 受到【实际血量伤害】（含 percent 百分比真伤）→ 在 healDuration(3s)
+   *     内快速回复最大生命的 healPct(20%)；连续受击只刷新时长不叠加。
+   *   · burstWindow(5s) 内累计造成超过 burstPct(30%) 最大生命的伤害 →
+   *     回血立刻打断，并压制 suppressDuration(5s)。
+   *   · 血量低于 disableBelowHpRatio(10%) → 回血彻底失效（防卡血不死）。
+   *   · 血条下方绿色闪烁细线 = 正在回血，提示玩家集火秒杀。
+   * 数值统计的是「真正扣到本体 HP 的伤害」，被护盾完全吸收的伤害不计数。
+   * ============================================================ */
+  _initExtremeHeal(scene) {
+    if (!this.cfg || !this.cfg.boss) return;
+    if (!scene || typeof scene.getBossExtremeHealCfg !== 'function') return;
+    const h = scene.getBossExtremeHealCfg();
+    if (!h) return;
+    this._ehCfg = {
+      healPct: (h.healPct != null) ? h.healPct : 0.20,
+      healDuration: Math.max(0.1, (h.healDuration != null) ? h.healDuration : 3),
+      burstPct: (h.burstPct != null) ? h.burstPct : 0.30,
+      burstWindow: Math.max(0.1, (h.burstWindow != null) ? h.burstWindow : 5),
+      suppressDuration: Math.max(0, (h.suppressDuration != null) ? h.suppressDuration : 5),
+      disableBelow: (h.disableBelowHpRatio != null) ? h.disableBelowHpRatio : 0.10
+    };
+  }
+
+  /* 受伤回调：amount = 本击真正扣掉的本体 HP（护盾吸收部分不计） */
+  _bossExtremeHealOnDamage(amount) {
+    const cfg = this._ehCfg;
+    if (!cfg || this._ehExpired || this.dead || this.removed || !(amount > 0)) return;
+    if (this.maxHp <= 0 || this.hp <= 0) return;
+    /* 低于 10%：机制永久失效，并清掉正在进行的回血 */
+    if (this.hp / this.maxHp < cfg.disableBelow) {
+      this._ehExpired = true;
+      this._ehHealTimer = 0;
+      this._ehHealRate = 0;
+      this._showExtremeHealFx(false);
+      return;
+    }
+    /* 爆发统计：滚动 burstWindow(5s) 窗口内累计伤害达到 30% 最大生命
+       → 打断回血并压制。使用真实时间戳，持续小伤害（灼烧）不会无限累积，
+       必须是「短时间内的爆发」才会触发。 */
+    const now = (this.scene && this.scene.time) ? this.scene.time.now : 0;
+    const winMs = cfg.burstWindow * 1000;
+    this._ehHits.push({ t: now, d: amount });
+    while (this._ehHits.length && now - this._ehHits[0].t > winMs) this._ehHits.shift();
+    let burst = 0;
+    for (let i = 0; i < this._ehHits.length; i++) burst += this._ehHits[i].d;
+    if (burst >= this.maxHp * cfg.burstPct) {
+      this._ehHits.length = 0;
+      this._ehSuppressTimer = cfg.suppressDuration;
+      this._ehHealTimer = 0;
+      this._ehHealRate = 0;
+      this._showExtremeHealFx(false);
+      return;
+    }
+    /* 压制期间不启动回血；解除后下一次受击才重新触发 */
+    if (this._ehSuppressTimer > 0) return;
+    this._ehHealTimer = cfg.healDuration;
+    this._ehHealRate = this.maxHp * cfg.healPct / cfg.healDuration;
+  }
+
+  /* 每帧结算：压制倒计时 / 回血与血条刷新（爆发窗口在受伤时按时间戳滚动清理） */
+  _updateExtremeHeal(dt) {
+    const cfg = this._ehCfg;
+    if (!cfg || this._ehExpired || this.dead || this.removed) return;
+    if (this._ehSuppressTimer > 0) {
+      this._ehSuppressTimer -= dt;
+      if (this._ehSuppressTimer <= 0) this._ehSuppressTimer = 0;
+    }
+    if (this._ehHealTimer > 0) {
+      /* 回血过程中跌破 10%：立即停止并永久失效（防止卡血不死） */
+      if (this.hp <= 0 || this.hp / this.maxHp < cfg.disableBelow) {
+        this._ehExpired = true;
+        this._ehHealTimer = 0;
+        this._ehHealRate = 0;
+        this._showExtremeHealFx(false);
+        return;
+      }
+      this.hp = Math.min(this.maxHp, this.hp + this._ehHealRate * dt);
+      this._ehHealTimer -= dt;
+      if (this._ehHealTimer <= 0) this._ehHealTimer = 0;
+      this.drawHpBar(this.hp / this.maxHp);
+      this._showExtremeHealFx(this._ehHealTimer > 0);
+    } else {
+      this._showExtremeHealFx(false);
+    }
+  }
+
+  /* 血条下方绿色闪烁细线（回血提示）：首次需要时创建，之后只切显隐 */
+  _showExtremeHealFx(on) {
+    if (!this._ehCfg || !this.scene) return;
+    if (on) {
+      if (!this._ehGfx) {
+        const g = this.scene.add.graphics();
+        const barH = this.cfg.barThickness || 5;
+        g.setPosition(0, -this.cfg.radius - 10);   // 与血条同一本地坐标
+        g.fillStyle(0x4dff8f, 0.9);
+        g.fillRoundedRect(-this.barW / 2, barH + 2, this.barW, 2, 1);
+        g.setAlpha(0.18);
+        this.add(g);
+        this._ehGfx = g;
+        this._ehTween = this.scene.tweens.add({
+          targets: g, alpha: { from: 0.18, to: 0.62 },
+          duration: 220, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+        });
+      }
+      if (!this._ehGfx.visible) this._ehGfx.setVisible(true);
+    } else if (this._ehGfx && this._ehGfx.visible) {
+      this._ehGfx.setVisible(false);
+    }
   }
 
   /* 施加减速：取更强（数值更小）的减速系数，时间刷新取较长者。
@@ -359,6 +492,13 @@ class Enemy extends Phaser.GameObjects.Container {
   applyFreeze(duration) {
     if (this.hardControlImmune) return;
     this.freezeTimer = Math.max(this.freezeTimer, duration); // 重复冰冻刷新取较长
+    this.showFreezeGfx(true);
+  }
+
+  /* 冰塔封印：强冻 BOSS（绕过硬控免疫，独立计时，CD 由塔侧控制） */
+  applyBossFreeze(duration) {
+    if (!(duration > 0)) return;
+    this.bossFreezeTimer = Math.max(this.bossFreezeTimer || 0, duration);
     this.showFreezeGfx(true);
   }
 
@@ -523,6 +663,8 @@ class Enemy extends Phaser.GameObjects.Container {
     if (this.dead || this.invulnTimer > 0) return;
     /* 元素护盾（第 7 关）：同元素伤害完全免疫——不掉血、不计有效攻击次数 */
     if (this.shieldBlocks(element)) return;
+    /* 本击前的本体 HP：用于 BOSS 极限回血统计「真正扣到本体」的伤害 */
+    const hpBefore = this.hp;
     /* 易伤（仅小怪，BOSS/小BOSS 不吃）：受伤 = 原伤害 × (1 + 每层10% × 层数，满层+30%) */
     let vulnMul = 1;
     if (this.reactionsEnabled && !(this.cfg && this.cfg.boss) && !this.bossMini &&
@@ -543,17 +685,24 @@ class Enemy extends Phaser.GameObjects.Container {
     /* 4 级塔状态增幅剩余部分：潮湿每层 +4%（水塔4，排除元素不生效） */
     const statusAmp = 1 + ((this.statusWetAmp && element !== this.statusAmpExclude)
       ? this.statusWetAmp : 0);
+    /* trueDamage=true：真伤，跳过减伤与祭坛降防（护盾仍优先吸收）
+       第 10 关金币祭坛：altarDamageMul=1.5（降防 50% → 受到伤害 +50%），
+       仅普通伤害生效，真伤不吃降防 */
+    const ignoreArmor = !!(opts && opts.trueDamage);
+    const altarMul = (!ignoreArmor && this.scene && this.scene.altarDamageMul > 1)
+      ? this.scene.altarDamageMul : 1;
     /* 减伤口径：血量盾本体无盾时的基数 = armorReduction（水晶史莱姆 80%/分裂体
        90% 等常态减伤在此生效 —— 百分比伤害同样受此减免，见需求第 4 条） */
-    let dmg = value * vulnMul * windMul * statusAmp * (1 - this.armorReduction);
+    let dmg = value * vulnMul * windMul * statusAmp * altarMul *
+      (ignoreArmor ? 1 : (1 - this.armorReduction));
 
     /* 血量护盾（第 7 关）：护盾血量优先吸收，盾存期间本体不掉血；
        击破当帧的溢出伤害继续结算到本体。
        【百分比伤害 vs 血量盾】最终伤害 ×0.5（减免 50%，需求和第 3 条）；
-       常规固定伤害照原样全额吸收，不做减免。 */
+       常规固定伤害照原样全额吸收，不做减免；真伤不受 ×0.5 影响。 */
     const hpShield = (this.shield && this.shield.type === 'hp' && this.shield.hp > 0)
       ? this.shield : null;
-    if (hpShield && opts && opts.percent) dmg *= 0.5;
+    if (hpShield && opts && opts.percent && !ignoreArmor) dmg *= 0.5;
     if (hpShield) {
       /* 【强制拦截】strict 口径（第 9 关圣殿守卫圣盾，requirements 第 1~3 条）：
          只要盾还在（hp>0），任何形式的伤害（单体 / 溅射 / 电链 / 真伤 /
@@ -563,16 +712,27 @@ class Enemy extends Phaser.GameObjects.Container {
       const absorbed = Math.min(hpShield.hp, dmg);
       hpShield.hp -= absorbed;
       this.refreshShieldView(false);
-      if (hpShield.hp > 1e-6) return; // 本击被护盾完全吸收：本体无任何变化
+      if (hpShield.hp > 1e-6) {         // 本击被护盾完全吸收：本体无任何变化
+        this._showDamageNumber(absorbed, element, opts);
+        return;
+      }
       this.breakShield();
-      if (strict) return;             // strict：溢出伤害丢弃，绝不打到本体
+      if (strict) {                     // strict：溢出伤害丢弃，绝不打到本体
+        this._showDamageNumber(absorbed, element, opts);
+        return;
+      }
       const rest = dmg - absorbed;
-      if (rest <= 0) return;
+      if (rest <= 0) {
+        this._showDamageNumber(absorbed, element, opts);
+        return;
+      }
       this.hp -= rest;
       this.drawHpBar(Math.max(0, this.hp / this.maxHp));
+      this._showDamageNumber(absorbed + rest, element, opts);
     } else {
       this.hp -= dmg;
       this.drawHpBar(Math.max(0, this.hp / this.maxHp));
+      this._showDamageNumber(dmg, element, opts);
     }
 
     /* 元素护盾：
@@ -597,6 +757,10 @@ class Enemy extends Phaser.GameObjects.Container {
       }
     }
 
+    /* BOSS 极限回血：按本击真正扣掉的本体 HP 记账（百分比真伤同样计入；
+       被血量盾完全吸收时为 0，不触发回血） */
+    this._bossExtremeHealOnDamage(hpBefore - this.hp);
+
     /* 子类血量阈值分裂（第 8 关熔岩巨兽 20% 血线分裂）：
        子类覆写 onHpThresholdCheck 并在命中/持续伤害结算后判定；
        返回 true = 已接管（本击不再走死亡流程）。无覆写/无配置的关卡恒 false。 */
@@ -606,6 +770,13 @@ class Enemy extends Phaser.GameObjects.Container {
        关卡 bossPhase 恒为 0，此检查零影响 */
     if (!this.dead && this.bossPhase === 1 && this.scene.checkBossSplit(this)) return;
     if (this.hp <= 0) this.scene.onEnemyKilled(this);
+  }
+
+  /* 第 10 关伤害飘字入口：真伤/百分比统一用金色（GameScene.damageNumber 门控关卡） */
+  _showDamageNumber(value, element, opts) {
+    if (!(value > 0) || !this.scene || typeof this.scene.damageNumber !== 'function') return;
+    this.scene.damageNumber(this, value, element,
+      !!(opts && (opts.percent || opts.trueDamage)));
   }
 
   /* 血量阈值分裂钩子（子类覆写；基类恒 false = 零影响） */
@@ -715,6 +886,7 @@ class Enemy extends Phaser.GameObjects.Container {
      旧关卡无人调用（burnStacks 恒空），零影响 */
   applyDot(amount, opts) {
     if (this.dead || this.invulnTimer > 0) return;
+    const hpBefore = this.hp;   // BOSS 极限回血：只统计真正扣到本体的 DOT
     const hpShield = (this.shield && this.shield.type === 'hp' && this.shield.hp > 0)
       ? this.shield : null;
     /* strict 口径与 takeDamage 完全一致：盾在则本体绝不掉血（含 DOT 溢出） */
@@ -724,12 +896,22 @@ class Enemy extends Phaser.GameObjects.Container {
       const absorbed = Math.min(hpShield.hp, inDmg);
       hpShield.hp -= absorbed;
       this.refreshShieldView(false);
-      if (hpShield.hp > 1e-6) return; // 本跳被护盾完全吸收
+      if (hpShield.hp > 1e-6) {       // 本跳被护盾完全吸收
+        this._showDamageNumber(absorbed, null, opts);
+        return;
+      }
       this.breakShield();
-      if (strict) return;             // strict：溢出丢弃，绝不打到本体
+      if (strict) {                   // strict：溢出丢弃，绝不打到本体
+        this._showDamageNumber(absorbed, null, opts);
+        return;
+      }
       const rest = inDmg - absorbed;
-      if (rest <= 0) return;
+      if (rest <= 0) {
+        this._showDamageNumber(absorbed, null, opts);
+        return;
+      }
       this.hp -= rest;
+      this._showDamageNumber(absorbed + rest, null, opts);
     } else {
       this.hp -= inDmg;
       /* 次数盾：DOT 每跳也计 1 次有效攻击（百分比伤害对护盾生效） */
@@ -738,8 +920,11 @@ class Enemy extends Phaser.GameObjects.Container {
         this.refreshShieldView(false);
         if (this.shield.hits >= this.shield.maxHits) this.breakShield();
       }
+      this._showDamageNumber(inDmg, null, opts);
     }
     this.drawHpBar(Math.max(0, this.hp / this.maxHp));
+    /* BOSS 极限回血：DOT（含百分比灼烧）真正扣血后同样触发 */
+    this._bossExtremeHealOnDamage(hpBefore - this.hp);
     if (this.hp <= 0) {
       if (this.onHpThresholdCheck()) return;
       if (this.bossPhase === 1 && this.scene.checkBossSplit(this)) return;
@@ -753,6 +938,9 @@ class Enemy extends Phaser.GameObjects.Container {
       !this.scene=场景切换/销毁瞬间的残留帧（如旧场景 shutdown 与 RAF
        交叠），此时路由几何已不存在，跳过本帧即可（会被所在场景数组过滤） */
     if (this.dead || this.removed || !this.scene) return;
+
+    /* BOSS 极限回血：结算回血 / 爆发窗口 / 压制倒计时（旧关卡 _ehCfg 恒 null） */
+    this._updateExtremeHeal(dt);
 
     /* 传送后无敌计时：期间本体半透明提示，结束恢复不透明 */
     if (this.invulnTimer > 0) {
@@ -814,6 +1002,26 @@ class Enemy extends Phaser.GameObjects.Container {
         this._windTimer = 0;
         this.statusWindAmp = 0;
       }
+    }
+    /* 冰塔封印：BOSS 强冻独立倒计时（不受 hardControlImmune 清理影响） */
+    if (this.bossFreezeTimer > 0) {
+      this.bossFreezeTimer -= dt;
+      if (this.bossFreezeTimer <= 0) {
+        this.bossFreezeTimer = 0;
+        if (this.freezeTimer <= 0) this.showFreezeGfx(false);
+      }
+    }
+    /* 引力塔封印：拉扯附加 5% 真伤/秒（持续 5 秒；真伤跳过减伤/祭坛降防） */
+    if (this._gravitySealDot > 0) {
+      const gsCfg = (this.scene && typeof this.scene.getSealCfg === 'function')
+        ? this.scene.getSealCfg('towerD') : null;
+      const pct = (gsCfg && gsCfg.truePctPerSec != null) ? gsCfg.truePctPerSec : 0.05;
+      const d = Math.min(dt, this._gravitySealDot);
+      this._gravitySealDot -= dt;
+      if (d > 0 && this.maxHp > 0) {
+        this.takeDamage(this.maxHp * pct * d, null, { percent: true, trueDamage: true });
+      }
+      if (this.dead || this.removed) return;
     }
 
     /* 元素相关计时 */
@@ -904,7 +1112,7 @@ class Enemy extends Phaser.GameObjects.Container {
        （真控场，避免视觉位移叠加正常推进）；烘焙后从新位置全速继续走；
        冰冻（水+冰反应）期间完全定身，不推进 */
     let speedNow = this.baseSpeed * (this.slowTimer > 0 ? this.slowFactor : 1);
-    if (this.freezeTimer > 0) speedNow = 0;
+    if (this.freezeTimer > 0 || this.bossFreezeTimer > 0) speedNow = 0;
     const ctrlSlow = wasPulled ? 0.5 : 1;
     const distBefore = this.pathDist;
     this.pathDist += speedNow * dt * ctrlSlow;
@@ -1313,6 +1521,9 @@ class Enemy extends Phaser.GameObjects.Container {
 
   /* 任一销毁路径（playDeath / destroyImmediately / 场景关闭）统一释放视频引用 */
   destroy(fromScene) {
+    /* BOSS 极限回血提示 Tween 随本体销毁，避免残留淡入淡出 */
+    if (this._ehTween) { try { this._ehTween.stop(); } catch (_) {} this._ehTween = null; }
+    this._ehGfx = null;
     this._endSlime();
     this._endBossVideo();
     super.destroy(fromScene);

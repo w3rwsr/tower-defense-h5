@@ -315,6 +315,59 @@
       this._showBreakMark(true);
     }
 
+    /* ============================================================
+     * 熔岩巨兽分裂体形态（仅第 8 关 / 第 10 关灰色 BOSS）
+     * ------------------------------------------------------------
+     * 分裂体存活期间才生效的 90% 常态减伤：把普通水晶史莱姆的配置
+     * （armorBase=80% / 20 次反应破防）暂存到 _lavaSplitForm，再覆写为
+     * 分裂体参数（90% / 40 次反应破防、破防后 0%）。
+     * 死亡 / 漏怪 / 重新聚合时统一走 clearLavaSplitForm()：恢复原配置并
+     * 清空破防计时、反应计数与组标记 —— 90% 减伤只属于这一批分裂体，
+     * 绝不留存到后续波次或污染其他怪物。
+     * ============================================================ */
+    applyLavaSplitForm(ph, gid) {
+      const cfg = this.cfg || {};
+      const brk = cfg.break || {};
+      const defArmor = (cfg.armorBase != null) ? cfg.armorBase : 0.8;
+      this._lavaSplitForm = {
+        gid: gid,
+        armor: (ph && ph.splitArmor != null) ? ph.splitArmor : 0.9,
+        need: (ph && ph.splitNeed != null) ? ph.splitNeed : 40,
+        reduced: (ph && ph.splitReduced != null) ? ph.splitReduced : 0,
+        duration: (ph && ph.splitBreakDur != null) ? ph.splitBreakDur : 6,
+        /* 分裂结束后的还原值（普通水晶史莱姆口径） */
+        restoreArmor: defArmor,
+        restoreBreak: {
+          need: Math.max(1, brk.reactionsToBreak != null ? brk.reactionsToBreak : 20),
+          reduced: (brk.reducedArmor != null) ? brk.reducedArmor : 0.30,
+          duration: (brk.breakDuration != null) ? brk.breakDuration : 5
+        }
+      };
+      const f = this._lavaSplitForm;
+      this.armorBase = f.armor;
+      this._brk = { need: f.need, reduced: f.reduced, duration: f.duration };
+      this.reactionCount = 0;
+      this.breakTimer = 0;
+      this.dmgReduction = this.armorBase;
+      this.__lavaSplitGid = gid;
+    }
+
+    /* 清除分裂体形态：恢复普通水晶史莱姆的减伤/破防参数，
+       并彻底清掉破防计时、反应计数、组标记与破防标记特效。
+       死亡、漏怪、聚合三条路径都会调用；可重复调用（幂等）。 */
+    clearLavaSplitForm() {
+      const f = this._lavaSplitForm;
+      if (!f) return;
+      this._lavaSplitForm = null;
+      this.armorBase = f.restoreArmor;
+      this._brk = f.restoreBreak;
+      this.reactionCount = 0;
+      this.breakTimer = 0;
+      this.dmgReduction = this.armorBase;
+      this.__lavaSplitGid = 0;
+      this._showBreakMark(false);
+    }
+
     /* 破防特效：冰晶碎裂/爆散 —— 双层扩散冰环 + 12 片冰晶碎片 + 中心白闪 */
     _breakFx() {
       const s = this.scene;
@@ -409,6 +462,9 @@
     }
 
     destroy(fromScene) {
+      /* 最后一道保险：无论从哪条路径销毁，都不允许分裂体的 90% 减伤
+         标记随对象残留（正常情况下死亡/漏怪/聚合已提前清理） */
+      this.clearLavaSplitForm();
       this._showBreakMark(false);
       if (this._hlTween) { try { this._hlTween.stop(); } catch (_) {} this._hlTween = null; }
       if (this._jellyTween) { try { this._jellyTween.stop(); } catch (_) {} this._jellyTween = null; }

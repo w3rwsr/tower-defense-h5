@@ -203,6 +203,8 @@
          小怪眩晕 1 秒（BOSS 免疫）；每塔 stunCooldown（5 秒）内最多触发一次。
          _prevActive 用于检测「active 由 >0 跨到 <=0」的窗口闭合瞬间。 */
       this.stunCd = 0;
+      /* 第 10 关引力塔解封：拉扯附加 5% 真伤/秒（5 秒），本塔 10 秒 CD */
+      this.sealDmgCd = 0;
       this._prevActive = this.active;
     }
 
@@ -236,6 +238,7 @@
       this._prevActive = this.active;
       if (this.bossSlowCd > 0) this.bossSlowCd -= dt;   // 本塔对 BOSS 的触发冷却
       if (this.stunCd > 0) this.stunCd -= dt;           // 本塔 4 级眩晕触发冷却
+      if (this.sealDmgCd > 0) this.sealDmgCd -= dt;     // 本塔解封真伤触发冷却
       let windowJustOpened = false;
       if (!this.primed) {
         /* 构造时已开首个窗口（建塔即生效），首帧补记一次开窗事件 */
@@ -340,6 +343,20 @@
       if (windowJustOpened && this.targets.length > 0 && typeof ctx.pullPulse === 'function') {
         ctx.pullPulse(t, range, this.targets);
         this.pulseCount++;
+      }
+
+      /* 第 10 关引力塔解封：拉扯命中时给被吸目标挂 5% 真伤/秒（5 秒），
+         每座塔 10 秒 CD；真伤由 Enemy.update 按秒结算（跳减伤/祭坛降防） */
+      const seal = (scene && typeof scene.getSealCfg === 'function')
+        ? scene.getSealCfg('towerD') : null;
+      if (seal && t.level >= 4 && this.sealDmgCd <= 0 &&
+          windowJustOpened && this.targets.length > 0) {
+        const dur = (seal.duration != null) ? seal.duration : 5;
+        for (const e of this.targets) {
+          if (!e || e.dead || e.removed) continue;
+          e._gravitySealDot = Math.max(e._gravitySealDot || 0, dur);
+        }
+        this.sealDmgCd = (seal.cooldown != null) ? seal.cooldown : 10;
       }
     }
 
@@ -486,14 +503,30 @@
       if (!target || this.cooldown > 0) return;
 
       /* ---- 电链弹跳 ---- */
-      const jumps = this.tower.stats.jumps || 0; // 4 级时已被 recalcStats 覆盖为 10（lv4.chain.jumps）
+      /* 第 10 关雷塔解封（Lv4）：弹射 20 次、无衰减；每 3 秒给本次链击
+         命中的所有目标附加 5% 最大生命真伤（真伤跳过减伤，CD 独立计时） */
+      const seal = (scene && typeof scene.getSealCfg === 'function' &&
+        this.tower.level >= 4) ? scene.getSealCfg('towerE') : null;
+      const jumps = seal
+        ? ((seal.jumps != null) ? seal.jumps : 20)
+        : (this.tower.stats.jumps || 0); // 4 级原为 10（lv4.chain.jumps）
       /* 4 级雷霆万钧（TowerConfig.json lv4.chain.jumpDecay）：每跳衰减降至 5% */
       const lv4 = (this.tower.level >= 4 && this.tower.cfg.lv4) || null;
       const lv4chain = lv4 && lv4.chain;
       const lv4para = lv4 && lv4.paralyze;
-      const decay = (lv4chain && lv4chain.jumpDecay != null)
-        ? lv4chain.jumpDecay
-        : (this.eff.jumpDecay != null ? this.eff.jumpDecay : 0.90);
+      const decay = (seal && seal.removeDecay) ? 1
+        : ((lv4chain && lv4chain.jumpDecay != null)
+          ? lv4chain.jumpDecay
+          : (this.eff.jumpDecay != null ? this.eff.jumpDecay : 0.90));
+      let sealTrue = false;
+      if (seal && seal.truePct > 0) {
+        const now = (scene.time && scene.time.now) || 0;
+        if (now >= (this.tower._sealThunderNext || 0)) {
+          sealTrue = true;
+          this.tower._sealThunderNext = now +
+            ((seal.trueCooldown != null) ? seal.trueCooldown : 3) * 1000;
+        }
+      }
       const chainRange = this.eff.chainRange || 130;
       const visualDuration = this.eff.visualDuration || 0.25;
       const baseDmg = this.tower.stats.damage;
@@ -533,6 +566,12 @@
              护盾概念，多收一个元素参数不影响其实现） */
           if (!current.dead) {
             current.takeDamage(Math.round(dmg * mul), chainEl);
+            /* 第 10 关雷塔解封：3 秒一次，本次链击的所有命中目标额外吃
+               5% 最大生命真伤（trueDamage 跳减伤/祭坛降防） */
+            if (sealTrue && seal.truePct > 0 && !current.dead && current.maxHp > 0) {
+              current.takeDamage(current.maxHp * seal.truePct, chainEl,
+                { percent: true, trueDamage: true });
+            }
             /* 4 级雷霆万钧：麻痹只作用于本次电链的【首个命中目标】（i===0，
                即这发闪电真正命中的那一只怪）。绝不沿弹射链扩散给其它被弹到
                的怪——修复“一发电链让周围一圈怪集体麻痹”的问题。 */

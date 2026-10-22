@@ -290,6 +290,23 @@ class Projectile extends Phaser.GameObjects.Image {
               if (bs.duration != null) sd = bs.duration;
             }
             if (!e.dead) e.applySlow(Math.max(0, sf), sd, el);
+            /* 第 10 关冰塔解封：Lv4 冰塔命中 BOSS 时可强冻 1 秒，
+               每座塔 5 秒 CD（独立计时）；BOSS 的普通冰冻免疫不拦截此强冻 */
+            const sealIce = (scene && typeof scene.getSealCfg === 'function')
+              ? scene.getSealCfg('towerB') : null;
+            const srcLv = (this.sourceTower && this.sourceTower.level) || 1;
+            if (sealIce && srcLv >= 4 && !e.dead &&
+                ((e.cfg && e.cfg.boss) || e.bossMini) &&
+                typeof e.applyBossFreeze === 'function') {
+              const tw = this.sourceTower;
+              const now = (scene.time && scene.time.now) || 0;
+              if (tw && now >= (tw._sealIceFreezeNext || 0)) {
+                e.applyBossFreeze((sealIce.bossFreezeDuration != null)
+                  ? sealIce.bossFreezeDuration : 1);
+                tw._sealIceFreezeNext = now +
+                  ((sealIce.bossFreezeCooldown != null) ? sealIce.bossFreezeCooldown : 5) * 1000;
+              }
+            }
           }
         });
       }

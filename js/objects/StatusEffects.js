@@ -119,6 +119,13 @@
     _tickEnemy(e, st, dt) {
       /* 灼烧（火4）：1%/秒，5 秒，不叠加只刷新 */
       if (st.burn && !this._dot(e, st.burn, dt)) st.burn = null;
+      /* 火塔解封：无限叠加灼烧层，每层独立倒计时，到期逐层移除 */
+      if (st.burns && st.burns.length) {
+        for (let i = st.burns.length - 1; i >= 0; i--) {
+          if (!this._dot(e, st.burns[i], dt)) st.burns.splice(i, 1);
+        }
+        if (!st.burns.length) st.burns = null;
+      }
 
       /* 寒冷状态（冰4）：2%/秒，5 秒 */
       if (st.coldState && !this._dot(e, st.coldState, dt)) st.coldState = null;
@@ -180,23 +187,37 @@
 
     /* ---------- 施加接口（塔侧调用入口） ---------- */
 
-    /** 火塔4：灼烧。同怪不叠加只刷新时长（cfg: duration/hpPerSecPct/minDamage） */
+    /** 火塔4：灼烧。默认同怪不叠加只刷新时长；第 10 关火塔解封后无限叠加，
+        且每跳最低伤害提升至 seal.burnMinDamage(10)。 */
     applyBurn(e, cfg) {
       if (!e || e.dead || e.invulnTimer > 0) return;
       const st = this._state(e);
-      const fresh = !(st.burn && st.burn.timer > 0);
-      if (fresh) {
-        st.burn = { timer: cfg.duration, acc: 0, pct: cfg.hpPerSecPct, minDamage: cfg.minDamage, element: 'fire' };
+      const seal = (this.scene && typeof this.scene.getSealCfg === 'function')
+        ? this.scene.getSealCfg('towerA') : null;
+      const minDamage = (seal && seal.burnMinDamage != null) ? seal.burnMinDamage : cfg.minDamage;
+      if (seal && seal.burnUnlimited) {
+        /* 无限叠加：每次命中新增一层独立倒计时的灼烧（不覆盖旧层） */
+        st.burns = st.burns || [];
+        st.burns.push({
+          timer: cfg.duration, acc: 0, pct: cfg.hpPerSecPct,
+          minDamage: minDamage, element: 'fire'
+        });
       } else {
-        st.burn.timer = cfg.duration; // 多座火塔命中：只刷新持续时间
+        const fresh = !(st.burn && st.burn.timer > 0);
+        if (fresh) {
+          st.burn = { timer: cfg.duration, acc: 0, pct: cfg.hpPerSecPct, minDamage: minDamage, element: 'fire' };
+        } else {
+          st.burn.timer = cfg.duration; // 多座火塔命中：只刷新持续时间
+        }
       }
       duckApplyStatus(e, 'burn', {
         duration: cfg.duration, hpPerSecPct: cfg.hpPerSecPct,
-        minDamage: cfg.minDamage, element: 'fire'
+        minDamage: minDamage, element: 'fire'
       });
     }
 
-    /** 冰塔4：+1 层寒冷值；满层触发寒冷状态并清空层数（cfg: stacksToTrigger/duration/hpPerSecPct/defReduce） */
+    /** 冰塔4：+1 层寒冷值；满层触发寒冷状态并清空层数（cfg: stacksToTrigger/duration/hpPerSecPct/defReduce）
+     *  第 10 关冰塔解封：寒冷每秒扣血提升至 5%。 */
     addColdStack(e, cfg) {
       if (!e || e.dead || e.invulnTimer > 0) return;
       const st = this._state(e);
@@ -204,9 +225,13 @@
       st.cold.stacks++;
       if (st.cold.stacks < cfg.stacksToTrigger) return;
       st.cold.stacks = 0; // 触发即清空，可被多座冰塔快速回充
-      st.coldState = { timer: cfg.duration, acc: 0, pct: cfg.hpPerSecPct, minDamage: 1, element: 'ice' };
+      const seal = (this.scene && typeof this.scene.getSealCfg === 'function')
+        ? this.scene.getSealCfg('towerB') : null;
+      const pct = (seal && seal.coldHpPerSecPct != null)
+        ? seal.coldHpPerSecPct : cfg.hpPerSecPct;
+      st.coldState = { timer: cfg.duration, acc: 0, pct: pct, minDamage: 1, element: 'ice' };
       duckApplyStatus(e, 'chill', {
-        duration: cfg.duration, hpPerSecPct: cfg.hpPerSecPct,
+        duration: cfg.duration, hpPerSecPct: pct,
         defReduce: cfg.defReduce, element: 'ice'
       });
     }
@@ -263,17 +288,24 @@
       if (!handled && typeof e.applySlow === 'function') e.applySlow(0, cfg.duration, null, true);
     }
 
-    /** 风塔4：命中时尝试全屏风蚀增伤（10 秒共享冷却；不叠加=重复施加刷新时长） */
+    /** 风塔4：命中时尝试全屏风蚀增伤（10 秒共享冷却；不叠加=重复施加刷新时长）。
+     *  第 10 关风塔解封：常驻 40%（无冷却、无到期），后续新出怪在
+     *  GameScene.spawnEnemy / Enemy 构造时自动继承。 */
     tryWindAero(cfg) {
-      if (this.windAeroCd > 0) return false;
-      this.windAeroCd = cfg.cooldown;
+      const seal = (this.scene && typeof this.scene.getSealCfg === 'function')
+        ? this.scene.getSealCfg('towerF') : null;
+      if (this.windAeroCd > 0 && !seal) return false;
+      if (!seal) this.windAeroCd = cfg.cooldown;
+      const amp = (seal && seal.dmgAmp != null) ? seal.dmgAmp : cfg.dmgAmp;
+      const duration = seal ? 1e9 : cfg.duration;
       const enemies = (this.scene && this.scene.enemies) || [];
       for (const e of enemies) {
         if (e.dead || e.removed || e.invulnTimer > 0) continue;
         const st = this._state(e);
-        st.wind = { timer: cfg.duration, amp: cfg.dmgAmp }; // 直接刷新，不叠加
-        duckApplyStatus(e, 'windErosion', { dmgAmp: cfg.dmgAmp, duration: cfg.duration, element: 'wind' });
+        st.wind = { timer: duration, amp: amp }; // 直接刷新，不叠加
+        duckApplyStatus(e, 'windErosion', { dmgAmp: amp, duration: duration, element: 'wind' });
       }
+      if (seal && this.scene) this.scene.windSealPermanent = true;
       return true;
     }
   }
@@ -293,16 +325,21 @@
       if (!mgr) return;
       const vsObstacle = !!(this.target && this.target.isObstacle);
 
-      /* 火塔4：烈焰风暴 —— 命中点 50px 内所有敌人受 50% 溅射伤害并附加灼烧 */
+      /* 火塔4：烈焰风暴 —— 命中点 50px 内所有敌人受溅射伤害并附加灼烧。
+         第 10 关无尽：溅射倍率覆盖为 200%（endless.fireSplashRatio），
+         伤害基于 this.damage（= 火塔当前攻击力，含等级/加成）；其他关卡仍 50%。 */
       if (t.isFire && lv4.splash && !vsObstacle) {
         const r = lv4.splash.radius;
         if (typeof scene.spawnSplashFx === 'function') {
           scene.spawnSplashFx(this.tx, this.ty, r, this.pCfg.color);
         }
+        const ratio = (typeof scene.getFireSplashRatio === 'function' &&
+          scene.getFireSplashRatio() != null)
+          ? scene.getFireSplashRatio() : lv4.splash.ratio;
         for (const e of scene.enemies) {
           if (e.dead || e.removed || e.invulnTimer > 0) continue;
           if (Phaser.Math.Distance.Between(this.tx, this.ty, e.x, e.y) > r + e.radius) continue;
-          e.takeDamage(Math.max(1, Math.round(this.damage * lv4.splash.ratio)), 'fire');
+          e.takeDamage(Math.max(1, Math.round(this.damage * ratio)), 'fire');
           if (!e.dead) mgr.applyBurn(e, lv4.burn);
         }
       }
@@ -318,9 +355,28 @@
         }
       }
 
-      /* 水塔4：高压水枪 —— 命中的目标 +1 层潮湿 */
+      /* 水塔4：高压水枪 —— 命中的目标 +1 层潮湿。
+         第 10 关水塔解封：以命中点为中心半径 wetRadius(100) 内全部敌人
+         施加潮湿，每层易伤提升至 seal.wetPerStackAmp(20%)，5 层满 100%。 */
       if (t.isWater && lv4.wet && !vsObstacle) {
-        mgr.applyWet(this.target, lv4.wet);
+        const seal = (typeof scene.getSealCfg === 'function')
+          ? scene.getSealCfg('towerC') : null;
+        if (seal) {
+          const r = (seal.wetRadius != null) ? seal.wetRadius : 100;
+          const wetCfg = Object.assign({}, lv4.wet, {
+            perStackAmp: (seal.wetPerStackAmp != null) ? seal.wetPerStackAmp : 0.20
+          });
+          if (typeof scene.spawnSplashFx === 'function') {
+            scene.spawnSplashFx(this.tx, this.ty, r, this.pCfg.color);
+          }
+          for (const e of scene.enemies) {
+            if (e.dead || e.removed || e.invulnTimer > 0) continue;
+            if (Phaser.Math.Distance.Between(this.tx, this.ty, e.x, e.y) > r + e.radius) continue;
+            mgr.applyWet(e, wetCfg);
+          }
+        } else {
+          mgr.applyWet(this.target, lv4.wet);
+        }
       }
 
       /* 风塔4：飓风眼 —— 命中即尝试全屏风蚀增伤（共享 10 秒冷却，状态由特效体现） */
