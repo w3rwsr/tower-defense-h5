@@ -38,6 +38,8 @@ class GameScene extends Phaser.Scene {
     this.altarBuffSlow = 0.5;
     this.altars = [];
     this.windSealPermanent = false;
+    this.windGodStacks = 0;      // 风神降临：每次风塔命中 +20% 的全局叠层
+    this.windSealAmp = 0;        // 当前风蚀总增伤（基础 40% + 风神叠层）
 
     /* 无尽续档：选关页确认「继续上次进度」时带 resume:true 进关，
        这里只读取一次快照，create 末尾统一重建（见 restoreEndlessSave） */
@@ -1468,13 +1470,14 @@ class GameScene extends Phaser.Scene {
     try { if (typeof BOMB_SLIME_VIDEO !== 'undefined') BOMB_SLIME_VIDEO.tick(); } catch (e) {}
     // 暂停或结算时冻结全部逻辑（画面保持）
     const rawDt = Math.min(delta, 50) / 1000;
-    /* 单帧步长上限 0.12s：4x 下 60fps 时 dt≈0.067 可跑满 4 倍速；
-       低帧率时自动收敛到 3~3.6 倍，避免大步长让弹道/寻路穿模。 */
-    const dt = (this.paused || this.state === 'won' || this.state === 'lost')
-      ? 0 : Math.min(rawDt * this.speedMul, 0.12);
+    const frozen = this.paused || this.state === 'won' || this.state === 'lost';
+    /* 真实时间：不受倍速影响，专门驱动 Buff 时长、准备倒计时、特殊 CD */
+    const realDt = frozen ? 0 : rawDt;
+    /* 游戏时间：驱动小怪移动、子弹飞行、普通攻击频率与出兵节奏 */
+    const dt = frozen ? 0 : Math.min(rawDt * this.speedMul, 0.12);
 
-    if (dt > 0) {
-      this.updateWaves(dt);
+    if (realDt > 0) {
+      this.updateWaves(dt, realDt);
 
       /* 第 8 关：风眼计时 / 风蚀增伤倒计时（暂停即冻结） */
       if (this.level8) this.level8.tick(dt);
@@ -1482,8 +1485,8 @@ class GameScene extends Phaser.Scene {
       /* 第 9 关：图腾计时（元素护盾派发）+ 蓝色圣殿守卫光环减伤计算 */
       if (this.level9) this.level9.tick(dt);
 
-      /* 第 10 关无尽：金币祭坛增益倒计时 / 祭坛 UI */
-      if (this.levelId === 10) this.updateEndlessExtras(dt);
+      /* 第 10 关无尽：祭坛 Buff / 自动续杯（真实 10 秒，不受 4x 影响） */
+      if (this.levelId === 10) this.updateEndlessExtras(realDt);
 
       const ctx = {
         enemies: this.enemies,
@@ -1495,10 +1498,11 @@ class GameScene extends Phaser.Scene {
         spawnChainFx: (points, color, duration) => this.spawnChainFx(points, color, duration)
       };
       /* 塔先于敌更新：塔D（PullBehavior）先标记 pullFresh/写位移，敌再据其位移；
-         普通 AttackBehavior 同样先于敌，1 帧索敌延迟不可见 */
-      for (const t of this.towers) t.update(dt, ctx);
+         普通 AttackBehavior 同样先于敌，1 帧索敌延迟不可见。
+         realDt 专门给特殊 CD/眩晕/黑洞冷却使用，普通攻击冷却仍走游戏时间。 */
+      for (const t of this.towers) t.update(dt, ctx, realDt);
 
-      for (const e of this.enemies) e.update(dt);
+      for (const e of this.enemies) e.update(dt, realDt);
       this.enemies = this.enemies.filter((e) => !e.removed);
 
       /* 集火目标维护：已死亡/进门/被移除 → 自动取消（塔下帧恢复默认索敌）；
@@ -1529,9 +1533,11 @@ class GameScene extends Phaser.Scene {
   /* ============================================================
    * 波次状态机
    * ============================================================ */
-  updateWaves(dt) {
+  updateWaves(dt, realDt) {
+    const rdt = (realDt == null) ? dt : realDt;
     if (this.state === 'ready' && this.countdown !== null) {
-      this.countdown -= dt;
+      /* 准备阶段倒计时按真实时间走：4x 下仍是 10 个真实秒 */
+      this.countdown -= rdt;
       if (this.countdown <= 0) this.startWave();
     } else if (this.state === 'active') {
       this.spawnClock += dt;
@@ -1740,8 +1746,11 @@ class GameScene extends Phaser.Scene {
   applyWindSealToEnemy(e) {
     if (!e || e.dead || e.removed) return;
     const cfg = this.getSealCfg('towerF');
-    if (!cfg) return;
-    const amp = (cfg.dmgAmp != null) ? cfg.dmgAmp : 0.40;
+    const cfg2 = this.getSealCfg('towerF2');
+    if (!cfg && !cfg2) return;
+    /* 基础 40%（一次解封）+ 风神无限叠层（二次解封） */
+    const base = cfg ? ((cfg.dmgAmp != null) ? cfg.dmgAmp : 0.40) : 0;
+    const amp = base + tdSafeNumber(this.windGodStacks || 0, 0);
     e.statusWindAmp = Math.max(e.statusWindAmp || 0, amp);
     e._windTimer = 1e9;   // 常驻：不参与到期清除
   }
@@ -1890,17 +1899,17 @@ class GameScene extends Phaser.Scene {
       const ramp = (ec.hpRampWaves != null) ? ec.hpRampWaves : 10;
       const after = (ec.hpGrowthAfterRamp != null) ? ec.hpGrowthAfterRamp : 1.4;
       /* wi < ramp：第 1~10 波（索引 0~9），纯 hpGrowth 复合 */
-      if (wi < ramp) return Math.round(baseHp * Math.pow(growth, wi));
+      if (wi < ramp) return tdClampHp(Math.round(baseHp * Math.pow(growth, wi)));
       /* wi >= ramp：第 11 波起，以第 10 波(索引 ramp-1)血量为基准再累乘 */
-      return Math.round(baseHp * Math.pow(growth, ramp - 1) *
-        Math.pow(after, wi - (ramp - 1)));
+      return tdClampHp(Math.round(baseHp * Math.pow(growth, ramp - 1) *
+        Math.pow(after, wi - (ramp - 1))));
     }
     const special = (wcfg.finalWaveSpecial !== false); // 缺省 true：末波走特例翻倍
     if (special && total >= 2 && wi === total - 1) {
-      const prevHp = Math.round(baseHp * Math.pow(growth, wi - 1));
-      return Math.round(prevHp * (wcfg.finalWaveHpFactor != null ? wcfg.finalWaveHpFactor : 2));
+      const prevHp = tdClampHp(Math.round(baseHp * Math.pow(growth, wi - 1)));
+      return tdClampHp(Math.round(prevHp * (wcfg.finalWaveHpFactor != null ? wcfg.finalWaveHpFactor : 2)));
     }
-    return Math.round(baseHp * Math.pow(growth, wi));
+    return tdClampHp(Math.round(baseHp * Math.pow(growth, wi)));
   }
 
   /* 当前波次对应的 BOSS 变体（三种 BOSS：金/蓝/灰，全部 JSON 驱动）
@@ -1985,8 +1994,8 @@ class GameScene extends Phaser.Scene {
          第 7 关 bossVariantHpMul=false：严格「小怪血 × bossFactor」，不吃
          金/蓝/灰的 1/1.2/1.45 微调 */
       const useHpMul = wcfg.bossVariantHpMul !== false;
-      e.maxHp = Math.round(this.waveSmallHp(TD_CONFIG.enemies.enemyX.hp) * bossFactor *
-        (useHpMul && bv && bv.hpMul != null ? bv.hpMul : 1));
+      e.maxHp = tdClampHp(Math.round(this.waveSmallHp(TD_CONFIG.enemies.enemyX.hp) * bossFactor *
+        (useHpMul && bv && bv.hpMul != null ? bv.hpMul : 1)));
       e.hp = e.maxHp;
       /* 移速 / 击杀金币 / 漏血扣生命 全部取变体 JSON（缺省回退全局系数）：
          漏血 = 普通怪(enemyX)漏血 × leakMul（默认 3 = 普通怪的 3 倍） */
@@ -2041,7 +2050,7 @@ class GameScene extends Phaser.Scene {
       /* entry.hpWaveIndex 非空 = 支线波（第 4 关岔路奇兵）：血量按 JSON 指定
          波次水平成长，不受主波 waveIndex/末波特例影响（wHpMul/fwHpMul 仅按
          主波编号判定，支线波进行时均不触发）。 */
-      e.maxHp = Math.round(this.waveSmallHp(e.cfg.hp, entry.hpWaveIndex) * hpMul * wHpMul * fwHpMul);
+      e.maxHp = tdClampHp(Math.round(this.waveSmallHp(e.cfg.hp, entry.hpWaveIndex) * hpMul * wHpMul * fwHpMul));
       e.hp = e.maxHp;
       e.drawHpBar(1); // 血量上限变化后重绘满血条宽度
       /* 末波小怪伤害减免（如第 3 关 finalWaveDmgReduction=0.10：受击 ×90%），
@@ -2056,7 +2065,7 @@ class GameScene extends Phaser.Scene {
       if (rb && rb[routeId]) {
         const rbCfg = rb[routeId];
         if (rbCfg.hpMul) {
-          e.maxHp = Math.round(e.maxHp * rbCfg.hpMul);
+          e.maxHp = tdClampHp(Math.round(e.maxHp * rbCfg.hpMul));
           e.hp = e.maxHp;
           e.drawHpBar(1);
         }
@@ -2067,7 +2076,7 @@ class GameScene extends Phaser.Scene {
          旧关卡组无此字段（恒 false），零影响 */
       if (entry.elite) {
         const mul = (entry.eliteHpMul != null) ? entry.eliteHpMul : 4;
-        e.maxHp = Math.round(e.maxHp * mul);
+        e.maxHp = tdClampHp(Math.round(e.maxHp * mul));
         e.hp = e.maxHp;
         e.drawHpBar(1);
         if (entry.eliteScale) e.setScale(entry.eliteScale);
@@ -2193,8 +2202,8 @@ class GameScene extends Phaser.Scene {
     e.dead = true;
     /* 剩余血量计总（被一击打穿阈值时按 1 保底），× splitHpMul 得分身总量
        （旧关卡均分模式使用；第 7 关 miniHp 固定血量模式忽略 total） */
-    const rest = Math.max(e.hp, 1);
-    const total = Math.max(1, Math.round(rest * ((bp.splitHpMul != null) ? bp.splitHpMul : 1)));
+    const rest = Math.max(tdSafeNumber(e.hp, 1), 1);
+    const total = tdClampHp(Math.round(rest * ((bp.splitHpMul != null) ? bp.splitHpMul : 1)));
     const n = bp.splitCount || 3;
     const miniType = bp.miniType || e.typeKey;
     const miniCfgIsBoss = !!(TD_CONFIG.enemies[miniType] && TD_CONFIG.enemies[miniType].boss);
@@ -2219,9 +2228,9 @@ class GameScene extends Phaser.Scene {
       const mi = new Enemy(this, miniType, e.routeId, miniOpts);
       if (bp.miniHp != null) {
         /* 固定分身血量（第 7 关：每只 5000，与分裂时剩余血量无关） */
-        mi.maxHp = bp.miniHp;
+        mi.maxHp = tdClampHp(bp.miniHp);
       } else {
-        mi.maxHp = (i === n - 1) ? Math.max(1, total - base * (n - 1)) : base;
+        mi.maxHp = tdClampHp((i === n - 1) ? Math.max(1, total - base * (n - 1)) : base);
       }
       mi.hp = mi.maxHp;
       mi.bossPhase = 2;
@@ -2275,9 +2284,9 @@ class GameScene extends Phaser.Scene {
   spawnMergedBoss(link, bp) {
     let hpv;
     if (bp.mergeHpRatio != null && link.parentMaxHp != null) {
-      hpv = Math.max(1, Math.round(link.parentMaxHp * bp.mergeHpRatio));
+      hpv = tdClampHp(Math.round(link.parentMaxHp * bp.mergeHpRatio));
     } else {
-      hpv = Math.max(1, Math.round(link.total * ((bp.mergeHealRatio != null) ? bp.mergeHealRatio : 0.5)));
+      hpv = tdClampHp(Math.round(link.total * ((bp.mergeHealRatio != null) ? bp.mergeHealRatio : 0.5)));
     }
     let mergeType = 'enemyBoss';
     let mergeTex = null;
@@ -2430,8 +2439,8 @@ class GameScene extends Phaser.Scene {
     const len = this.routeLength(g.lastRoute);
     const e = new Cls(this, 'lavaBoss', g.lastRoute,
       g.parent.tex ? { bossTexKey: g.parent.tex } : null);
-    e.maxHp = Math.max(1, Math.round(g.parent.maxHp));
-    e.hp = Math.max(1, Math.round(e.maxHp * g.healRatio));
+    e.maxHp = tdClampHp(Math.round(g.parent.maxHp));
+    e.hp = tdClampHp(Math.round(e.maxHp * g.healRatio));
     e.baseSpeed = g.parent.speed;
     e.reward = g.parent.reward;
     e.leakDamage = g.parent.leak;
@@ -4069,16 +4078,19 @@ class GameScene extends Phaser.Scene {
    * 仅第 10 关显示；前 9 关直接 return，保持原界面。
    * ============================================================ */
   damageNumber(enemy, amount, element, isTrue) {
-    if (this.levelId !== 10 || !enemy || !(amount > 0)) return;
+    if (this.levelId !== 10 || !enemy) return;
     const now = (this.time && this.time.now) || 0;
     const key = isTrue ? 'true' : (element || 'none');
     const bag = enemy._dmgBag || (enemy._dmgBag = {});
     const cur = bag[key];
-    const val = Math.max(1, Math.round(amount));
+    /* 大数保护：非有限值直接忽略；显示统一走缩写（1e15 以上科学计数） */
+    const safeAmount = (typeof tdSafeNumber === 'function') ? tdSafeNumber(amount, 0) : amount;
+    if (!(safeAmount > 0)) return;
+    const val = Math.max(1, Math.round(safeAmount));
     /* 180ms 内同色伤害合并：更新数字并轻微弹一下，不新建文本 */
     if (cur && cur.text && cur.text.active && now - cur.t0 < 180) {
-      cur.amount += val;
-      cur.text.setText(String(Math.round(cur.amount)));
+      cur.amount = tdSafeNumber(cur.amount + val, cur.amount);
+      cur.text.setText(tdFormatBigNumber(cur.amount));
       cur.text.setScale(1.08);
       this.tweens.add({ targets: cur.text, scale: 1, duration: 80 });
       return;
@@ -4087,7 +4099,7 @@ class GameScene extends Phaser.Scene {
     const color = isTrue ? 0xffe27a : (colors[element] || 0xffffff);
     const x = Math.round(enemy.x + (Math.random() * 16 - 8));
     const y = Math.round(enemy.y - (enemy.radius || 12) - 22 - Math.random() * 4);
-    const t = this.add.text(x, y, String(val), {
+    const t = this.add.text(x, y, tdFormatBigNumber(val), {
       fontFamily: TD_FONT_STACK,
       fontSize: '13px', fontStyle: 'bold',
       color: '#' + color.toString(16).padStart(6, '0'),
@@ -4983,13 +4995,15 @@ class GameScene extends Phaser.Scene {
     const cfg = ec.altar;
     this.altarCfg = cfg;
     this._altarUiClock = 0;
+    this.altarAuto = false;
+    this.altarAutoTimer = 0;
     (cfg.positions || []).forEach((p, idx) => {
       if (!p || p.x == null || p.y == null) return;
       /* 祭坛必须落在空地：离路太近则不建（避免压路/挡怪） */
       if (typeof this.distToPath === 'function' && this.distToPath(p.x, p.y) < 38) return;
-      /* 剔除祭坛周围塔位，保证点击祭坛不会与选塔热区冲突 */
+      /* 剔除祭坛与「自动」按钮周围的塔位，保证点击不会与选塔热区冲突 */
       this.hotspots = (this.hotspots || []).filter(
-        (h) => Math.hypot(h.x - p.x, h.y - p.y) > 46);
+        (h) => Math.hypot(h.x - p.x, h.y - p.y) > 62);
       const c = this.add.container(p.x, p.y).setDepth(14);
       const g = this.add.graphics();
       const icon = this.add.text(0, -2, '祭', {
@@ -5007,8 +5021,23 @@ class GameScene extends Phaser.Scene {
         if (p && p.event && p.event.stopPropagation) p.event.stopPropagation();
         this.activateGoldAltar();
       });
-      c.add([g, icon, label, zone]);
-      this.altars.push({ x: p.x, y: p.y, g, icon, label, zone, activeShown: false });
+      /* 祭坛旁「自动」开关：每隔真实 10 秒自动扣 10000 续杯 */
+      const autoBg = this.add.graphics();
+      const autoText = this.add.text(48, 0, '自动 关', {
+        fontFamily: TD_FONT_STACK, fontSize: '10px', fontStyle: 'bold',
+        color: '#ffe27a', resolution: TD_TEXT_RES
+      }).setOrigin(0.5).setStroke('#3a2a10', 2);
+      const autoZone = this.add.zone(48, 0, 56, 24).setInteractive({ useHandCursor: true });
+      autoZone.setData('ui', true);
+      autoZone.on('pointerdown', (p) => {
+        if (p && p.event && p.event.stopPropagation) p.event.stopPropagation();
+        this.toggleAltarAuto();
+      });
+      c.add([g, icon, label, zone, autoBg, autoText, autoZone]);
+      this.altars.push({
+        x: p.x, y: p.y, g, icon, label, zone,
+        autoBg, autoText, autoZone, activeShown: false
+      });
     });
     this.refreshAltarVisual();
   }
@@ -5018,13 +5047,26 @@ class GameScene extends Phaser.Scene {
     const cfg = this.altarCfg || (this.getEndlessCfg() && this.getEndlessCfg().altar);
     if (!cfg || this.state === 'lost' || this.state === 'won') return false;
     const cost = (cfg.cost != null) ? cfg.cost : 10000;
-    const dur = (cfg.duration != null) ? cfg.duration : 10;
     const a0 = this.altars && this.altars[0];
     if (this.gold < cost) {
       if (a0) this.floatText(a0.x, a0.y - 42, '金币不足', 0xffd66b);
       return false;
     }
     this.gold -= cost;
+    this._applyAltarBuff();
+    this.syncHud();
+    if (a0) {
+      this.floatText(a0.x, a0.y - 44,
+        '全屏降防/减速 ' + ((cfg.duration != null) ? cfg.duration : 10) + ' 秒', 0xffd66b);
+    }
+    return true;
+  }
+
+  /** 实际刷新祭坛 Buff（手动与自动续杯共用；不负责扣钱） */
+  _applyAltarBuff() {
+    const cfg = this.altarCfg || (this.getEndlessCfg() && this.getEndlessCfg().altar);
+    if (!cfg) return false;
+    const dur = (cfg.duration != null) ? cfg.duration : 10;
     this.altarBuffTimer = dur;
     this.altarBuffSlow = (cfg.slowFactor != null) ? cfg.slowFactor : 0.5;
     this.altarDamageMul = 1 + ((cfg.defenseBonus != null) ? cfg.defenseBonus : 0.5);
@@ -5033,29 +5075,59 @@ class GameScene extends Phaser.Scene {
       if (!e || e.dead || e.removed) continue;
       if (typeof e.applySlow === 'function') e.applySlow(this.altarBuffSlow, dur, 'altar', true);
     }
-    this.syncHud();
     this.refreshAltarVisual();
-    if (a0) this.floatText(a0.x, a0.y - 44, '全屏降防/减速 ' + dur + ' 秒', 0xffd66b);
     return true;
   }
 
-  /** 无尽金币机制每帧结算（仅 dt>0 时调用；暂停即冻结） */
-  updateEndlessExtras(dt) {
+  /** 祭坛「自动」开关：开 → 每真实 10 秒自动扣 10000 续杯 */
+  toggleAltarAuto(force) {
+    if (this.levelId !== 10 || this.state === 'lost' || this.state === 'won') return false;
+    const on = (force != null) ? !!force : !this.altarAuto;
+    this.altarAuto = on;
+    this.altarAutoTimer = on ? 10 : 0;
+    this.refreshAltarVisual();
+    const a0 = this.altars && this.altars[0];
+    if (on && a0) this.floatText(a0.x + 48, a0.y - 26, '自动续杯开启', 0x9be86b);
+    return on;
+  }
+
+  /** 无尽金币机制每帧结算（realDt=真实时间；暂停即冻结） */
+  updateEndlessExtras(realDt) {
     if (this.altarBuffTimer > 0) {
-      this.altarBuffTimer -= dt;
+      this.altarBuffTimer -= realDt;
       if (this.altarBuffTimer <= 0) {
         this.altarBuffTimer = 0;
         this.altarDamageMul = 1;
       }
     }
-    this._altarUiClock = (this._altarUiClock || 0) + dt;
+    /* 自动续杯：固定真实 10 秒；金币不足立即关闭并提示 */
+    if (this.altarAuto) {
+      this.altarAutoTimer -= realDt;
+      if (this.altarAutoTimer <= 0) {
+        const cfg = this.altarCfg || {};
+        const cost = (cfg.cost != null) ? cfg.cost : 10000;
+        const a0 = this.altars && this.altars[0];
+        if (this.gold >= cost && this.state !== 'lost' && this.state !== 'won') {
+          this.gold -= cost;
+          this._applyAltarBuff();
+          this.altarAutoTimer = 10;
+          if (a0) this.floatText(a0.x, a0.y - 52, '自动续杯 -' + cost, 0xffd66b);
+        } else {
+          this.altarAuto = false;
+          this.altarAutoTimer = 0;
+          if (a0) this.floatText(a0.x, a0.y - 52, '金币不足，自动续杯已关闭', 0xff6b6b);
+        }
+        this.refreshAltarVisual();
+      }
+    }
+    this._altarUiClock = (this._altarUiClock || 0) + realDt;
     if (this._altarUiClock >= 0.25) {
       this._altarUiClock = 0;
       this.refreshAltarVisual();
     }
   }
 
-  /** 祭坛视觉/文案：常态金色；生效期间绿色并显示剩余秒数 */
+  /** 祭坛视觉/文案：常态金色；生效期间绿色并显示剩余秒数；自动开关绿/灰 */
   refreshAltarVisual() {
     if (!this.altars || !this.altars.length) return;
     const active = this.altarBuffTimer > 0;
@@ -5071,6 +5143,16 @@ class GameScene extends Phaser.Scene {
       a.label.setText(active ? ('祭坛生效 ' + sec + 's') : ('金币祭坛 ' + cost));
       a.label.setColor(active ? '#7be86b' : '#ffe27a');
       a.activeShown = active;
+      if (a.autoBg && a.autoText) {
+        const on = !!this.altarAuto;
+        a.autoBg.clear();
+        a.autoBg.fillStyle(on ? 0x4c9e2f : 0x5c431f, 0.92);
+        a.autoBg.fillRoundedRect(20, -12, 56, 24, 7);
+        a.autoBg.lineStyle(2, on ? 0x9be86b : 0xa08a66, 1);
+        a.autoBg.strokeRoundedRect(20, -12, 56, 24, 7);
+        a.autoText.setText(on ? ('自动 ' + Math.max(0, Math.ceil(this.altarAutoTimer)) + 's') : '自动 关');
+        a.autoText.setColor(on ? '#eaffdc' : '#cbb894');
+      }
     }
   }
 
@@ -5101,28 +5183,48 @@ class GameScene extends Phaser.Scene {
     if (open) this.refreshSealPanel();
   }
 
-  /** 刷新封印面板：已解封置绿并禁用，未解封显示 10000 价格 */
+  /** 刷新封印面板：已解封置绿并禁用；未解封显示 400000 价格，
+   *  金币不足时置灰禁用（金币变化由 syncHud 增量刷新）。 */
   refreshSealPanel() {
     const p = document.getElementById('seal-panel');
     const ec = this.getEndlessCfg();
     if (!p || !ec || !ec.seals) return;
-    const cost = (ec.seals.cost != null) ? ec.seals.cost : 10000;
+    const cost = (ec.seals.cost != null) ? ec.seals.cost : 400000;
+    const canAfford = this.gold >= cost;
+    this._sealCanAfford = canAfford;
     p.querySelectorAll('.seal-item').forEach((btn) => {
       const key = btn.dataset.seal;
       const on = this.isSealActive(key);
       btn.classList.toggle('unlocked', on);
-      btn.disabled = on;
+      btn.classList.toggle('unaffordable', !on && !canAfford);
+      btn.disabled = on || !canAfford;
       const price = btn.querySelector('.seal-price');
       if (price) price.textContent = on ? '已解封' : String(cost);
     });
   }
 
-  /** 花 10000 解封某塔：写本地永久状态 → 更新面板 → 即时应用可立即生效的封印 */
+  /** 金币跨过解封价格阈值时，仅更新未解封条目的置灰状态（面板打开时才执行） */
+  refreshSealAffordability() {
+    const p = document.getElementById('seal-panel');
+    const ec = this.getEndlessCfg();
+    if (!p || p.classList.contains('hidden') || !ec || !ec.seals) return;
+    const cost = (ec.seals.cost != null) ? ec.seals.cost : 400000;
+    const canAfford = this.gold >= cost;
+    if (this._sealCanAfford === canAfford) return;
+    this._sealCanAfford = canAfford;
+    p.querySelectorAll('.seal-item').forEach((btn) => {
+      const on = this.isSealActive(btn.dataset.seal);
+      btn.classList.toggle('unaffordable', !on && !canAfford);
+      btn.disabled = on || !canAfford;
+    });
+  }
+
+  /** 花 400000 解封某塔：写本地永久状态 → 更新面板 → 即时应用可立即生效的封印 */
   unlockSeal(typeKey) {
     const ec = this.getEndlessCfg();
     if (!ec || !ec.seals || !ec.seals[typeKey]) return false;
     if (this.isSealActive(typeKey)) return true;
-    const cost = (ec.seals.cost != null) ? ec.seals.cost : 10000;
+    const cost = (ec.seals.cost != null) ? ec.seals.cost : 400000;
     if (this.gold < cost) {
       this.flashSealMsg('金币不足，需要 ' + cost);
       return false;
@@ -5134,7 +5236,10 @@ class GameScene extends Phaser.Scene {
     this.refreshSealPanel();
     const names = {
       towerA: '火塔', towerE: '雷塔', towerB: '冰塔',
-      towerC: '水塔', towerD: '引力塔', towerF: '风塔'
+      towerC: '水塔', towerD: '引力塔', towerF: '风塔',
+      globalBulletSpeed: '极速弹道',
+      towerA2: '火塔·极', towerE2: '雷塔·极', towerB2: '冰塔·极',
+      towerC2: '水塔·极', towerD2: '引力塔·极', towerF2: '风塔·神'
     };
     this.flashSealMsg('已解封：' + (names[typeKey] || typeKey), true);
     this.applySealImmediate(typeKey);
@@ -5143,6 +5248,18 @@ class GameScene extends Phaser.Scene {
 
   /** 封印购买后的即时生效项：风塔若场上已有 Lv4 风塔，立即开启常驻 40% */
   applySealImmediate(typeKey) {
+    if (typeKey === 'globalBulletSpeed') {
+      /* 极速弹道：已飞行的子弹也立即 ×3（新子弹在 Projectile 构造时处理） */
+      const cfg = this.getSealCfg('globalBulletSpeed');
+      const mul = (cfg && cfg.bulletSpeedMul != null) ? cfg.bulletSpeedMul : 3;
+      for (const p of this.projectiles || []) {
+        if (p && !p._bulletSealApplied) {
+          p.speed *= mul;
+          p._bulletSealApplied = true;
+        }
+      }
+      return;
+    }
     if (typeKey !== 'towerF') return;
     const hasLv4Wind = (this.towers || []).some(
       (t) => t && t.typeKey === 'towerF' && t.level >= 4 && !t.removed);
@@ -5395,7 +5512,8 @@ class GameScene extends Phaser.Scene {
 
   setPaused(v) {
     this.paused = v;
-    this.tweens.timeScale = v ? 0 : this.speedMul;
+    /* UI / 飘字 / 特效 tween 永远按真实时间播放：暂停才归零，倍速不再放大 */
+    this.tweens.timeScale = v ? 0 : 1;
     document.getElementById('overlay-pause').classList.toggle('hidden', !v);
     if (v) this.clearPlacementHighlight();   // 暂停时关闭可能残留的放塔高亮
     /* 无尽模式：每次点暂停即时静默覆盖存档（防浏览器崩溃丢进度） */
@@ -5424,12 +5542,12 @@ class GameScene extends Phaser.Scene {
     return this.getEndlessCfg() ? [1, 2, 4] : [1, 2];
   }
 
-  /** 设定倍速：怪物移动、塔攻击节奏（都用 dt = rawDt × speedMul）
-   *  与全部 tween 特效（tweens.timeScale）同步加速。 */
+  /** 设定倍速：只放大游戏逻辑时间（小怪移动 / 弹道 / 出兵 / 普通攻击），
+   *  所有 tween（UI 倒计时、伤害飘字、提示动画）保持真实时间 1x。 */
   setSpeed(v) {
     const steps = this.speedSteps();
     this.speedMul = (steps.indexOf(v) >= 0) ? v : 1;
-    if (!this.paused) this.tweens.timeScale = this.speedMul;
+    if (!this.paused) this.tweens.timeScale = 1;
     this.syncHud();
   }
 
@@ -5469,6 +5587,8 @@ class GameScene extends Phaser.Scene {
         buyLifeBtn.disabled = this.gold < cost;
       }
     }
+    /* 解封面板打开时：金币跨过 40 万阈值 → 实时置灰/恢复 */
+    if (this.levelId === 10) this.refreshSealAffordability();
 
     // 商店按钮：未解锁显示锁定态（保持可点击以弹出解锁条件提示，
     // 不用 disabled——禁用按钮不派发 click）；已解锁则按金币置灰 / 选中高亮

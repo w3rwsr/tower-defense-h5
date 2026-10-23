@@ -764,8 +764,8 @@ class Tower extends Phaser.GameObjects.Container {
     }
   }
 
-  update(dt, ctx) {
-    this.behavior.update(dt, ctx);
+  update(dt, ctx, realDt) {
+    this.behavior.update(dt, ctx, realDt);
     if (this.isWind) {
       /* 风塔龙卷风自转：视频接管后由视频自身旋转（三龙卷风同步循环），
          不再每帧 rotation；未接管时按 JSON 配置 art.spin[等级] 每帧累加。 */

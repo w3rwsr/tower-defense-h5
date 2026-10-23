@@ -74,13 +74,13 @@
       this.scene = null;
     }
 
-    /** dt 与 GameScene 主循环口径一致：暂停/结算归零，应用倍速，上限 50ms */
+    /** 真实时间口径：Buff 时长 / DOT 频率不受 4x 倍速影响；暂停/结算归零 */
     _tickScene(time, delta) {
       const s = this.scene;
       if (!s || s.paused || s.state === 'won' || s.state === 'lost') return;
-      const dt = Math.min(delta, 50) / 1000 * (s.speedMul || 1);
-      if (dt <= 0) return;
-      this.update(dt);
+      const realDt = Math.min(delta, 50) / 1000;
+      if (realDt <= 0) return;
+      this.update(realDt);
     }
 
     update(dt) {
@@ -110,7 +110,10 @@
       while (slot.acc >= 1 && guard++ < 4) {
         slot.acc -= 1;
         if (e.dead) break;
-        const dmg = Math.max(slot.minDamage || 1, Math.round(e.maxHp * slot.pct));
+        /* 百分比 DOT：以钳制后的 1e15 血量上限为基准，防 NaN/Infinity */
+        const baseHp = (typeof tdClampHp === 'function') ? tdClampHp(e.maxHp) : e.maxHp;
+        const pct = (typeof tdSafeNumber === 'function') ? tdSafeNumber(slot.pct, 0) : slot.pct;
+        const dmg = Math.min(TD_MAX_HP, Math.max(slot.minDamage || 1, Math.round(baseHp * pct)));
         e.takeDamage(dmg, slot.element || null, { percent: true });
       }
       return slot.timer > 0;
@@ -138,8 +141,9 @@
           if (st.wet[i] <= 0) { st.wet.splice(i, 1); changed = true; }
         }
         if (changed) {
+          const totalStacks = st.wet.length + (st.wetInf || 0);
           duckApplyStatus(e, 'wet', {
-            stacks: st.wet.length,
+            stacks: totalStacks,
             perStackAmp: st.wetPer,
             excludeElement: st.wetEx,
             stackDuration: st.wetDur
@@ -162,7 +166,10 @@
           while (p.acc >= 1 && guard++ < 4) {
             p.acc -= 1;
             if (e.dead) break;
-            const dmg = Math.max(1, Math.round(e.maxHp * p.pct * p.timers.length));
+            const baseHp = (typeof tdClampHp === 'function') ? tdClampHp(e.maxHp) : e.maxHp;
+            const pct = (typeof tdSafeNumber === 'function') ? tdSafeNumber(p.pct, 0) : p.pct;
+            const dmg = Math.min(TD_MAX_HP,
+              Math.max(1, Math.round(baseHp * pct * p.timers.length)));
             e.takeDamage(dmg, 'thunder', { percent: true });   // 最大生命百分比 → 百分比伤害
           }
         }
@@ -194,14 +201,21 @@
       const st = this._state(e);
       const seal = (this.scene && typeof this.scene.getSealCfg === 'function')
         ? this.scene.getSealCfg('towerA') : null;
-      const minDamage = (seal && seal.burnMinDamage != null) ? seal.burnMinDamage : cfg.minDamage;
-      if (seal && seal.burnUnlimited) {
-        /* 无限叠加：每次命中新增一层独立倒计时的灼烧（不覆盖旧层） */
+      const seal2 = (this.scene && typeof this.scene.getSealCfg === 'function')
+        ? this.scene.getSealCfg('towerA2') : null;
+      const minDamage = (seal && seal.burnMinDamage != null) ? seal.burnMinDamage
+        : (seal2 ? 10 : cfg.minDamage);
+      const unlimited = !!(seal && seal.burnUnlimited) || !!seal2;
+      if (unlimited) {
+        /* 无限叠加：每次命中新增独立倒计时层；二次解封一次附加 3 层 */
         st.burns = st.burns || [];
-        st.burns.push({
-          timer: cfg.duration, acc: 0, pct: cfg.hpPerSecPct,
-          minDamage: minDamage, element: 'fire'
-        });
+        const n = seal2 ? Math.max(1, seal2.burnStacksPerHit || 3) : 1;
+        for (let i = 0; i < n; i++) {
+          st.burns.push({
+            timer: cfg.duration, acc: 0, pct: cfg.hpPerSecPct,
+            minDamage: minDamage, element: 'fire'
+          });
+        }
       } else {
         const fresh = !(st.burn && st.burn.timer > 0);
         if (fresh) {
@@ -222,7 +236,14 @@
       if (!e || e.dead || e.invulnTimer > 0) return;
       const st = this._state(e);
       st.cold = st.cold || { stacks: 0 };
-      st.cold.stacks++;
+      const seal2 = (this.scene && typeof this.scene.getSealCfg === 'function')
+        ? this.scene.getSealCfg('towerB2') : null;
+      if (seal2 && seal2.instantCold) {
+        /* 二次解封：每次命中瞬间叠满，直接触发寒冷（反复刷新 DOT） */
+        st.cold.stacks = cfg.stacksToTrigger;
+      } else {
+        st.cold.stacks++;
+      }
       if (st.cold.stacks < cfg.stacksToTrigger) return;
       st.cold.stacks = 0; // 触发即清空，可被多座冰塔快速回充
       const seal = (this.scene && typeof this.scene.getSealCfg === 'function')
@@ -240,12 +261,24 @@
     applyWet(e, cfg) {
       if (!e || e.dead || e.invulnTimer > 0) return;
       const st = this._state(e);
-      st.wet = st.wet || [];
-      if (st.wet.length >= cfg.maxStacks) return;
-      st.wet.push(cfg.duration);
       st.wetPer = cfg.perStackAmp;
       st.wetEx = cfg.excludeElement;
       st.wetDur = cfg.duration;
+      const seal2 = (this.scene && typeof this.scene.getSealCfg === 'function')
+        ? this.scene.getSealCfg('towerC2') : null;
+      if (seal2 && seal2.unlimitedWet) {
+        /* 二次解封：无限层 + 无限持续（不写倒计时数组，避免层数计时开销） */
+        st.wetInf = (st.wetInf || 0) + 1;
+        const stacks = (st.wet ? st.wet.length : 0) + st.wetInf;
+        duckApplyStatus(e, 'wet', {
+          stacks: stacks, perStackAmp: cfg.perStackAmp,
+          excludeElement: cfg.excludeElement, stackDuration: Infinity
+        });
+        return;
+      }
+      st.wet = st.wet || [];
+      if (st.wet.length >= cfg.maxStacks) return;
+      st.wet.push(cfg.duration);
       duckApplyStatus(e, 'wet', {
         stacks: st.wet.length, perStackAmp: cfg.perStackAmp,
         excludeElement: cfg.excludeElement, stackDuration: cfg.duration
@@ -290,14 +323,27 @@
 
     /** 风塔4：命中时尝试全屏风蚀增伤（10 秒共享冷却；不叠加=重复施加刷新时长）。
      *  第 10 关风塔解封：常驻 40%（无冷却、无到期），后续新出怪在
-     *  GameScene.spawnEnemy / Enemy 构造时自动继承。 */
-    tryWindAero(cfg) {
+     *  GameScene.spawnEnemy / Enemy 构造时自动继承。
+     *  风塔二次解封「风神降临」：每次命中 +20% 无限叠加；自身射程内 Boss
+     *  额外获得 5% 最大生命真伤/秒层（5 秒，可无限叠层）。 */
+    tryWindAero(cfg, sourceTower) {
       const seal = (this.scene && typeof this.scene.getSealCfg === 'function')
         ? this.scene.getSealCfg('towerF') : null;
-      if (this.windAeroCd > 0 && !seal) return false;
-      if (!seal) this.windAeroCd = cfg.cooldown;
-      const amp = (seal && seal.dmgAmp != null) ? seal.dmgAmp : cfg.dmgAmp;
-      const duration = seal ? 1e9 : cfg.duration;
+      const seal2 = (this.scene && typeof this.scene.getSealCfg === 'function')
+        ? this.scene.getSealCfg('towerF2') : null;
+      if (this.windAeroCd > 0 && !seal && !seal2) return false;
+      if (!seal && !seal2) this.windAeroCd = cfg.cooldown;
+      let amp = seal
+        ? ((seal.dmgAmp != null) ? seal.dmgAmp : 0.40)
+        : (seal2 ? 0 : ((cfg.dmgAmp != null) ? cfg.dmgAmp : 0.20));
+      if (seal2) {
+        /* 每次风塔命中：全局 +20% 增伤永久叠层（无上限） */
+        const add = (seal2.ampPerHit != null) ? seal2.ampPerHit : 0.20;
+        this.scene.windGodStacks = tdSafeNumber((this.scene.windGodStacks || 0) + add, 0);
+        amp += this.scene.windGodStacks;
+      }
+      if (this.scene) this.scene.windSealAmp = amp;
+      const duration = (seal || seal2) ? 1e9 : cfg.duration;
       const enemies = (this.scene && this.scene.enemies) || [];
       for (const e of enemies) {
         if (e.dead || e.removed || e.invulnTimer > 0) continue;
@@ -305,7 +351,26 @@
         st.wind = { timer: duration, amp: amp }; // 直接刷新，不叠加
         duckApplyStatus(e, 'windErosion', { dmgAmp: amp, duration: duration, element: 'wind' });
       }
-      if (seal && this.scene) this.scene.windSealPermanent = true;
+      /* 风神降临：自身射程内 Boss 叠一层 5% 真伤/秒（5 秒） */
+      if (seal2) {
+        const bossPct = (seal2.bossDotPctPerSec != null) ? seal2.bossDotPctPerSec : 0.05;
+        const bossDur = (seal2.bossDotDuration != null) ? seal2.bossDotDuration : 5;
+        const range = sourceTower && sourceTower.stats ? sourceTower.stats.range : 0;
+        const r2 = range > 0 ? range * range : Infinity;
+        for (const e of enemies) {
+          if (e.dead || e.removed || e.invulnTimer > 0) continue;
+          if (!((e.cfg && e.cfg.boss) || e.bossMini)) continue;
+          if (Number.isFinite(r2) && sourceTower) {
+            const dx = e.x - sourceTower.x, dy = e.y - sourceTower.y;
+            if (dx * dx + dy * dy > r2) continue;
+          }
+          e._windGodDots = e._windGodDots || [];
+          e._windGodDots.push(bossDur);
+          /* 保证层数伤害使用配置值（Enemy.update 读取怪物侧默认 5%） */
+          e._windGodDotPct = bossPct;
+        }
+      }
+      if (this.scene) this.scene.windSealPermanent = true;
       return true;
     }
   }
@@ -379,9 +444,10 @@
         }
       }
 
-      /* 风塔4：飓风眼 —— 命中即尝试全屏风蚀增伤（共享 10 秒冷却，状态由特效体现） */
+      /* 风塔4：飓风眼 —— 命中即尝试全屏风蚀增伤（共享 10 秒冷却，状态由特效体现）
+         二次解封「风神降临」：把发射塔传入，用于判断自身射程内 Boss 叠真伤层 */
       if (t.isWind && lv4.aero && !vsObstacle) {
-        mgr.tryWindAero(lv4.aero);
+        mgr.tryWindAero(lv4.aero, this.sourceTower);
       }
     };
 

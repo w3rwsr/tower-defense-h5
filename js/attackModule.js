@@ -230,15 +230,16 @@
     return bestFoot;
   }
 
-    update(dt, ctx) {
+    update(dt, ctx, realDt) {
+      const rdt = (realDt == null) ? dt : realDt;
       /* ---- 脉冲计时：每 interval 秒开窗一次，窗内持续 duration 秒 ---- */
       this.timer -= dt;
       const wasActive = this._prevActive > 0;
       if (this.active > 0) this.active -= dt;
       this._prevActive = this.active;
-      if (this.bossSlowCd > 0) this.bossSlowCd -= dt;   // 本塔对 BOSS 的触发冷却
-      if (this.stunCd > 0) this.stunCd -= dt;           // 本塔 4 级眩晕触发冷却
-      if (this.sealDmgCd > 0) this.sealDmgCd -= dt;     // 本塔解封真伤触发冷却
+      if (this.bossSlowCd > 0) this.bossSlowCd -= rdt;  // 本塔对 BOSS 的触发冷却
+      if (this.stunCd > 0) this.stunCd -= rdt;          // 本塔 4 级眩晕触发冷却
+      if (this.sealDmgCd > 0) this.sealDmgCd -= rdt;    // 本塔解封真伤触发冷却
       let windowJustOpened = false;
       if (!this.primed) {
         /* 构造时已开首个窗口（建塔即生效），首帧补记一次开窗事件 */
@@ -345,18 +346,21 @@
         this.pulseCount++;
       }
 
-      /* 第 10 关引力塔解封：拉扯命中时给被吸目标挂 5% 真伤/秒（5 秒），
-         每座塔 10 秒 CD；真伤由 Enemy.update 按秒结算（跳减伤/祭坛降防） */
+      /* 第 10 关引力塔解封：拉扯命中时给被吸目标挂 5% 真伤/秒（5 秒）。
+         一次解封：10 秒 CD；二次解封：无冷却，每个脉冲窗口刷新，持续不断。 */
       const seal = (scene && typeof scene.getSealCfg === 'function')
         ? scene.getSealCfg('towerD') : null;
-      if (seal && t.level >= 4 && this.sealDmgCd <= 0 &&
+      const seal2 = (scene && typeof scene.getSealCfg === 'function')
+        ? scene.getSealCfg('towerD2') : null;
+      if ((seal || seal2) && t.level >= 4 && (seal2 || this.sealDmgCd <= 0) &&
           windowJustOpened && this.targets.length > 0) {
-        const dur = (seal.duration != null) ? seal.duration : 5;
+        const dur = (seal2 && seal2.duration != null) ? seal2.duration
+          : ((seal && seal.duration != null) ? seal.duration : 5);
         for (const e of this.targets) {
           if (!e || e.dead || e.removed) continue;
           e._gravitySealDot = Math.max(e._gravitySealDot || 0, dur);
         }
-        this.sealDmgCd = (seal.cooldown != null) ? seal.cooldown : 10;
+        if (!seal2) this.sealDmgCd = (seal && seal.cooldown != null) ? seal.cooldown : 10;
       }
     }
 
@@ -507,6 +511,9 @@
          命中的所有目标附加 5% 最大生命真伤（真伤跳过减伤，CD 独立计时） */
       const seal = (scene && typeof scene.getSealCfg === 'function' &&
         this.tower.level >= 4) ? scene.getSealCfg('towerE') : null;
+      const seal2 = (scene && typeof scene.getSealCfg === 'function' &&
+        this.tower.level >= 4) ? scene.getSealCfg('towerE2') : null;
+      const truePct = seal && seal.truePct != null ? seal.truePct : (seal2 ? 0.05 : 0);
       const jumps = seal
         ? ((seal.jumps != null) ? seal.jumps : 20)
         : (this.tower.stats.jumps || 0); // 4 级原为 10（lv4.chain.jumps）
@@ -519,7 +526,10 @@
           ? lv4chain.jumpDecay
           : (this.eff.jumpDecay != null ? this.eff.jumpDecay : 0.90));
       let sealTrue = false;
-      if (seal && seal.truePct > 0) {
+      if (seal2 && seal2.trueEveryChain) {
+        /* 二次解封：每次电链都触发 5% 真伤（无 3 秒 CD） */
+        sealTrue = truePct > 0;
+      } else if (seal && truePct > 0) {
         const now = (scene.time && scene.time.now) || 0;
         if (now >= (this.tower._sealThunderNext || 0)) {
           sealTrue = true;
@@ -527,6 +537,8 @@
             ((seal.trueCooldown != null) ? seal.trueCooldown : 3) * 1000;
         }
       }
+      const paraCfg = (seal2 && seal2.paralyzeAll && lv4para)
+        ? Object.assign({}, lv4para, { chance: 1 }) : lv4para;
       const chainRange = this.eff.chainRange || 130;
       const visualDuration = this.eff.visualDuration || 0.25;
       const baseDmg = this.tower.stats.damage;
@@ -568,17 +580,19 @@
             current.takeDamage(Math.round(dmg * mul), chainEl);
             /* 第 10 关雷塔解封：3 秒一次，本次链击的所有命中目标额外吃
                5% 最大生命真伤（trueDamage 跳减伤/祭坛降防） */
-            if (sealTrue && seal.truePct > 0 && !current.dead && current.maxHp > 0) {
-              current.takeDamage(current.maxHp * seal.truePct, chainEl,
-                { percent: true, trueDamage: true });
+            if (sealTrue && truePct > 0 && !current.dead && current.maxHp > 0) {
+              /* 百分比真伤保护：血量先钳制到 1e15，结果再防 NaN/Infinity */
+              const baseHp = (typeof tdClampHp === 'function') ? tdClampHp(current.maxHp) : current.maxHp;
+              const trueDmg = (typeof tdSafeNumber === 'function')
+                ? tdSafeNumber(baseHp * truePct, 0) : baseHp * truePct;
+              current.takeDamage(trueDmg, chainEl, { percent: true, trueDamage: true, rawTrue: true });
             }
-            /* 4 级雷霆万钧：麻痹只作用于本次电链的【首个命中目标】（i===0，
-               即这发闪电真正命中的那一只怪）。绝不沿弹射链扩散给其它被弹到
-               的怪——修复“一发电链让周围一圈怪集体麻痹”的问题。 */
-            if (i === 0 && lv4para && !current.dead && !current.isObstacle &&
+            /* 4 级雷霆万钧：默认只麻痹首个命中目标；
+               二次解封后每一次弹跳都施加麻痹（概率提升到 100%） */
+            if ((i === 0 || (seal2 && seal2.paralyzeAll)) && paraCfg && !current.dead && !current.isObstacle &&
                 typeof TDStatusEffects !== 'undefined') {
               const mgr = TDStatusEffects.ensure(this.tower.scene);
-              if (mgr) mgr.onThunderHit(current, lv4para);
+              if (mgr) mgr.onThunderHit(current, paraCfg);
             }
           }
         }

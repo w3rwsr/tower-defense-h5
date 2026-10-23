@@ -260,8 +260,8 @@
       if (this._hl) { try { this._hl.destroy(); } catch (_) {} this._hl = null; }
     }
 
-    update(dt) {
-      super.update(dt);
+    update(dt, realDt) {
+      super.update(dt, realDt);
       if (this.dead || this.removed || !this.scene) return;
 
       /* 破防倒计时：到期后减伤复原为常态，反应计数清零重新累积 */
@@ -519,8 +519,8 @@
       if (this._pulseTween) { try { this._pulseTween.stop(); } catch (_) {} this._pulseTween = null; }
     }
 
-    update(dt) {
-      super.update(dt);
+    update(dt, realDt) {
+      super.update(dt, realDt);
       if (this.dead || this.removed || !this.scene) return;
       /* 滚动节奏与物理位移同步（避免「滑步」）：按本只小怪的实时移速比
          上报播放倍速（减速/定身时滚动同步变慢），共享单视频取本帧最快者 */
@@ -661,8 +661,8 @@
       this.applyShield({ type: 'hp', hp: this._ph.shieldHp });
     }
 
-    update(dt) {
-      super.update(dt);
+    update(dt, realDt) {
+      super.update(dt, realDt);
       if (this.dead || this.removed || !this.scene) return;
       const ratio = this.maxHp > 0 ? this.hp / this.maxHp : 1;
 

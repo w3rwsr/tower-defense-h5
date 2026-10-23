@@ -2836,25 +2836,34 @@ window.TD_CONFIG = {
              祭坛：点击花 10000，全屏怪物受到伤害 +50%、移速 -50%，持续 10 秒，
                    可重复花钱刷新（无冷却）。
              买血：顶部生命旁按钮，5000 金币 +1 生命，无冷却无上限。
-             封印：右侧面板逐塔花 10000 永久解封（td_endless_seals_v1 本地存档）。 */
+             封印：右侧面板逐塔花 400000 永久解封（td_endless_seals_v1 本地存档）。 */
           "buyLifeCost": 5000,
           "altar": {
             "cost": 10000,
             "duration": 10,
             "defenseBonus": 0.50,      // 降防 50% → 怪物受到伤害 ×1.5
             "slowFactor": 0.50,        // 移速 ×0.5
-            /* 祭坛位置：均落在两排火力点之间的空地（创建时自动剔除附近塔位） */
-            "positions": [ { "x": 200, "y": 190 }, { "x": 730, "y": 345 } ]
+            /* 祭坛位置：仅 1 个，固定在地图左下空地（避开左下 HUD 与全部火力点） */
+            "positions": [ { "x": 120, "y": 350 } ]
           },
           /* 解封各塔（Lv4 生效；数值均集中在此，便于后续调整） */
           "seals": {
-            "cost": 10000,
+            "cost": 400000,
+            /* 全局解封：所有塔的子弹 / 弹幕飞行速度 ×3 */
+            "globalBulletSpeed": { "bulletSpeedMul": 3 },
             "towerA": { "burnUnlimited": true, "burnMinDamage": 10 },
             "towerE": { "jumps": 20, "removeDecay": true, "truePct": 0.05, "trueCooldown": 3 },
             "towerB": { "coldHpPerSecPct": 0.05, "bossFreezeDuration": 1, "bossFreezeCooldown": 5 },
             "towerC": { "wetRadius": 100, "wetPerStackAmp": 0.20 },
             "towerD": { "truePctPerSec": 0.05, "duration": 5, "cooldown": 10 },
-            "towerF": { "dmgAmp": 0.40 }
+            "towerF": { "dmgAmp": 0.40 },
+            /* 防御塔二次解封：解除叠层 / 触发 CD */
+            "towerA2": { "burnStacksPerHit": 3 },
+            "towerB2": { "instantCold": true },
+            "towerC2": { "unlimitedWet": true },
+            "towerD2": { "continuous": true, "duration": 5 },
+            "towerE2": { "trueEveryChain": true, "paralyzeAll": true },
+            "towerF2": { "ampPerHit": 0.20, "bossDotPctPerSec": 0.05, "bossDotDuration": 5 }
           },
           /* 火塔 Lv4 溅射（仅第 10 关覆盖：普通关卡仍为 TowerConfig 的 50%） */
           "fireSplashRatio": 2.0

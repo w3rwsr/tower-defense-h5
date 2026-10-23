@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>卡通塔防 H5（Phaser 3）</title>
-  <link rel="stylesheet" href="style.css?v=20261022b" />
+  <link rel="stylesheet" href="style.css?v=20261022c" />
   <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js）。
        全部脚本 defer：浏览器先渲染加载提示层，再并行下载、按序执行，消除手机端白屏 -->
   <script defer src="vendor/phaser.min.js?v=20260920h"></script>
@@ -82,7 +82,7 @@
       <div class="seal-head">
         <div>
           <b>解除封印</b>
-          <span>每项 10000 金币 · Lv4 生效</span>
+          <span>每项 400000 金币 · Lv4 生效</span>
         </div>
         <button id="btn-seal-close" type="button" aria-label="关闭">×</button>
       </div>
@@ -90,32 +90,67 @@
         <button class="seal-item" data-seal="towerA" type="button">
           <span class="seal-name">火塔</span>
           <span class="seal-desc">灼烧无限叠加，最低伤害 10</span>
-          <span class="seal-price">10000</span>
+          <span class="seal-price">400000</span>
         </button>
         <button class="seal-item" data-seal="towerE" type="button">
           <span class="seal-name">雷塔</span>
           <span class="seal-desc">弹射 20 次无衰减，每 3 秒附加 5% 真伤</span>
-          <span class="seal-price">10000</span>
+          <span class="seal-price">400000</span>
         </button>
         <button class="seal-item" data-seal="towerB" type="button">
           <span class="seal-name">冰塔</span>
           <span class="seal-desc">强冻 BOSS 1 秒（5 秒 CD），寒冷 5%/秒</span>
-          <span class="seal-price">10000</span>
+          <span class="seal-price">400000</span>
         </button>
         <button class="seal-item" data-seal="towerC" type="button">
           <span class="seal-name">水塔</span>
           <span class="seal-desc">范围施加潮湿，易伤最高 100%</span>
-          <span class="seal-price">10000</span>
+          <span class="seal-price">400000</span>
         </button>
         <button class="seal-item" data-seal="towerD" type="button">
           <span class="seal-name">引力塔</span>
           <span class="seal-desc">拉扯附加 5% 真伤/秒，持续 5 秒（10 秒 CD）</span>
-          <span class="seal-price">10000</span>
+          <span class="seal-price">400000</span>
         </button>
         <button class="seal-item" data-seal="towerF" type="button">
           <span class="seal-name">风塔</span>
           <span class="seal-desc">风蚀增伤常驻，提升至 40%</span>
-          <span class="seal-price">10000</span>
+          <span class="seal-price">400000</span>
+        </button>
+        <button class="seal-item" data-seal="globalBulletSpeed" type="button">
+          <span class="seal-name">极速弹道</span>
+          <span class="seal-desc">全场所有防御塔的子弹 / 弹幕飞行速度 ×3</span>
+          <span class="seal-price">400000</span>
+        </button>
+        <button class="seal-item" data-seal="towerA2" type="button">
+          <span class="seal-name">火塔·极</span>
+          <span class="seal-desc">解除叠层 CD，每次命中附加 3 层灼烧</span>
+          <span class="seal-price">400000</span>
+        </button>
+        <button class="seal-item" data-seal="towerB2" type="button">
+          <span class="seal-name">冰塔·极</span>
+          <span class="seal-desc">解除叠层 CD，每次命中瞬间叠满并触发寒冷</span>
+          <span class="seal-price">400000</span>
+        </button>
+        <button class="seal-item" data-seal="towerC2" type="button">
+          <span class="seal-name">水塔·极</span>
+          <span class="seal-desc">潮湿无限叠层、无限持续</span>
+          <span class="seal-price">400000</span>
+        </button>
+        <button class="seal-item" data-seal="towerD2" type="button">
+          <span class="seal-name">引力塔·极</span>
+          <span class="seal-desc">解除冷却，黑洞真伤持续不断</span>
+          <span class="seal-price">400000</span>
+        </button>
+        <button class="seal-item" data-seal="towerE2" type="button">
+          <span class="seal-name">雷塔·极</span>
+          <span class="seal-desc">解除 CD，每次电链都附加麻痹与 5% 真伤</span>
+          <span class="seal-price">400000</span>
+        </button>
+        <button class="seal-item" data-seal="towerF2" type="button">
+          <span class="seal-name">风塔·神</span>
+          <span class="seal-desc">每次命中 +20% 无限叠加；Boss 5% 真伤/秒叠层</span>
+          <span class="seal-price">400000</span>
         </button>
       </div>
       <div id="seal-msg"></div>
@@ -189,25 +224,25 @@
   <!-- ===== 脚本按依赖顺序加载（全部 defer：按文档顺序执行，下载并行） =====
        FireBurnData.js（~600KB 内嵌燃烧视频）不在此同步加载——由 main.js 在
        Phaser 启动前后台动态注入，选关页先行进入，视频数据就绪后自动挂接 -->
-  <script defer src="js/config.js?v=20261022b"></script>
+  <script defer src="js/config.js?v=20261023a"></script>
   <!-- 4 级塔配置（唯一来源根目录 TowerConfig.json；file:// 无法 fetch JSON，
        故加载内嵌副本并注入 TD_CONFIG：maxLevel/lv4Cost/waveGate + cfg.lv4） -->
   <script defer src="js/TowerConfigData.js?v=20261018b"></script>
-  <script defer src="js/storage.js?v=20261022b"></script>
+  <script defer src="js/storage.js?v=20261023a"></script>
   <!-- 媒体加载统一调度（串行队列 + 进度条 + 10s 超时跳过 + Cache API 缓存）：
        必须早于各视频模块执行，供其按需排进加载队列 -->
   <script defer src="js/MediaLoader.js?v=20261018b"></script>
   <!-- 开发调试工具：仅 URL 带 #dbg 时激活（全内容解锁 + 应用内浏览器），无 #dbg 的正式环境脚本立即退出，不创建 DOM、不写任何存储 -->
   <script defer src="js/debugTools.js?v=20260921r"></script>
-  <script defer src="js/attackModule.js?v=20261022b"></script>
-  <script defer src="js/objects/Enemy.js?v=20261022b"></script>
+  <script defer src="js/attackModule.js?v=20261023b"></script>
+  <script defer src="js/objects/Enemy.js?v=20261023b"></script>
   <!-- 第 8 关专属实体（水晶史莱姆/自爆泥怪/熔岩巨兽/风眼控制器），依赖 Enemy 基类 -->
-  <script defer src="js/objects/Level8Enemies.js?v=20261022a"></script>
+  <script defer src="js/objects/Level8Enemies.js?v=20261023a"></script>
   <!-- 第 9 关专属实体（元素狂暴图腾 / 蓝色圣殿守卫控制器），依赖 Enemy 基类 -->
-  <script defer src="js/objects/Level9Enemies.js?v=20261020a"></script>
-  <script defer src="js/objects/Projectile.js?v=20261022b"></script>
+  <script defer src="js/objects/Level9Enemies.js?v=20261023a"></script>
+  <script defer src="js/objects/Projectile.js?v=20261023a"></script>
   <!-- 4 级塔异常状态管理器（塔侧）：依赖 Projectile 做命中钩子，须在其后加载 -->
-  <script defer src="js/objects/StatusEffects.js?v=20261022b"></script>
+  <script defer src="js/objects/StatusEffects.js?v=20261023a"></script>
   <script defer src="js/FireTowerArtData.js?v=20261009o"></script>
   <script defer src="js/LavaBulletData.js?v=20261009l"></script>
   <script defer src="js/IceTowerArtData.js?v=20261010a"></script>
@@ -230,11 +265,11 @@
   <script defer src="js/objects/WindVideo.js?v=20261018a"></script>
   <!-- 第 8 关小怪移动视频（水晶史莱姆 / 自爆泥怪，白底/绿幕抠图单例） -->
   <script defer src="js/objects/Level8Video.js?v=20261019b"></script>
-  <script defer src="js/objects/Tower.js?v=20261022a"></script>
+  <script defer src="js/objects/Tower.js?v=20261023a"></script>
   <script defer src="js/objects/ThunderArc.js?v=20261012m"></script>
   <script defer src="js/scenes/BootScene.js?v=20261020a"></script>
   <script defer src="js/scenes/LevelSelectScene.js?v=20261022b"></script>
-  <script defer src="js/scenes/GameScene.js?v=20261022b"></script>
+  <script defer src="js/scenes/GameScene.js?v=20261023a"></script>
   <script defer src="js/main.js?v=20261019a"></script>
   <script>
     /* 启动进度条 + 失败自动重试（放在所有 defer 脚本之后：
@@ -300,4 +335,9 @@
   </script>
 </body>
 </html>
+
+
+
+
+
 

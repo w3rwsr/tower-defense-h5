@@ -2,6 +2,44 @@
  * Enemy.js —— 敌人（敌人X：低血快速 / 敌人Y：高血慢速）
  * 沿 GameScene 预计算的路径移动，支持减速 debuff 与血条。
  * ============================================================ */
+
+/* ============================================================
+ * 全局大数保护工具（无尽模式后期血量可达万亿级）
+ * ------------------------------------------------------------
+ * TD_MAX_HP       : 所有怪物血量上限（1e15，低于 JS 安全整数上限）
+ * tdSafeNumber    : NaN / Infinity / 非数字 → 安全回退值
+ * tdClampHp       : 血量钳制到 [1, 1e15]
+ * tdFormatBigNumber: UI 缩写（万 / 亿 / 万亿 / 1e15 以上科学计数）
+ * ============================================================ */
+var TD_MAX_HP = 1e15;
+
+function tdSafeNumber(value, fallback) {
+  var n = Number(value);
+  return Number.isFinite(n) ? n : (fallback == null ? 0 : fallback);
+}
+
+function tdClampHp(value) {
+  var n = Number(value);
+  if (Number.isNaN(n) || n <= 0) return 1;
+  /* 正向溢出（Infinity）按 1e15 上限处理，而不是回退成 1 */
+  if (n === Infinity) return TD_MAX_HP;
+  return Math.min(n, TD_MAX_HP);
+}
+
+/* 15.2万 / 2.4亿 / 3.6万亿 / 1.5e18；1e4 以下显示整数 */
+function tdFormatBigNumber(value) {
+  var n = tdSafeNumber(value, 0);
+  if (n < 0) return '-' + tdFormatBigNumber(-n);
+  var trim1 = function (s) { return s.replace(/\.0$/, ''); };
+  if (n >= 1e15) {
+    return n.toExponential(1).replace('e+', 'e').replace(/\.0e/, 'e');
+  }
+  if (n >= 1e12) return trim1((n / 1e12).toFixed(1)) + '万亿';
+  if (n >= 1e8) return trim1((n / 1e8).toFixed(1)) + '亿';
+  if (n >= 1e4) return trim1((n / 1e4).toFixed(1)) + '万';
+  return String(Math.round(n));
+}
+
 class Enemy extends Phaser.GameObjects.Container {
   constructor(scene, typeKey, routeId, opts) {
     const cfg = TD_CONFIG.enemies[typeKey];
@@ -15,9 +53,9 @@ class Enemy extends Phaser.GameObjects.Container {
     this.cfg = cfg;
     this.radius = cfg.radius;
 
-    /* ---- 数值（全部来自 JSON） ---- */
-    this.maxHp = cfg.hp;
-    this.hp = cfg.hp;
+    /* ---- 数值（全部来自 JSON；血量统一钳制到 1e15 防溢出） ---- */
+    this.maxHp = tdClampHp(cfg.hp);
+    this.hp = this.maxHp;
     this.baseSpeed = cfg.speed;
     /* 小怪击杀金币 = 基础 reward + economy.killRewardBonus + 关卡调整值；
        关卡调整值 killRewardAdjust 可正（奖励）可负（惩罚，旧字段 killRewardPenalty 仍兼容）；
@@ -97,6 +135,7 @@ class Enemy extends Phaser.GameObjects.Container {
     this._chillTimer = 0;         // 寒冷状态剩余时长（水晶史莱姆减伤敏感）
     this._windTimer = 0;          // 风蚀剩余时长
     this._gravitySealDot = 0;     // 引力塔解封：5% 真伤/秒剩余时长
+    this._windGodDots = null;     // 风神降临：Boss 5% 最大生命真伤层（每层独立 5 秒）
     this._paraHold = 0;           // 麻痹值保活窗口（层未到期不衰减）
 
     /* ---- 三阶段 BOSS（第 5 关，JSON 驱动） ---- */
@@ -203,6 +242,7 @@ class Enemy extends Phaser.GameObjects.Container {
     this.barBg = scene.add.graphics();
     this.barBg.setPosition(0, -cfg.radius - 10);
     this.add(this.barBg);
+    this.hpText = null;          // BOSS 血条数字（格式化缩写；小怪不显示数字）
 
     this.setDepth(20);
     scene.add.existing(this);
@@ -663,6 +703,12 @@ class Enemy extends Phaser.GameObjects.Container {
     if (this.dead || this.invulnTimer > 0) return;
     /* 元素护盾（第 7 关）：同元素伤害完全免疫——不掉血、不计有效攻击次数 */
     if (this.shieldBlocks(element)) return;
+    /* 大数保护：非有限伤害直接丢弃；血量本身若被外部改坏则回退到安全值 */
+    const incoming = tdSafeNumber(value, 0);
+    if (!(incoming > 0)) return;
+    if (!Number.isFinite(this.maxHp) || this.maxHp <= 0) this.maxHp = tdClampHp(this.maxHp);
+    this.maxHp = Math.min(this.maxHp, TD_MAX_HP);
+    if (!Number.isFinite(this.hp)) this.hp = this.maxHp;
     /* 本击前的本体 HP：用于 BOSS 极限回血统计「真正扣到本体」的伤害 */
     const hpBefore = this.hp;
     /* 易伤（仅小怪，BOSS/小BOSS 不吃）：受伤 = 原伤害 × (1 + 每层10% × 层数，满层+30%) */
@@ -686,15 +732,21 @@ class Enemy extends Phaser.GameObjects.Container {
     const statusAmp = 1 + ((this.statusWetAmp && element !== this.statusAmpExclude)
       ? this.statusWetAmp : 0);
     /* trueDamage=true：真伤，跳过减伤与祭坛降防（护盾仍优先吸收）
-       第 10 关金币祭坛：altarDamageMul=1.5（降防 50% → 受到伤害 +50%），
-       仅普通伤害生效，真伤不吃降防 */
+       rawTrue=true：封印类「X% 最大生命真伤」完全固定，不吃潮湿/风蚀等增伤乘区 */
     const ignoreArmor = !!(opts && opts.trueDamage);
+    const rawTrue = !!(opts && opts.rawTrue);
+    const vulnSafe = rawTrue ? 1 : vulnMul;
+    const windSafe = rawTrue ? 1 : windMul;
+    const ampSafe = rawTrue ? 1 : statusAmp;
     const altarMul = (!ignoreArmor && this.scene && this.scene.altarDamageMul > 1)
       ? this.scene.altarDamageMul : 1;
     /* 减伤口径：血量盾本体无盾时的基数 = armorReduction（水晶史莱姆 80%/分裂体
        90% 等常态减伤在此生效 —— 百分比伤害同样受此减免，见需求第 4 条） */
-    let dmg = value * vulnMul * windMul * statusAmp * altarMul *
+    let dmg = incoming * vulnSafe * windSafe * ampSafe * altarMul *
       (ignoreArmor ? 1 : (1 - this.armorReduction));
+    /* 大数保护：任何乘区异常（NaN/Infinity）或超限伤害统一钳制到 1e15 */
+    dmg = tdSafeNumber(dmg, 0);
+    dmg = Math.max(0, Math.min(dmg, TD_MAX_HP));
 
     /* 血量护盾（第 7 关）：护盾血量优先吸收，盾存期间本体不掉血；
        击破当帧的溢出伤害继续结算到本体。
@@ -886,12 +938,19 @@ class Enemy extends Phaser.GameObjects.Container {
      旧关卡无人调用（burnStacks 恒空），零影响 */
   applyDot(amount, opts) {
     if (this.dead || this.invulnTimer > 0) return;
+    const amountSafe = tdSafeNumber(amount, 0);
+    if (!(amountSafe > 0)) return;
+    if (!Number.isFinite(this.maxHp) || this.maxHp <= 0) this.maxHp = tdClampHp(this.maxHp);
+    this.maxHp = Math.min(this.maxHp, TD_MAX_HP);
+    if (!Number.isFinite(this.hp)) this.hp = this.maxHp;
     const hpBefore = this.hp;   // BOSS 极限回血：只统计真正扣到本体的 DOT
     const hpShield = (this.shield && this.shield.type === 'hp' && this.shield.hp > 0)
       ? this.shield : null;
     /* strict 口径与 takeDamage 完全一致：盾在则本体绝不掉血（含 DOT 溢出） */
     const strict = !!hpShield && !!hpShield.strict;
-    const inDmg = (hpShield && opts && opts.percent) ? amount * 0.5 : amount;
+    let inDmg = (hpShield && opts && opts.percent) ? amountSafe * 0.5 : amountSafe;
+    inDmg = tdSafeNumber(inDmg, 0);
+    inDmg = Math.max(0, Math.min(inDmg, TD_MAX_HP));
     if (hpShield) {
       const absorbed = Math.min(hpShield.hp, inDmg);
       hpShield.hp -= absorbed;
@@ -932,28 +991,30 @@ class Enemy extends Phaser.GameObjects.Container {
     }
   }
 
-  update(dt) {
+  update(dt, realDt) {
     /* dead=正常死亡/进门流程；removed=已从场景销毁（销毁后到数组过滤前
        可能残留一帧，this.scene 已失效，直接跳过避免空引用）；
       !this.scene=场景切换/销毁瞬间的残留帧（如旧场景 shutdown 与 RAF
        交叠），此时路由几何已不存在，跳过本帧即可（会被所在场景数组过滤） */
     if (this.dead || this.removed || !this.scene) return;
+    /* dt = 游戏时间（移动/弹道受倍速影响）；rdt = 真实时间（Buff/特殊 CD） */
+    const rdt = (realDt == null) ? dt : realDt;
 
     /* BOSS 极限回血：结算回血 / 爆发窗口 / 压制倒计时（旧关卡 _ehCfg 恒 null） */
-    this._updateExtremeHeal(dt);
+    this._updateExtremeHeal(rdt);
 
     /* 传送后无敌计时：期间本体半透明提示，结束恢复不透明 */
     if (this.invulnTimer > 0) {
-      this.invulnTimer -= dt;
+      this.invulnTimer -= rdt;
       if (this.invulnTimer <= 0) {
         this.invulnTimer = 0;
         this.body.setAlpha(1);
       }
     }
 
-    /* 减速计时 */
+    /* 减速计时：祭坛 10 秒等 Debuff 按真实时间走，4x 下不会缩水 */
     if (this.slowTimer > 0) {
-      this.slowTimer -= dt;
+      this.slowTimer -= rdt;
       if (this.slowTimer <= 0) {
         this.slowTimer = 0;
         this.slowFactor = 1;
@@ -967,37 +1028,37 @@ class Enemy extends Phaser.GameObjects.Container {
       let dps = 0;
       for (let i = this.burnStacks.length - 1; i >= 0; i--) {
         const s = this.burnStacks[i];
-        s.timer -= dt;
+        s.timer -= rdt;
         if (s.timer <= 0) this.burnStacks.splice(i, 1);
         else dps += s.dps;
       }
-      if (dps > 0) this.applyDot(dps * dt);
+      if (dps > 0) this.applyDot(dps * rdt);
     }
     /* 降防层独立倒计时，到期解除 */
     if (this.armorBreaks.length) {
       for (let i = this.armorBreaks.length - 1; i >= 0; i--) {
         const s = this.armorBreaks[i];
-        s.timer -= dt;
+        s.timer -= rdt;
         if (s.timer <= 0) this.armorBreaks.splice(i, 1);
       }
     }
     /* 麻痹值消退：0.5s 保活窗口内不衰减（等待塔侧层刷新），随后快速消退
        （40/秒 ≈ 满 100 值 2.5s 清空，与麻痹层 2.5s 存续时长对齐） */
     if (this._paraHold > 0) {
-      this._paraHold -= dt;
+      this._paraHold -= rdt;
     } else if (this.paralysis > 0) {
-      this.paralysis = Math.max(0, this.paralysis - 40 * dt);
+      this.paralysis = Math.max(0, this.paralysis - 40 * rdt);
     }
     /* 4 级塔状态计时（与塔侧 DOT/增伤时长对齐，塔侧到期不回调故怪物侧自计） */
     if (this._chillTimer > 0) {
-      this._chillTimer -= dt;
+      this._chillTimer -= rdt;
       if (this._chillTimer <= 0) {
         this._chillTimer = 0;
         this.statusDefReduce = 0;
       }
     }
     if (this._windTimer > 0) {
-      this._windTimer -= dt;
+      this._windTimer -= rdt;
       if (this._windTimer <= 0) {
         this._windTimer = 0;
         this.statusWindAmp = 0;
@@ -1005,7 +1066,7 @@ class Enemy extends Phaser.GameObjects.Container {
     }
     /* 冰塔封印：BOSS 强冻独立倒计时（不受 hardControlImmune 清理影响） */
     if (this.bossFreezeTimer > 0) {
-      this.bossFreezeTimer -= dt;
+      this.bossFreezeTimer -= rdt;
       if (this.bossFreezeTimer <= 0) {
         this.bossFreezeTimer = 0;
         if (this.freezeTimer <= 0) this.showFreezeGfx(false);
@@ -1016,10 +1077,24 @@ class Enemy extends Phaser.GameObjects.Container {
       const gsCfg = (this.scene && typeof this.scene.getSealCfg === 'function')
         ? this.scene.getSealCfg('towerD') : null;
       const pct = (gsCfg && gsCfg.truePctPerSec != null) ? gsCfg.truePctPerSec : 0.05;
-      const d = Math.min(dt, this._gravitySealDot);
-      this._gravitySealDot -= dt;
+      const d = Math.min(rdt, this._gravitySealDot);
+      this._gravitySealDot -= rdt;
       if (d > 0 && this.maxHp > 0) {
-        this.takeDamage(this.maxHp * pct * d, null, { percent: true, trueDamage: true });
+        const dot = tdClampHp(this.maxHp) * tdSafeNumber(pct, 0.05) * d;
+        this.takeDamage(tdSafeNumber(dot, 0), null, { percent: true, trueDamage: true, rawTrue: true });
+      }
+      if (this.dead || this.removed) return;
+    }
+    /* 风神降临：Boss 身上的 5% 最大生命真伤层（每层独立 5 秒，可无限叠加） */
+    if (this._windGodDots && this._windGodDots.length) {
+      for (let i = this._windGodDots.length - 1; i >= 0; i--) {
+        this._windGodDots[i] -= rdt;
+        if (this._windGodDots[i] <= 0) this._windGodDots.splice(i, 1);
+      }
+      if (this._windGodDots.length > 0) {
+        const wp = tdSafeNumber(this._windGodDotPct, 0.05);
+        const dot = tdClampHp(this.maxHp) * wp * this._windGodDots.length * rdt;
+        this.takeDamage(tdSafeNumber(dot, 0), 'wind', { percent: true, trueDamage: true, rawTrue: true });
       }
       if (this.dead || this.removed) return;
     }
@@ -1032,14 +1107,14 @@ class Enemy extends Phaser.GameObjects.Container {
         let changed = false;
         for (let i = this.elements.length - 1; i >= 0; i--) {
           const s = this.elements[i];
-          s.timer -= dt;
+          s.timer -= rdt;
           if (s.timer <= 0) { this.elements.splice(i, 1); changed = true; }
         }
         if (changed) this.refreshElementMarks();
       }
       /* 冰冻倒计时：到期解除定身（视觉还原交给 showFreezeGfx） */
       if (this.freezeTimer > 0) {
-        this.freezeTimer -= dt;
+        this.freezeTimer -= rdt;
         if (this.freezeTimer <= 0) {
           this.freezeTimer = 0;
           this.showFreezeGfx(false);
@@ -1050,7 +1125,7 @@ class Enemy extends Phaser.GameObjects.Container {
         let changed = false;
         for (let i = this.vulnStacks.length - 1; i >= 0; i--) {
           const stk = this.vulnStacks[i];
-          stk.timer -= dt;
+          stk.timer -= rdt;
           if (stk.timer <= 0) { this.vulnStacks.splice(i, 1); changed = true; }
         }
         if (changed) this.refreshVulnView(false);
@@ -1067,7 +1142,7 @@ class Enemy extends Phaser.GameObjects.Container {
           this.clearElementMark();
         }
       } else if (this.element && this.elementTimer > 0) {
-        this.elementTimer -= dt;
+        this.elementTimer -= rdt;
         if (this.elementTimer <= 0) {
           this.elementTimer = 0;
           this.element = null;
@@ -1146,14 +1221,32 @@ class Enemy extends Phaser.GameObjects.Container {
     const g = this.barBg;
     const w = this.barW;
     const h = this.cfg.barThickness || 5;   // BOSS 更粗血条（barThickness）
+    /* 防除零 / 防 NaN / 防 Infinity：血条宽度比例始终钳制在 0~1 */
+    let r = Number(ratio);
+    if (!Number.isFinite(r)) r = 0;
+    r = Math.max(0, Math.min(1, r));
     g.clear();
     g.fillStyle(0x000000, 0.35);
     g.fillRoundedRect(-w / 2 - 1, -1, w + 2, h + 2, 3);
-    if (ratio > 0) {
+    if (r > 0) {
       /* 血量颜色：绿 → 黄 → 红 */
-      const color = ratio > 0.55 ? 0x6be26b : ratio > 0.25 ? 0xffd24a : 0xff5d5d;
+      const color = r > 0.55 ? 0x6be26b : r > 0.25 ? 0xffd24a : 0xff5d5d;
       g.fillStyle(color, 1);
-      g.fillRoundedRect(-w / 2, 0, w * ratio, h, 2.5);
+      g.fillRoundedRect(-w / 2, 0, w * r, h, 2.5);
+    }
+    /* 第 10 关 BOSS 血条数字：缩写显示（15.2万 / 2.4亿 / 1.5e18），
+       不会横穿屏幕；小怪血条与普通关卡保持纯图形，避免后期怪海数字糊屏。 */
+    if (this.cfg && this.cfg.boss && this.scene && this.scene.levelId === 10) {
+      if (!this.hpText && this.scene) {
+        this.hpText = this.scene.add.text(0, -this.cfg.radius - 10 + h / 2, '', {
+          fontFamily: TD_FONT_STACK, fontSize: '9px', fontStyle: 'bold',
+          color: '#ffffff', resolution: TD_TEXT_RES
+        }).setOrigin(0.5).setStroke('#1b1412', 2);
+        this.add(this.hpText);
+      }
+      if (this.hpText) {
+        this.hpText.setText(tdFormatBigNumber(Math.max(0, tdSafeNumber(this.hp, 0))));
+      }
     }
   }
 
@@ -1311,11 +1404,14 @@ class Enemy extends Phaser.GameObjects.Container {
       ratio = Math.max(0, s.hp / Math.max(1, s.maxHp));
     } else if (s.value != null) {
       ratio = Math.max(0, s.value / Math.max(1, s.maxValue));
-      text = '盾值 ' + Math.ceil(Math.max(0, s.value));
+      text = '盾值 ' + tdFormatBigNumber(Math.max(0, s.value));
     } else {
       ratio = 1 - s.hits / Math.max(1, s.maxHits);
-      text = '护盾 ' + Math.max(0, s.maxHits - s.hits);
+      text = '护盾 ' + tdFormatBigNumber(Math.max(0, s.maxHits - s.hits));
     }
+    /* 盾条比例同样防 NaN/Infinity/除零 */
+    ratio = tdSafeNumber(ratio, 0);
+    ratio = Math.max(0, Math.min(1, ratio));
     g.fillStyle(this.shieldColor(), 1);
     g.fillRoundedRect(-w / 2, y0, Math.max(0, w * ratio), 3, 1.5);
 

@@ -283,6 +283,12 @@ html, body {
 .seal-item.unlocked { background: #e9ffe2; border-color: #6bc25a; cursor: default; }
 .seal-item.unlocked .seal-price { color: #2e7d1c; }
 .seal-item:disabled { opacity: .8; }
+.seal-item.unaffordable {
+  opacity: .5;
+  filter: grayscale(.7);
+  cursor: not-allowed;
+}
+.seal-item.unlocked:disabled { opacity: 1; filter: none; cursor: default; }
 #seal-msg { min-height: 15px; margin-top: 6px; font-size: 11px; color: #c0392b; text-align: center; }
 
 /* ---------------- 无尽模式波次计数器已移除 ----------------

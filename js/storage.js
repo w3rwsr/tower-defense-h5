@@ -235,7 +235,9 @@
         const d = raw ? JSON.parse(raw) : null;
         if (!d || typeof d !== 'object' || Array.isArray(d)) return {};
         const out = {};
-        ['towerA', 'towerB', 'towerC', 'towerD', 'towerE', 'towerF'].forEach((k) => {
+        ['towerA', 'towerB', 'towerC', 'towerD', 'towerE', 'towerF',
+          'towerA2', 'towerB2', 'towerC2', 'towerD2', 'towerE2', 'towerF2',
+          'globalBulletSpeed'].forEach((k) => {
           if (d[k] === true) out[k] = true;
         });
         return out;

@@ -12,7 +12,12 @@ class Projectile extends Phaser.GameObjects.Image {
     this.pCfg = pCfg;
     this.damage = damage;                 // 已含塔等级加成
     this.effect = pCfg.effect;
-    this.speed = pCfg.speed;
+    /* 全局解封「极速弹道」：所有塔的子弹/弹幕速度 ×3（仅第 10 关封印生效） */
+    const bulletSeal = (scene && typeof scene.getSealCfg === 'function')
+      ? scene.getSealCfg('globalBulletSpeed') : null;
+    this._bulletSealApplied = !!bulletSeal;
+    this.speed = pCfg.speed * (bulletSeal
+      ? ((bulletSeal.bulletSpeedMul != null) ? bulletSeal.bulletSpeedMul : 3) : 1);
     this.target = target;
     this.sourceTower = sourceTower || null; // 发射塔（风元素塔扩散冷却判定用）
     this.spin = pCfg.spin || 0;           // 风刃旋转速度（弧度/秒，0=不旋转）

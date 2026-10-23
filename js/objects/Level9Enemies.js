@@ -101,8 +101,8 @@
       this.applyShield({ type: 'element', element: el, value: this._ss.value });
     }
 
-    update(dt) {
-      super.update(dt);
+    update(dt, realDt) {
+      super.update(dt, realDt);
       if (this.dead || this.removed || !this.scene) return;
       if (this.__shieldBroken) return;      // 已变回普通史莱姆：不再挂盾/切换
       this._switchTimer -= dt;
@@ -176,8 +176,8 @@
       });
     }
 
-    update(dt) {
-      super.update(dt);
+    update(dt, realDt) {
+      super.update(dt, realDt);
       if (this.dead || this.removed || !this.scene) return;
       if (this._auraGfx) this._auraGfx.setPosition(this.x, this.y);
 
