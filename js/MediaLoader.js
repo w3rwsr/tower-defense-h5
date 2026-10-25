@@ -55,7 +55,8 @@ const TDMedia = (function () {
   /* ---------------- 进度组（进度条 UI） ---------------- */
   const group = {
     active: false, shown: false, label: '', total: 0, done: 0, fail: 0,
-    shownAt: 0, capTimer: null, hideTimer: null, idleTimer: null
+    shownAt: 0, capTimer: null, hideTimer: null, idleTimer: null,
+    after: []                     // 加载页关闭后要执行的后台任务（如 BOSS 死亡视频预载）
   };
   let overlay = null, barFill = null, textEl = null;
   let toastEl = null, toastTimer = null;
@@ -64,11 +65,13 @@ const TDMedia = (function () {
     if (overlay || !document || !document.body) return overlay;
     overlay = document.createElement('div');
     overlay.id = 'td-media-loading';
-    /* 内联样式：不依赖 style.css，避免与既有样式冲突；
-       pointer-events:none —— 进度条绝不吞掉任何触摸/点击（玩法零影响） */
+    /* 内联样式：不依赖 style.css，避免与既有样式冲突。
+       加载期间必须【拦截】所有点击/触摸：此前 pointer-events:none 会让
+       点击穿透到地图，出现可建造绿框；现在加载页就是全屏物理遮罩，
+       加载结束（display:none）后才恢复地图交互。 */
     overlay.style.cssText = 'position:fixed;left:0;right:0;top:0;bottom:0;z-index:9998;' +
       'display:none;flex-direction:column;align-items:center;justify-content:center;' +
-      'background:rgba(18,30,10,0.42);pointer-events:none;' +
+      'background:rgba(18,30,10,0.42);pointer-events:auto;touch-action:none;' +
       'font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:#fff;';
     const box = document.createElement('div');
     box.style.cssText = 'min-width:280px;padding:18px 22px;border-radius:14px;' +
@@ -113,12 +116,14 @@ const TDMedia = (function () {
   /** 开始一个进度组（有媒体入队时才显示进度条）。进关时调用。 */
   api.beginGroup = function (label) {
     group.active = true;
-    group.shown = false;                 // 先不显示：等首个媒体入队（见 showGroup）
     group.label = label || '加载中';
     group.total = group.done = group.fail = 0;
     group.shownAt = 0;
     ensureOverlay();
-    if (overlay) overlay.style.display = 'none';
+    /* 立即显示加载页（0% 仅出现在首批任务入队的 1~1.4s 内）：
+       它同时是输入遮罩，必须从进关第一刻起挡住地图点击，避免
+       "资源还在加载、玩家已能点出绿框"的竞态。 */
+    showGroup();
     /* 整组硬超时：到点无论是否加载完都放行（隐藏进度条，绝不卡住玩家） */
     clearTimeout(group.capTimer);
     group.capTimer = setTimeout(() => api.endGroup(true), GROUP_TIMEOUT);
@@ -129,6 +134,21 @@ const TDMedia = (function () {
     }, IDLE_GRACE);
   }
 
+  /** 加载组是否仍在进行：GameScene 用它兜底屏蔽地图 pointerdown，
+   *  即使加载页 DOM 尚未完成合成，也不会漏出可建造高亮。 */
+  api.isBusy = function () {
+    return !!group.active;
+  };
+
+  /** 注册「加载页关闭后」执行的后台任务（不显示遮罩、不占加载进度）。
+   *  用于 BOSS 死亡视频等非首屏必需资源：避免把加载页拖长数秒。
+   *  若当前没有加载组，立即异步执行。 */
+  api.afterGroup = function (fn) {
+    if (typeof fn !== 'function') return;
+    if (!group.active) { setTimeout(fn, 0); return; }
+    group.after.push(fn);
+  };
+
   /** 结束进度组：清进度条；failed>0 时给一次轻提示 */
   api.endGroup = function (force) {
     if (!group.active) return;
@@ -137,6 +157,11 @@ const TDMedia = (function () {
     clearTimeout(group.capTimer);
     clearTimeout(group.idleTimer);
     clearTimeout(group.hideTimer);
+    /* 加载页已关闭 → 立即放行后台预载（此时 group.active=false，
+       后续媒体不会重新拉起遮罩，也不会延长玩家等待） */
+    const after = group.after;
+    group.after = [];
+    after.forEach((fn) => { try { fn(); } catch (e) { /* 后台预载失败不影响游戏 */ } });
     const failed = group.fail;
     const wait = force ? 0 : Math.max(0, OVERLAY_MIN_MS - (Date.now() - group.shownAt));
     group.hideTimer = setTimeout(() => {

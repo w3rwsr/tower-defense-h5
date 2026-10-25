@@ -10,6 +10,48 @@
 (function () {
   'use strict';
 
+  /* 第 10 关高倍速索敌：判断怪物本帧【扫掠路径】是否穿过射程圈。
+     不能只看当前位置——4x / 后期高移速下一帧可能跨过整个射程圈，
+     只看当前位置会整帧漏锁。做法：
+       1) 当前位置在圈内 → 直接命中；
+       2) 单帧位移 ≤48px → 用位移量补偿半径（便宜、覆盖常规 4x）；
+       3) 位移更大 → 沿 pathDist 区间采样路径点，检查是否穿圈（覆盖极端速度）；
+     前 9 关 scene.levelId !== 10，只做第 1 步，与原逻辑完全一致。 */
+  function inRange(tower, e) {
+    const r = tower.stats.range;
+    const dx = e.x - tower.x, dy = e.y - tower.y;
+    if (dx * dx + dy * dy <= r * r) return true;
+
+    const scene = tower.scene;
+    if (!scene || scene.levelId !== 10) return false;
+
+    const from = (e._prevPathDist != null) ? e._prevPathDist : e.pathDist;
+    const to = e.pathDist;
+    if (to > from) {
+      const moved = to - from;
+      if (moved <= 48) {
+        const rr = r + moved;
+        return dx * dx + dy * dy <= rr * rr;
+      }
+      /* 沿真实路径采样（拐弯也准确），最多 24 段，避免塔多怪多时爆开销 */
+      const steps = Math.min(24, Math.ceil(moved / 24));
+      const routeId = e.routeId || 0;
+      for (let i = 0; i <= steps; i++) {
+        const p = scene.pathPointAt(from + moved * i / steps, routeId);
+        const px = p.x - tower.x, py = p.y - tower.y;
+        if (px * px + py * py <= r * r) return true;
+      }
+      return false;
+    }
+
+    /* 无路径里程数据（理论上不会出现在小怪上）：退回单帧直线补偿 */
+    const px = (e._prevX != null) ? e._prevX : e.x;
+    const py = (e._prevY != null) ? e._prevY : e.y;
+    const pad = Math.min(96, Math.max(Math.abs(e.x - px), Math.abs(e.y - py)));
+    const rr = r + pad;
+    return dx * dx + dy * dy <= rr * rr;
+  }
+
   /* ---------------- 索敌策略表 ----------------
    * 每个策略签名：(tower, enemies) => enemy | null
    * tower 需提供：x, y, stats.range
@@ -20,13 +62,12 @@
     furthest(tower, enemies) {
       let best = null;
       let bestDist = -Infinity;
-      const r2 = tower.stats.range * tower.stats.range;
       for (let i = 0; i < enemies.length; i++) {
         const e = enemies[i];
         if (e.dead || e.invulnTimer > 0) continue; // 传送后短暂无敌：不可被索敌/吸引
         const dx = e.x - tower.x;
         const dy = e.y - tower.y;
-        if (dx * dx + dy * dy <= r2 && e.pathDist > bestDist) {
+        if (inRange(tower, e) && e.pathDist > bestDist) {
           best = e;
           bestDist = e.pathDist;
         }
@@ -38,14 +79,13 @@
     nearest(tower, enemies) {
       let best = null;
       let bestD2 = Infinity;
-      const r2 = tower.stats.range * tower.stats.range;
       for (let i = 0; i < enemies.length; i++) {
         const e = enemies[i];
         if (e.dead || e.invulnTimer > 0) continue; // 传送后短暂无敌：不可被索敌/吸引
         const dx = e.x - tower.x;
         const dy = e.y - tower.y;
         const d2 = dx * dx + dy * dy;
-        if (d2 <= r2 && d2 < bestD2) {
+        if (inRange(tower, e) && d2 < bestD2) {
           best = e;
           bestD2 = d2;
         }
@@ -56,13 +96,12 @@
     /* 血量最低（备用策略，留给后续“斩首型”新塔） */
     weakest(tower, enemies) {
       let best = null;
-      const r2 = tower.stats.range * tower.stats.range;
       for (let i = 0; i < enemies.length; i++) {
         const e = enemies[i];
         if (e.dead || e.invulnTimer > 0) continue; // 传送后短暂无敌：不可被索敌/吸引
         const dx = e.x - tower.x;
         const dy = e.y - tower.y;
-        if (dx * dx + dy * dy <= r2 && (!best || e.hp < best.hp)) best = e;
+        if (inRange(tower, e) && (!best || e.hp < best.hp)) best = e;
       }
       return best;
     }

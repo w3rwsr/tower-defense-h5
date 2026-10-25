@@ -231,16 +231,16 @@
   <script defer src="js/storage.js?v=20261023a"></script>
   <!-- 媒体加载统一调度（串行队列 + 进度条 + 10s 超时跳过 + Cache API 缓存）：
        必须早于各视频模块执行，供其按需排进加载队列 -->
-  <script defer src="js/MediaLoader.js?v=20261018b"></script>
+  <script defer src="js/MediaLoader.js?v=20261025a"></script>
   <!-- 开发调试工具：仅 URL 带 #dbg 时激活（全内容解锁 + 应用内浏览器），无 #dbg 的正式环境脚本立即退出，不创建 DOM、不写任何存储 -->
   <script defer src="js/debugTools.js?v=20260921r"></script>
-  <script defer src="js/attackModule.js?v=20261023b"></script>
-  <script defer src="js/objects/Enemy.js?v=20261023b"></script>
+  <script defer src="js/attackModule.js?v=20261025a"></script>
+  <script defer src="js/objects/Enemy.js?v=20261025a"></script>
   <!-- 第 8 关专属实体（水晶史莱姆/自爆泥怪/熔岩巨兽/风眼控制器），依赖 Enemy 基类 -->
   <script defer src="js/objects/Level8Enemies.js?v=20261023a"></script>
   <!-- 第 9 关专属实体（元素狂暴图腾 / 蓝色圣殿守卫控制器），依赖 Enemy 基类 -->
   <script defer src="js/objects/Level9Enemies.js?v=20261023a"></script>
-  <script defer src="js/objects/Projectile.js?v=20261023a"></script>
+  <script defer src="js/objects/Projectile.js?v=20261025a"></script>
   <!-- 4 级塔异常状态管理器（塔侧）：依赖 Projectile 做命中钩子，须在其后加载 -->
   <script defer src="js/objects/StatusEffects.js?v=20261023a"></script>
   <script defer src="js/FireTowerArtData.js?v=20261009o"></script>
@@ -269,7 +269,7 @@
   <script defer src="js/objects/ThunderArc.js?v=20261012m"></script>
   <script defer src="js/scenes/BootScene.js?v=20261020a"></script>
   <script defer src="js/scenes/LevelSelectScene.js?v=20261022b"></script>
-  <script defer src="js/scenes/GameScene.js?v=20261023a"></script>
+  <script defer src="js/scenes/GameScene.js?v=20261025b"></script>
   <script defer src="js/main.js?v=20261019a"></script>
   <script>
     /* 启动进度条 + 失败自动重试（放在所有 defer 脚本之后：

@@ -997,6 +997,11 @@ class Enemy extends Phaser.GameObjects.Container {
       !this.scene=场景切换/销毁瞬间的残留帧（如旧场景 shutdown 与 RAF
        交叠），此时路由几何已不存在，跳过本帧即可（会被所在场景数组过滤） */
     if (this.dead || this.removed || !this.scene) return;
+    /* 记录本帧起点：第 10 关高速索敌/子弹扫掠碰撞需要上一帧位置，
+       普通关卡不读取这两个字段，行为与旧版完全一致。 */
+    const frameStartX = this.x;
+    const frameStartY = this.y;
+    const frameStartPathDist = this.pathDist;
     /* dt = 游戏时间（移动/弹道受倍速影响）；rdt = 真实时间（Buff/特殊 CD） */
     const rdt = (realDt == null) ? dt : realDt;
 
@@ -1200,6 +1205,12 @@ class Enemy extends Phaser.GameObjects.Container {
     const curLen = this.scene.routeLength(this.routeId);
 
     if (this.pathDist >= curLen) {
+      /* 第 10 关：先把渲染位置钉到终点再结算漏怪，避免高倍速下这一帧的
+         位移让怪物看起来"跳过"大门（前 9 关不改，保持原进门动画起点）。 */
+      if (this.scene.levelId === 10) {
+        const end = this.scene.pathPointAt(curLen, this.routeId);
+        this.setPosition(end.x, end.y);
+      }
       this.leaked = true;
       this.dead = true;
       this.scene.onEnemyLeak(this);
@@ -1213,6 +1224,10 @@ class Enemy extends Phaser.GameObjects.Container {
     this.pullDX = vp.x - p.x;
     this.pullDY = vp.y - p.y;
     this.setPosition(vp.x, vp.y);
+    /* 第 10 关高速防漏的扫掠数据：本帧起点 → 当前位置 */
+    this._prevX = frameStartX;
+    this._prevY = frameStartY;
+    this._prevPathDist = frameStartPathDist;
     /* 让下方的敌人盖住上方的，制造一点层次 */
     this.setDepth(20 + Math.floor(p.y));
   }

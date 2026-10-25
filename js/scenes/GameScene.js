@@ -269,47 +269,80 @@ class GameScene extends Phaser.Scene {
       BOMB_SLIME_VIDEO.init && !BOMB_SLIME_VIDEO._inited) {
       plan.push({ tag: 'BOMB_SLIME_VIDEO.init', delay: 0, fn: () => BOMB_SLIME_VIDEO.init(this) });
     }
+    /* 首屏媒体全部立即入队：TDMedia 本身就是串行队列（一次只下载 1 个），
+       不再需要错峰延迟；立即入队才能让加载页的 total 准确包含全部首屏媒体，
+       不会出现"一个先加载完、加载页提前关闭、后续媒体还在加载"的漏洞。 */
     if (hasBoss && typeof BOSS_VIDEO !== 'undefined' && BOSS_VIDEO.init && !BOSS_VIDEO._inited) {
-      plan.push({ tag: 'BOSS_VIDEO.init', delay: 800, fn: () => BOSS_VIDEO.init(this) });
+      plan.push({ tag: 'BOSS_VIDEO.init', delay: 0, fn: () => BOSS_VIDEO.init(this) });
     }
     if (windUsable && typeof WIND_VIDEO !== 'undefined' && WIND_VIDEO.init && !WIND_VIDEO._inited) {
-      plan.push({ tag: 'WIND_VIDEO.init', delay: 1100, fn: () => WIND_VIDEO.init(this) });
+      plan.push({ tag: 'WIND_VIDEO.init', delay: 0, fn: () => WIND_VIDEO.init(this) });
     }
-    /* 死亡视频按出场顺序逐个错峰预载：队列串行，下完一个才下一个 */
+    /* BOSS 死亡视频属于【背景预载】，不占用阻塞加载页：等前景媒体加载完、
+       加载页关闭后再入队。否则 3 个变体错峰到 8.4 秒，会把玩家锁在
+       加载页前数秒。死亡视频仍走 TDMedia 串行队列，BOSS 出场前必然就绪；
+       未就绪时既有静态贴图兜底逻辑不变。 */
+    const bg = [];
     const deathMod = (typeof BOSS_DEATH !== 'undefined') ? BOSS_DEATH : null;
     bossKeys.forEach((k, i) => {
       if (!deathMod) return;
       if (!deathMod.supported) return;                      // H.264/管线不支持：加载无意义，不计入
       if (deathMod._st && deathMod._st[k]) return;          // 已建条目：已在下载/已就绪/已失败 → 不重复排
-      plan.push({
+      bg.push({
         tag: 'BOSS_DEATH.prewarm(' + k + ')',
-        delay: 1400 + i * 3500,
+        delay: 1200 + i * 2800,
         fn: () => deathMod.prewarm(k)
       });
     });
+
+    /* 统一的任务调度：DOM setTimeout，不受游戏暂停/场景时钟影响 */
+    const runList = (list) => {
+      list.forEach((p) => {
+        setTimeout(() => {
+          try { p.fn(); } catch (e) {
+            /* 不静默：打出具体任务名与错误，便于真机排查 */
+            console.error('[TDMedia] 媒体加载任务异常：' + p.tag, e);
+          }
+        }, p.delay);
+      });
+    };
+    const runBackground = () => { if (bg.length) runList(bg); };
+    /* 首屏任务同步执行：所有 init 在同一帧内把视频排进 TDMedia 队列，
+       group.total 立即包含全部首屏媒体，杜绝"先加载完一个就提前关页" */
+    const runNow = (list) => {
+      list.forEach((p) => {
+        try { p.fn(); } catch (e) {
+          console.error('[TDMedia] 媒体加载任务异常：' + p.tag, e);
+        }
+      });
+    };
+
     if (!plan.length) {
-      /* 本关所需媒体本会话已全部加载过（或本关无需媒体）：直接进游戏，不出现加载页 */
+      /* 本关首屏媒体已全部加载过（或本关无需首屏媒体）：不出现加载页；
+         死亡视频仍稍后在后台预热，不阻塞任何操作。 */
       try { if (typeof TDMedia !== 'undefined' && TDMedia.endGroup) TDMedia.endGroup(true); } catch (e) {}
+      if (bg.length) setTimeout(runBackground, 900);
       return;
     }
 
-    /* 进度条：百分比由 TDMedia 按已入队媒体的完成/失败推进；
-       10s 上限到点自动隐藏放行，绝不卡住玩家。
-       调度用 DOM setTimeout（不用 this.time.delayedCall）：媒体加载属于
-       资源层，不应受游戏暂停/场景时钟暂停影响，且与选关页的错峰加载同源。 */
+    /* 前景加载页：只等真正立即使用的媒体（风塔/史莱姆/BOSS 运动视频）。
+       10s 上限到点自动隐藏放行，绝不卡死；进度百分比由 TDMedia 推进。 */
     try {
       if (typeof TDMedia !== 'undefined' && TDMedia.beginGroup) TDMedia.beginGroup('加载本关资源');
     } catch (e) {
       console.warn('[TDMedia] 进度条启动失败（不影响进关）：', e);
     }
-    plan.forEach((p) => {
-      setTimeout(() => {
-        try { p.fn(); } catch (e) {
-          /* 不静默：打出具体任务名与错误，便于真机排查 */
-          console.error('[TDMedia] 媒体加载任务异常：' + p.tag, e);
-        }
-      }, p.delay);
-    });
+    /* 加载页关闭后才开始 BOSS 死亡视频背景预载（不重新拉起遮罩） */
+    try {
+      if (typeof TDMedia !== 'undefined' && TDMedia.afterGroup) {
+        TDMedia.afterGroup(runBackground);
+      } else {
+        setTimeout(runBackground, 4000);
+      }
+    } catch (e) {
+      setTimeout(runBackground, 4000);
+    }
+    runNow(plan);
   }
 
   /* 本关实际出场的 BOSS 变体 key 列表（gold/blue/gray），取值规则与
@@ -2536,6 +2569,9 @@ class GameScene extends Phaser.Scene {
    * 输入：放塔 / 选塔
    * ============================================================ */
   onPointerMove(pointer) {
+    /* 加载页活动期间屏蔽地图交互（双保险：DOM 加载页已拦截触摸，
+       这里再挡一次合成前/合成事件，绝不让绿框在加载期出现） */
+    if (typeof TDMedia !== 'undefined' && TDMedia.isBusy && TDMedia.isBusy()) return;
     if (this.selectedType) {
       /* DPR 高清渲染后 pointer.x/y 是物理缓冲坐标（0..960×dpr），
          而画幽灵/吸附/落塔全部按 960×540 逻辑世界坐标设计，
@@ -2554,6 +2590,9 @@ class GameScene extends Phaser.Scene {
   }
 
   onPointerDown(pointer) {
+    /* 加载页活动期间一律不响应地图点击：加载完成后 TDMedia.isBusy()
+       为 false，选塔/放塔/绿框提示全部恢复。 */
+    if (typeof TDMedia !== 'undefined' && TDMedia.isBusy && TDMedia.isBusy()) return;
     /* 同 onPointerMove：pointer.x/y 已是物理缓冲坐标（×dpr），
        下方 getTowerAt/getObstacleAt/snapHotspot/distToPath 等全部
        消费世界坐标，先经相机逆变换统一换算（dpr=1 时无差别）。
@@ -5342,6 +5381,17 @@ class GameScene extends Phaser.Scene {
     const sv = this._resumeSave;
     this._resumeSave = null;
     if (!sv || !this.getEndlessCfg()) return;
+
+    /* 【读档风塔视频】必须在重建塔阵【之前】初始化 WIND_VIDEO：
+       Tower 构造器只读取一次 WIND_VIDEO.supported；若选关页的延迟 init
+       尚未执行，读档重建的风塔会直接走静态贴图，且之后不再注册视频回调。
+       这里同步 init 让 supported 立刻为 true（纹理仍异步加载，就绪后经
+       whenReady 自动接管），保证读档风塔与正常进关一样显示视频动画。 */
+    const hasWindTower = (sv.towers || []).some((t) => t && t.t === 'towerF');
+    if (hasWindTower && typeof WIND_VIDEO !== 'undefined' &&
+        WIND_VIDEO.init && !WIND_VIDEO._inited) {
+      try { WIND_VIDEO.init(this); } catch (e) { /* 不支持/失败：静态贴图兜底 */ }
+    }
 
     /* 波次：存档 wave=已打到第 N 波 → waveIndex = N-1，下一波即 N */
     this.waveIndex = Math.max(0, (sv.wave || 1) - 1);

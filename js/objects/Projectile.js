@@ -4,6 +4,21 @@
  *   - 单体弹（damage）：目标没了就空爆消失；
  *   - 范围冰弹（splashSlow）：到达落点后范围伤害 + 减速。
  * ============================================================ */
+/* 点到线段最短距离的平方（扫掠碰撞用，避免开方） */
+function segPointDistSq(ax, ay, bx, by, px, py) {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  if (len2 <= 0.000001) {
+    const ex = px - ax, ey = py - ay;
+    return ex * ex + ey * ey;
+  }
+  let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+  t = t < 0 ? 0 : (t > 1 ? 1 : t);
+  const qx = ax + dx * t, qy = ay + dy * t;
+  const ex = px - qx, ey = py - qy;
+  return ex * ex + ey * ey;
+}
+
 class Projectile extends Phaser.GameObjects.Image {
   constructor(scene, x, y, target, pCfg, damage, sourceTower) {
     /* 贴图：默认按颜色生成圆弹；pCfg.texture 指定专用贴图（如风刃 proj_wind） */
@@ -206,23 +221,87 @@ class Projectile extends Phaser.GameObjects.Image {
   update(dt) {
     if (this.done) return;
 
+    const scene = this.scene;
+    /* 高速防漏增强仅在第 10 关启用；前 9 关 isL10=false，走原逻辑 */
+    const isL10 = !!(scene && scene.levelId === 10);
+
     if (this.target && !this.target.dead) {
-      this.tx = this.target.x;
-      this.ty = this.target.y;
+      let tx = this.target.x;
+      let ty = this.target.y;
+      /* 第 10 关：按目标本帧速度预测拦截点。4x / 后期高移速下，
+         纯追尾会让子弹永远落后于目标，提前量可保证在目标前方命中。 */
+      if (isL10 && this.target._prevX != null && dt > 0) {
+        const vx = (tx - this.target._prevX) / dt;
+        const vy = (ty - this.target._prevY) / dt;
+        const t = Math.min(0.35,
+          Math.hypot(tx - this.x, ty - this.y) / Math.max(this.speed, 1));
+        let lx = vx * t, ly = vy * t;
+        const ll = Math.hypot(lx, ly);
+        if (ll > 24) { lx *= 24 / ll; ly *= 24 / ll; }
+        tx += lx; ty += ly;
+      }
+      this.tx = tx;
+      this.ty = ty;
     }
 
     const dx = this.tx - this.x;
     const dy = this.ty - this.y;
     const dist = Math.hypot(dx, dy);
-    const step = this.speed * dt;
 
-    if (dist <= step + 6) {
+    /* 第 10 关命中半径加厚：基础 6px + 目标本体半径的 50%（上限 16px）。
+       防止极速下目标与弹丸"擦肩而过"被判定为未命中。 */
+    let hitDist = 6;
+    if (isL10 && this.target) {
+      hitDist += Math.min(16, (this.target.radius || 0) * 0.5);
+    }
+
+    /* 扫掠碰撞（CCD）第一步：目标本帧从 _prev 移到当前位置，若扫过弹丸
+       当前位置，直接判定命中——这是 4x 下防穿透的关键。 */
+    if (isL10 && this.target && !this.target.dead && this.target._prevX != null) {
+      const d2 = segPointDistSq(this.target._prevX, this.target._prevY,
+        this.target.x, this.target.y, this.x, this.y);
+      if (d2 <= hitDist * hitDist) {
+        this.tx = this.target.x;
+        this.ty = this.target.y;
+        this.impact();
+        return;
+      }
+    }
+
+    /* 第 10 关：目标速度超过子弹时临时提速（最多 3 倍），保证追得上；
+       正常波次目标远慢于子弹，这段不改变原有手感。 */
+    let speedNow = this.speed;
+    if (isL10 && this.target && !this.target.dead &&
+        this.target._prevX != null && dt > 0) {
+      const tv = Math.hypot(this.target.x - this.target._prevX,
+        this.target.y - this.target._prevY) / dt;
+      if (tv > speedNow) speedNow = Math.min(tv * 1.25, this.speed * 3);
+    }
+    const step = speedNow * dt;
+
+    if (dist <= step + hitDist) {
       this.setPosition(this.tx, this.ty);
       this.impact();
       return;
     }
 
-    this.setPosition(this.x + (dx / dist) * step, this.y + (dy / dist) * step);
+    const nx = this.x + (dx / dist) * step;
+    const ny = this.y + (dy / dist) * step;
+
+    /* 扫掠碰撞（CCD）第二步：弹丸本帧路径与目标本帧路径贴近则命中 */
+    if (isL10 && this.target && !this.target.dead && this.target._prevX != null) {
+      const d2 = segPointDistSq(this.target._prevX, this.target._prevY,
+        this.target.x, this.target.y, nx, ny);
+      if (d2 <= hitDist * hitDist) {
+        this.tx = this.target.x;
+        this.ty = this.target.y;
+        this.setPosition(this.target.x, this.target.y);
+        this.impact();
+        return;
+      }
+    }
+
+    this.setPosition(nx, ny);
     /* 风刃（spin>0）持续旋转出旋风效果；火焰弹幕沿飞行方向朝向目标（贴图尖端朝右）；
        冰雪花 / 水弹不朝向目标，持续轻微自转，并同步光带朝向与粒子飘散方向 */
     if (this.isIce || this.isWater) {
