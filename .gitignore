@@ -1,0 +1,6 @@
+node_modules/
+.tools/
+www/
+dist/
+__pycache__/
+.trae-html-share-packages/

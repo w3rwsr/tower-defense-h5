@@ -1,0 +1,9 @@
+{
+  "appId": "com.yourname.towerdefense",
+  "appName": "卡通塔防",
+  "webDir": "www",
+  "backgroundColor": "#7cc24e",
+  "android": {
+    "backgroundColor": "#7cc24e"
+  }
+}
