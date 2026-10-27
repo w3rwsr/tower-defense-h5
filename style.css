@@ -217,19 +217,9 @@ html, body {
    （由 GameScene 进入时加 class，仅隐藏该 chip，金币/波次不受影响） */
 .chip-lives.hidden-by-gate { display: none !important; }
 
-/* ---------------- 第 10 关无尽模式：金币买血 / 解除封印 ---------------- */
-/* 默认全部隐藏，仅 GameScene(levelId=10) 通过 .show 打开，前 9 关零影响 */
-.btn-buy-life {
-  display: none;
-  pointer-events: auto;
-  min-height: 36px;
-  padding: 6px 10px;
-  font-size: clamp(11px, 2vmin, 14px);
-  background: #ffb3b3;
-  color: #5a1010;
-  white-space: nowrap;
-}
-.btn-buy-life.show { display: inline-flex; align-items: center; }
+/* ---------------- 第 10 关无尽模式：解除封印 ---------------- */
+/* 买血已改为终点大门旁的画布内【+】按钮（GameScene.buildBuyLifeButton），
+   不再占用顶部 HUD；以下仅保留解除封印入口。 */
 .btn-seal-toggle { display: none; }
 .btn-seal-toggle.show { display: inline-flex; align-items: center; background: #d8c4ff; }
 #seal-panel {

@@ -20,22 +20,69 @@ function segPointDistSq(ax, ay, bx, by, px, py) {
 }
 
 class Projectile extends Phaser.GameObjects.Image {
-  constructor(scene, x, y, target, pCfg, damage, sourceTower) {
-    /* 贴图：默认按颜色生成圆弹；pCfg.texture 指定专用贴图（如风刃 proj_wind） */
-    super(scene, x, y, pCfg.texture || ('proj_' + pCfg.color.toString(16)));
+  constructor(scene, x, y, target, pCfg, damage, sourceTower, pooled) {
+    /* 池对象先挂一个已存在的占位贴图；真正发射时 spawn() 再切目标贴图 */
+    super(scene, x, y, 'fire_dot');
+    this._pooled = !!pooled;
+    this.done = true;
+    this.pCfg = null;
+    this.damage = 0;
+    this.effect = null;
+    this.target = null;
+    this.sourceTower = null;
+    this.speed = 0;
+    this.spin = 0;
+    this.isIce = false;
+    this.iceSpin = 0;
+    this.isWater = false;
+    this.waterSpin = 0;
+    this._trail = null;
+    this._sparks = null;
+    this._ribbon = null;
+    this._bulletSealApplied = false;
+    this.tx = x;
+    this.ty = y;
+    this.setDepth(40);
+    scene.add.existing(this);
+    if (this._pooled) {
+      this.setActive(false).setVisible(false).setPosition(-9999, -9999);
+    } else {
+      this.spawn(x, y, target, pCfg, damage, sourceTower);
+    }
+  }
 
+  /** 发射 / 池复用入口：彻底重置上一发状态，再按本次塔配置重建视觉。
+   *  坐标、伤害、目标、所属塔、速度、贴图、拖尾、粒子、光带全部重置。 */
+  spawn(x, y, target, pCfg, damage, sourceTower) {
+    if (!pCfg || !target) { this.done = true; return this; }
+    this._clearAttachments();
+    this.setActive(true).setVisible(true).setAlpha(1).setScale(1).setRotation(0);
+    this.setPosition(x, y);
+    this.done = false;
     this.pCfg = pCfg;
     this.damage = damage;                 // 已含塔等级加成
-    this.effect = pCfg.effect;
+    this.effect = pCfg.effect || { type: 'damage' };
+    this.target = target;
+    this.sourceTower = sourceTower || null; // 发射塔（风元素塔扩散冷却判定用）
+    this.spin = pCfg.spin || 0;           // 风刃旋转速度（弧度/秒，0=不旋转）
+    this.isIce = false;
+    this.iceSpin = 0;
+    this.isWater = false;
+    this.waterSpin = 0;
+    this._trail = null;
+    this._sparks = null;
+    this._ribbon = null;
+    this.tx = target.x;
+    this.ty = target.y;
+    const scene = this.scene;
+    /* 先重置为本次默认贴图，避免复用上一发的火/冰/水专属贴图 */
+    this.setTexture(pCfg.texture || ('proj_' + pCfg.color.toString(16)));
     /* 全局解封「极速弹道」：所有塔的子弹/弹幕速度 ×3（仅第 10 关封印生效） */
     const bulletSeal = (scene && typeof scene.getSealCfg === 'function')
       ? scene.getSealCfg('globalBulletSpeed') : null;
     this._bulletSealApplied = !!bulletSeal;
     this.speed = pCfg.speed * (bulletSeal
       ? ((bulletSeal.bulletSpeedMul != null) ? bulletSeal.bulletSpeedMul : 3) : 1);
-    this.target = target;
-    this.sourceTower = sourceTower || null; // 发射塔（风元素塔扩散冷却判定用）
-    this.spin = pCfg.spin || 0;           // 风刃旋转速度（弧度/秒，0=不旋转）
 
     /* 火元素塔（towerA）：按塔等级换熔岩弹贴图（裂纹/拖尾/火星随等级增强）。
        离线贴图（window.__lavaBulletArt）自带拖尾火星，不再挂粒子；
@@ -212,10 +259,42 @@ class Projectile extends Phaser.GameObjects.Image {
     // 落点（目标活着则每帧刷新）
     this.tx = target.x;
     this.ty = target.y;
-    this.done = false;
+    return this;
+  }
 
-    this.setDepth(40);
-    scene.add.existing(this);
+  /** 清空本次弹道的粒子/光带（复用时必须先销毁，避免叠到下一发） */
+  _clearAttachments() {
+    if (this._trail) { try { this._trail.destroy(); } catch (e) {} this._trail = null; }
+    if (this._sparks) { try { this._sparks.destroy(); } catch (e) {} this._sparks = null; }
+    if (this._ribbon) { try { this._ribbon.destroy(); } catch (e) {} this._ribbon = null; }
+  }
+
+  /** 命中/超时回收：池对象隐藏并彻底重置；非池对象按旧行为销毁 */
+  release() {
+    if (!this._pooled) {
+      this._clearAttachments();
+      this.done = true;
+      try { this.destroy(); } catch (e) {}
+      return;
+    }
+    this.done = true;
+    this._clearAttachments();
+    this.target = null;
+    this.sourceTower = null;
+    this.pCfg = null;
+    this.effect = null;
+    this.damage = 0;
+    this.speed = 0;
+    this.spin = 0;
+    this.isIce = false;
+    this.iceSpin = 0;
+    this.isWater = false;
+    this.waterSpin = 0;
+    this.setActive(false).setVisible(false).setPosition(-9999, -9999);
+    this.setScale(1).setRotation(0).setAlpha(1);
+    if (this.scene && typeof this.scene.recycleProjectile === 'function') {
+      this.scene.recycleProjectile(this);
+    }
   }
 
   update(dt) {
@@ -436,6 +515,6 @@ class Projectile extends Phaser.GameObjects.Image {
         scene.spawnHitFx(this.tx, this.ty, this.pCfg.color);
       }
     }
-    this.destroy();
+    this.release();
   }
 }

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>卡通塔防 H5（Phaser 3）</title>
-  <link rel="stylesheet" href="style.css?v=20261022c" />
+  <link rel="stylesheet" href="style.css?v=20261027a" />
   <!-- Phaser 3（本地引用，离线可运行；如需 CDN 可换成 https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js）。
        全部脚本 defer：浏览器先渲染加载提示层，再并行下载、按序执行，消除手机端白屏 -->
   <script defer src="vendor/phaser.min.js?v=20260920h"></script>
@@ -55,7 +55,6 @@
         <span class="chip chip-level">🎯 <b id="hud-level">第 1 关</b></span>
         <span class="chip chip-gold">🪙 <b id="hud-gold">0</b></span>
         <span class="chip chip-lives">❤️ <b id="hud-lives">0</b></span>
-        <button id="btn-buy-life" class="btn btn-buy-life" type="button">买血 5000</button>
         <span class="chip chip-wave">🌊 <b id="hud-wave">0/0</b></span>
       </div>
       <div class="controls">
@@ -224,7 +223,7 @@
   <!-- ===== 脚本按依赖顺序加载（全部 defer：按文档顺序执行，下载并行） =====
        FireBurnData.js（~600KB 内嵌燃烧视频）不在此同步加载——由 main.js 在
        Phaser 启动前后台动态注入，选关页先行进入，视频数据就绪后自动挂接 -->
-  <script defer src="js/config.js?v=20261023a"></script>
+  <script defer src="js/config.js?v=20261027a"></script>
   <!-- 4 级塔配置（唯一来源根目录 TowerConfig.json；file:// 无法 fetch JSON，
        故加载内嵌副本并注入 TD_CONFIG：maxLevel/lv4Cost/waveGate + cfg.lv4） -->
   <script defer src="js/TowerConfigData.js?v=20261018b"></script>
@@ -232,15 +231,17 @@
   <!-- 媒体加载统一调度（串行队列 + 进度条 + 10s 超时跳过 + Cache API 缓存）：
        必须早于各视频模块执行，供其按需排进加载队列 -->
   <script defer src="js/MediaLoader.js?v=20261025a"></script>
+  <!-- 全局程序音效（Web Audio，无外部音频文件；同类 0.1s 限流防爆音） -->
+  <script defer src="js/AudioFx.js?v=20261027a"></script>
   <!-- 开发调试工具：仅 URL 带 #dbg 时激活（全内容解锁 + 应用内浏览器），无 #dbg 的正式环境脚本立即退出，不创建 DOM、不写任何存储 -->
   <script defer src="js/debugTools.js?v=20260921r"></script>
   <script defer src="js/attackModule.js?v=20261025a"></script>
   <script defer src="js/objects/Enemy.js?v=20261025a"></script>
   <!-- 第 8 关专属实体（水晶史莱姆/自爆泥怪/熔岩巨兽/风眼控制器），依赖 Enemy 基类 -->
-  <script defer src="js/objects/Level8Enemies.js?v=20261023a"></script>
+  <script defer src="js/objects/Level8Enemies.js?v=20261027a"></script>
   <!-- 第 9 关专属实体（元素狂暴图腾 / 蓝色圣殿守卫控制器），依赖 Enemy 基类 -->
   <script defer src="js/objects/Level9Enemies.js?v=20261023a"></script>
-  <script defer src="js/objects/Projectile.js?v=20261025a"></script>
+  <script defer src="js/objects/Projectile.js?v=20261027a"></script>
   <!-- 4 级塔异常状态管理器（塔侧）：依赖 Projectile 做命中钩子，须在其后加载 -->
   <script defer src="js/objects/StatusEffects.js?v=20261023a"></script>
   <script defer src="js/FireTowerArtData.js?v=20261009o"></script>
@@ -269,7 +270,7 @@
   <script defer src="js/objects/ThunderArc.js?v=20261012m"></script>
   <script defer src="js/scenes/BootScene.js?v=20261020a"></script>
   <script defer src="js/scenes/LevelSelectScene.js?v=20261022b"></script>
-  <script defer src="js/scenes/GameScene.js?v=20261025b"></script>
+  <script defer src="js/scenes/GameScene.js?v=20261027a"></script>
   <script defer src="js/main.js?v=20261019a"></script>
   <script>
     /* 启动进度条 + 失败自动重试（放在所有 defer 脚本之后：

@@ -488,18 +488,26 @@
       const cfg = this.cfg || {};
       this.explodeRadius = (cfg.explodeRadius != null) ? cfg.explodeRadius : 50;
       this.explodeSilence = (cfg.explodeSilence != null) ? cfg.explodeSilence : 2;
-      this.contactRange = (cfg.contactRange != null) ? cfg.contactRange : 64;
       this._exploded = false;
-      /* 头顶悬浮红色警示「!」（微微上下浮动） */
-      const mark = scene.add.text(0, -this.radius - 18, '!', {
-        fontFamily: TD_FONT_STACK, fontSize: '17px', fontStyle: 'bold',
+      /* 常态 90% 免伤（JSON armorBase；降防/寒冷等状态仍走 armorReduction） */
+      this.armorBase = (cfg.armorBase != null) ? cfg.armorBase : 0.90;
+      this.dmgReduction = this.armorBase;
+      /* 出场即点燃引信（游戏时间；4x 下推进更快） */
+      this.fuseTime = (cfg.fuseTime != null) ? cfg.fuseTime : 8;
+      this.fuse = this.fuseTime;
+      this._fusePhase = 0;
+      this._fuseShown = -1;
+      /* 红色危险光圈：引信越短，脉冲越快、越亮 */
+      const ring = scene.add.graphics();
+      this.add(ring);
+      this._dangerRing = ring;
+      /* 头顶倒计时数字（红字白描边；越接近爆炸越大、闪烁） */
+      const mark = scene.add.text(0, -this.radius - 18, String(Math.ceil(this.fuse)), {
+        fontFamily: TD_FONT_STACK, fontSize: '16px', fontStyle: 'bold',
         color: '#ff3b3b', resolution: TD_TEXT_RES
-      }).setOrigin(0.5).setStroke('#3a0c08', 3);
+      }).setOrigin(0.5).setStroke('#ffffff', 3);
       this.add(mark);
-      this._markTween = scene.tweens.add({
-        targets: mark, y: '-=3', duration: 300,
-        yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
-      });
+      this._fuseText = mark;
       /* 高频小幅度膨胀收缩（模拟濒临爆炸的抖动）——视频接管后停止
          （视频自身即滚动动画，再叠加缩放会把画面压变形） */
       const bx = this.body.scaleX, by = this.body.scaleY;
@@ -511,6 +519,37 @@
       /* 移动视频接管（assets/bomb_slime_move.mp4，绿幕抠图） */
       setupMoveVideo(this, 'BOMB_SLIME_VIDEO', 'BombSlimeGK');
       this._ghostClock = 0;
+      this._updateFuseVisual();
+    }
+
+    /** 引信视觉：倒计时数字 + 红色危险圈（越接近爆炸越急促） */
+    _updateFuseVisual() {
+      const left = Math.max(0, this.fuse);
+      const urgency = 1 - left / this.fuseTime;
+      const sec = Math.ceil(left);
+      if (this._fuseText && sec !== this._fuseShown) {
+        this._fuseShown = sec;
+        this._fuseText.setText(String(sec));
+      }
+      if (this._fuseText) {
+        this._fuseText.setScale(1 + urgency * 0.22);
+        this._fuseText.setAlpha(left <= 3
+          ? (0.72 + 0.28 * Math.sin(this._fusePhase * 2)) : 1);
+      }
+      if (this._dangerRing) {
+        const g = this._dangerRing;
+        g.clear();
+        const pulse = 0.5 + 0.5 * Math.sin(this._fusePhase);
+        const radius = this.radius + 5 + pulse * 3;
+        const alpha = Math.min(1, 0.28 + urgency * 0.55 + pulse * 0.18);
+        g.lineStyle(2.5, 0xff3b3b, alpha);
+        g.strokeCircle(0, 0, radius);
+        if (urgency > 0.55) {
+          g.lineStyle(1.5, 0xff8a3d, 0.55 + 0.35 * pulse);
+          g.strokeCircle(0, 0, radius + 4);
+        }
+      }
+      if (this._pulseTween) this._pulseTween.timeScale = 1 + urgency * 3;
     }
 
     /* 视频接管成功：停止代码膨胀收缩（滚动由视频呈现；显示尺寸由
@@ -522,6 +561,19 @@
     update(dt, realDt) {
       super.update(dt, realDt);
       if (this.dead || this.removed || !this.scene) return;
+      /* 90% 常态免伤每帧复核：防止 spawn 侧「末波路线减伤」把基数覆盖成 0 */
+      if (this.dmgReduction !== this.armorBase) this.dmgReduction = this.armorBase;
+      /* 引信：出场即倒计时（游戏时间，4x 下同步加速）；归零原地爆炸 */
+      this.fuse -= dt;
+      const left = Math.max(0, this.fuse);
+      const ft = this.fuseTime > 0 ? this.fuseTime : 1;
+      const urgency = 1 - left / ft;
+      this._fusePhase += dt * (3 + urgency * 14);
+      this._updateFuseVisual();
+      if (this.fuse <= 0) {
+        this.detonate();
+        return;
+      }
       /* 滚动节奏与物理位移同步（避免「滑步」）：按本只小怪的实时移速比
          上报播放倍速（减速/定身时滚动同步变慢），共享单视频取本帧最快者 */
       if (this._mvActive && this._mvMod) {
@@ -540,21 +592,15 @@
           onComplete: () => { try { g.destroy(); } catch (_) {} }
         });
       }
-      /* 碰塔引爆：与任一存活塔中心距 < contactRange 即爆炸 */
-      const towers = this.scene.towers || [];
-      for (const tw of towers) {
-        if (!tw || tw.removed) continue;
-        if (Phaser.Math.Distance.Between(this.x, this.y, tw.x, tw.y) < this.contactRange) {
-          this.detonate();
-          break;
-        }
-      }
+      /* 【已移除碰塔提前引爆】移动炸弹只在引信归零或被击杀时爆炸，
+         避免路过塔边就提前炸掉、8 秒倒计时形同虚设。 */
     }
 
     /* 爆炸：特效 → 半径内塔禁言 → 自毁（走正常击杀流程保证波次计数一致） */
     detonate() {
       if (this._exploded || this.dead || this.removed || !this.scene) return;
       this._exploded = true;
+      if (typeof TDAudio !== 'undefined') TDAudio.play('explode');
       this.explodeFx();
       const reach = this.explodeRadius + this.radius; // 半径 50 + 自身体积补偿
       const towers = this.scene.towers || [];
@@ -598,8 +644,9 @@
     }
 
     destroy(fromScene) {
-      if (this._markTween) { try { this._markTween.stop(); } catch (_) {} this._markTween = null; }
       if (this._pulseTween) { try { this._pulseTween.stop(); } catch (_) {} this._pulseTween = null; }
+      this._fuseText = null;
+      this._dangerRing = null;
       endMoveVideo(this);
       super.destroy(fromScene);
     }

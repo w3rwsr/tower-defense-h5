@@ -99,10 +99,12 @@ class GameScene extends Phaser.Scene {
     this.lives = econ.startLives;
     /* 终点城堡大门（含点击热区与门旁血量牌；生命值已初始化） */
     this.drawCastleGates();
-    /* 第 10 关无尽：金币祭坛（地图空地，点击消耗金币激活全屏减益） */
+    /* 第 10 关无尽：金币祭坛（地图最下方空地） */
     this.buildGoldAltars();
+    /* 第 10 关无尽：终点大门旁【+】买血按钮（替代原顶部买血按钮） */
+    this.buildBuyLifeButton();
     /* 顶部 HUD 的血量 chip：普通关卡隐藏（血量已改为大门旁悬浮牌）；
-       第 10 关无尽模式显示，并在旁边提供「金币买血」按钮 */
+       第 10 关无尽模式显示（买血已改到大门旁【+】按钮） */
     const _livesChip = document.querySelector('.chip-lives');
     if (_livesChip) _livesChip.classList.toggle('hidden-by-gate', this.levelId !== 10);
     /* 波次按钮避让大门：冲突时给底部 HUD 加类上移（见 style.css .wave-clear-gate） */
@@ -111,6 +113,21 @@ class GameScene extends Phaser.Scene {
     this.towers = [];
     this.enemies = [];
     this.projectiles = [];
+    /* ---------- 对象池：开局预生成，避免无尽后期高频 new ----------
+       子弹 300 个（池耗尽时按需扩容，峰值后回收复用）；
+       伤害飘字 80 个（上限 200，超出用临时文本，用完销毁）。 */
+    this.projectilePool = [];
+    this._projectilePoolTotal = 0;
+    for (let i = 0; i < 300; i++) {
+      this.projectilePool.push(new Projectile(this, -9999, -9999, null, null, 0, null, true));
+      this._projectilePoolTotal++;
+    }
+    this.damageTextPool = [];
+    this._textPoolTotal = 0;
+    for (let i = 0; i < 80; i++) {
+      this.damageTextPool.push(this._createPoolText());
+      this._textPoolTotal++;
+    }
     /* 三阶段 BOSS 分裂/聚合链接：每局重置，避免同页跨关卡/重开残留旧链接 */
     this.bossPhaseLinks = {};
     this.bossPhaseLinkSeq = 0;
@@ -1550,7 +1567,21 @@ class GameScene extends Phaser.Scene {
       this.obstacles = this.obstacles.filter((o) => !o.dead);
 
       for (const p of this.projectiles) p.update(dt);
-      this.projectiles = this.projectiles.filter((p) => !p.done);
+      /* 回收本帧命中/到期的子弹：隐藏 → 重置 → 放回池（不 destroy） */
+      const aliveProjectiles = [];
+      for (const p of this.projectiles) {
+        if (p.done) {
+          p._tdNeedsRecycle = false;
+          if (this.projectilePool.length < 600) {
+            this.projectilePool.push(p);
+          } else {
+            try { p.destroy(); } catch (e) {}
+          }
+        } else {
+          aliveProjectiles.push(p);
+        }
+      }
+      this.projectiles = aliveProjectiles;
 
       /* 一波结束判定：不再出怪且场上无敌人。
          支线波进行中（activeSideWave）走独立清场逻辑，主波编号不递增。 */
@@ -1884,6 +1915,7 @@ class GameScene extends Phaser.Scene {
          (ec.clearBonusPerWave != null ? ec.clearBonusPerWave : 120) * this.waveIndex)
       : (wcfg.clearBonus[this.waveIndex] || 0);
     this.gold += bonus;
+    if (bonus > 0 && typeof TDAudio !== 'undefined') TDAudio.play('gold');
     /* 第 1 波结束额外一次性奖励（JSON 驱动 firstWaveClearBonus，仅第 1 波触发） */
     const firstBonus = (!ec && this.waveIndex === 0 && wcfg.firstWaveClearBonus) ? wcfg.firstWaveClearBonus : 0;
     if (firstBonus) this.gold += firstBonus;
@@ -2016,6 +2048,7 @@ class GameScene extends Phaser.Scene {
     const bossTexKey = (bv && bv.tex) || entry.bossTex || null;
     const e = new Cls(this, typeKey, routeId, bossTexKey ? { bossTexKey } : null);
     const isBoss = !!e.cfg.boss;
+    if (isBoss && typeof TDAudio !== 'undefined') TDAudio.play('bossSpawn');
     if (isBoss) {
       const wcfg = this.levelCfg.waves;
       const bossCfg = TD_CONFIG.boss || { hpMultiplier: 8, leakMultiplier: 3 };
@@ -2155,6 +2188,11 @@ class GameScene extends Phaser.Scene {
     e.dead = true;
     this.gold += e.reward;
     this.floatText(e.x, e.y - e.radius - 6, '+' + e.reward, 0xffe27a);
+    /* 音效：击杀 / BOSS 死亡 + 金币收入（同类 0.1s 限流，高层同屏不爆音） */
+    if (typeof TDAudio !== 'undefined') {
+      TDAudio.play((e.cfg && e.cfg.boss) ? 'bossDeath' : 'kill');
+      if (e.reward > 0) TDAudio.play('gold');
+    }
     e.playDeath();
   }
 
@@ -3715,9 +3753,23 @@ class GameScene extends Phaser.Scene {
     /* 发射点：火塔从旋转后的火焰根部（底部中心）出弹；其他塔保持塔中心 */
     const m = (typeof tower.getMuzzlePos === 'function')
       ? tower.getMuzzlePos() : { x: tower.x, y: tower.y - 4 };
-    this.projectiles.push(
-      new Projectile(this, m.x, m.y, target, tower.cfg.projectile, tower.stats.damage, tower)
-    );
+    /* 从对象池取弹（不足时兜底新建），避免每发都 new Projectile */
+    let p = null;
+    if (this.projectilePool && this.projectilePool.length) {
+      p = this.projectilePool.pop();
+    }
+    if (!p) {
+      p = new Projectile(this, m.x, m.y, null, null, 0, null, true);
+    }
+    p.spawn(m.x, m.y, target, tower.cfg.projectile, tower.stats.damage, tower);
+    this.projectiles.push(p);
+    if (typeof TDAudio !== 'undefined') TDAudio.play('fire', tower.typeKey);
+  }
+
+  /** Projectile.release() 回调：标记待回收；实际入池在 update 循环尾部统一处理，
+   *  避免遍历中 splice 导致跳帧。 */
+  recycleProjectile(p) {
+    if (p) p._tdNeedsRecycle = true;
   }
 
   /* ============================================================
@@ -4094,17 +4146,70 @@ class GameScene extends Phaser.Scene {
     });
   }
 
-  floatText(x, y, text, color) {
-    x = Math.round(x); y = Math.round(y);   // 坐标取整，避免半像素发虚
-    const t = this.add.text(x, y, text, {
+  /* ---------- 飘字对象池：预生成 80 个，按需扩容到 200 ---------- */
+  _createPoolText() {
+    return this.add.text(-9999, -9999, '', {
       fontFamily: TD_FONT_STACK,
       fontSize: '14px', fontStyle: 'bold',
-      color: '#' + color.toString(16).padStart(6, '0'),
-      resolution: TD_TEXT_RES
-    }).setOrigin(0.5).setDepth(700).setStroke('#2b2230', 3);
+      color: '#ffffff', resolution: TD_TEXT_RES
+    }).setOrigin(0.5).setDepth(700).setActive(false).setVisible(false);
+  }
+
+  _acquireText() {
+    let t = this.damageTextPool && this.damageTextPool.pop();
+    if (t) return t;
+    if ((this._textPoolTotal || 0) >= 200) {
+      t = this._createPoolText();
+      t._tdTransient = true;
+      return t;
+    }
+    this._textPoolTotal = (this._textPoolTotal || 0) + 1;
+    return this._createPoolText();
+  }
+
+  _releaseText(t) {
+    if (!t) return;
+    /* 清掉伤害飘字合并表里对已回收文本的引用 */
+    if (t._tdBag && t._tdBagKey && t._tdBag[t._tdBagKey] &&
+        t._tdBag[t._tdBagKey].text === t) {
+      t._tdBag[t._tdBagKey] = null;
+    }
+    t._tdBag = null;
+    t._tdBagKey = null;
+    if (t._tdTransient) {
+      try { t.destroy(); } catch (e) {}
+      return;
+    }
+    t.setActive(false).setVisible(false).setPosition(-9999, -9999);
+    t.setAlpha(1).setScale(1);
+    if (this.damageTextPool) this.damageTextPool.push(t);
+  }
+
+  floatText(x, y, text, color, opts) {
+    x = Math.round(x); y = Math.round(y);   // 坐标取整，避免半像素发虚
+    const o = opts || {};
+    const size = o.fontSize || 14;
+    const strokeColor = (o.strokeColor != null) ? o.strokeColor : 0x2b2230;
+    const strokeThickness = (o.strokeThickness != null) ? o.strokeThickness : 3;
+    const dur = o.duration || 800;
+    const rise = (o.rise != null) ? o.rise : 34;
+    const t = this._acquireText();
+    this.tweens.killTweensOf(t);
+    const toCss = (v) => (typeof v === 'string')
+      ? v : '#' + v.toString(16).padStart(6, '0');
+    t.setDepth(o.depth || 700);
+    t.setOrigin(0.5);
+    t.setFontSize(size + 'px');
+    t.setColor(toCss(color));
+    t.setStroke(toCss(strokeColor), strokeThickness);
+    t.setText(text);
+    t.setPosition(x, y);
+    t.setAlpha(1).setScale(1);
+    t.setActive(true).setVisible(true);
     this.tweens.add({
-      targets: t, y: y - 34, alpha: 0,
-      duration: 800, ease: 'Cubic.out', onComplete: () => t.destroy()
+      targets: t, y: y - rise, alpha: 0,
+      duration: dur, ease: 'Cubic.out',
+      onComplete: () => this._releaseText(t)
     });
   }
 
@@ -4138,22 +4243,28 @@ class GameScene extends Phaser.Scene {
     const color = isTrue ? 0xffe27a : (colors[element] || 0xffffff);
     const x = Math.round(enemy.x + (Math.random() * 16 - 8));
     const y = Math.round(enemy.y - (enemy.radius || 12) - 22 - Math.random() * 4);
-    const t = this.add.text(x, y, tdFormatBigNumber(val), {
-      fontFamily: TD_FONT_STACK,
-      fontSize: '13px', fontStyle: 'bold',
-      color: '#' + color.toString(16).padStart(6, '0'),
-      resolution: TD_TEXT_RES
-    }).setOrigin(0.5).setDepth(710).setStroke('#1b1412', 2);
-    t.setScale(1.15);
+    /* 从飘字池取用，不再每次命中 new Text */
+    const t = this._acquireText();
+    this.tweens.killTweensOf(t);
+    t.setDepth(710).setOrigin(0.5);
+    t.setFontSize('13px');
+    t.setColor('#' + color.toString(16).padStart(6, '0'));
+    t.setStroke('#1b1412', 2);
+    t.setText(tdFormatBigNumber(val));
+    t.setPosition(x, y);
+    t.setAlpha(1).setScale(1.15);
+    t.setActive(true).setVisible(true);
     const rec = { key: key, t0: now, amount: val, text: t };
     bag[key] = rec;
+    t._tdBag = bag;
+    t._tdBagKey = key;
     this.tweens.add({ targets: t, scale: 1, duration: 90, ease: 'Cubic.out' });
     this.tweens.add({
       targets: t, y: y - 24, alpha: { from: 1, to: 0 },
       duration: 560, ease: 'Cubic.out',
       onComplete: () => {
         if (bag[key] === rec) bag[key] = null;
-        try { t.destroy(); } catch (_) {}
+        this._releaseText(t);
       }
     });
   }
@@ -4280,8 +4391,6 @@ class GameScene extends Phaser.Scene {
 
     /* ---- 第 10 关无尽：金币买血 / 解除封印面板（前 9 关隐藏） ---- */
     const endlessNow = this.levelId === 10;
-    const buyLifeBtn = document.getElementById('btn-buy-life');
-    if (buyLifeBtn) buyLifeBtn.classList.toggle('show', endlessNow);
     const sealToggle = document.getElementById('btn-seal-panel');
     if (sealToggle) sealToggle.classList.toggle('show', endlessNow);
     const sealPanelEl = document.getElementById('seal-panel');
@@ -4299,10 +4408,6 @@ class GameScene extends Phaser.Scene {
         });
       }
     }
-    bindOnce('btn-buy-life', 'click', () => {
-      const s = window.__tdScene;
-      if (s && typeof s.buyLife === 'function') s.buyLife();
-    });
     bindOnce('btn-seal-panel', 'click', () => {
       const s = window.__tdScene;
       if (s && typeof s.toggleSealPanel === 'function') s.toggleSealPanel();
@@ -5040,20 +5145,23 @@ class GameScene extends Phaser.Scene {
       if (!p || p.x == null || p.y == null) return;
       /* 祭坛必须落在空地：离路太近则不建（避免压路/挡怪） */
       if (typeof this.distToPath === 'function' && this.distToPath(p.x, p.y) < 38) return;
-      /* 剔除祭坛与「自动」按钮周围的塔位，保证点击不会与选塔热区冲突 */
+      /* 剔除祭坛与「自动」按钮周围的塔位，保证点击不会与选塔热区冲突。
+         底部祭坛的自动按钮向右延伸到 +72px，留到 78px 更安全。 */
       this.hotspots = (this.hotspots || []).filter(
-        (h) => Math.hypot(h.x - p.x, h.y - p.y) > 62);
+        (h) => Math.hypot(h.x - p.x, h.y - p.y) > 78);
+      /* 底部车道之间只有约 43px 高，祭坛改为紧凑造型：
+         圆内「祭」+ 价格/剩余秒数，自动按钮放右侧同一行，避免标签压到下方道路。 */
       const c = this.add.container(p.x, p.y).setDepth(14);
       const g = this.add.graphics();
-      const icon = this.add.text(0, -2, '祭', {
-        fontFamily: TD_FONT_STACK, fontSize: '18px', fontStyle: 'bold',
+      const icon = this.add.text(0, -6, '祭', {
+        fontFamily: TD_FONT_STACK, fontSize: '15px', fontStyle: 'bold',
         color: '#5a3d16', resolution: TD_TEXT_RES
       }).setOrigin(0.5);
-      const label = this.add.text(0, 28, '', {
-        fontFamily: TD_FONT_STACK, fontSize: '11px', fontStyle: 'bold',
+      const label = this.add.text(0, 9, '', {
+        fontFamily: TD_FONT_STACK, fontSize: '8px', fontStyle: 'bold',
         color: '#ffe27a', resolution: TD_TEXT_RES
-      }).setOrigin(0.5).setStroke('#3a2a10', 3);
-      const zone = this.add.zone(0, 0, 58, 58).setInteractive({ useHandCursor: true });
+      }).setOrigin(0.5).setStroke('#3a2a10', 2);
+      const zone = this.add.zone(0, 0, 50, 50).setInteractive({ useHandCursor: true });
       zone.setData('ui', true);
       zone.on('pointerdown', (p) => {
         /* 阻止冒泡到场景级 onPointerDown，避免激活祭坛同时触发选塔/集火 */
@@ -5063,10 +5171,10 @@ class GameScene extends Phaser.Scene {
       /* 祭坛旁「自动」开关：每隔真实 10 秒自动扣 10000 续杯 */
       const autoBg = this.add.graphics();
       const autoText = this.add.text(48, 0, '自动 关', {
-        fontFamily: TD_FONT_STACK, fontSize: '10px', fontStyle: 'bold',
+        fontFamily: TD_FONT_STACK, fontSize: '9px', fontStyle: 'bold',
         color: '#ffe27a', resolution: TD_TEXT_RES
       }).setOrigin(0.5).setStroke('#3a2a10', 2);
-      const autoZone = this.add.zone(48, 0, 56, 24).setInteractive({ useHandCursor: true });
+      const autoZone = this.add.zone(48, 0, 52, 23).setInteractive({ useHandCursor: true });
       autoZone.setData('ui', true);
       autoZone.on('pointerdown', (p) => {
         if (p && p.event && p.event.stopPropagation) p.event.stopPropagation();
@@ -5172,43 +5280,113 @@ class GameScene extends Phaser.Scene {
     const active = this.altarBuffTimer > 0;
     const sec = active ? Math.max(0, Math.ceil(this.altarBuffTimer)) : 0;
     const cost = (this.altarCfg && this.altarCfg.cost != null) ? this.altarCfg.cost : 10000;
+    const costShort = (typeof tdFormatBigNumber === 'function')
+      ? tdFormatBigNumber(cost) : String(cost);
     for (const a of this.altars) {
       a.g.clear();
-      a.g.fillStyle(0x000000, 0.18).fillEllipse(0, 6, 44, 16);
-      a.g.fillStyle(active ? 0x9be86b : 0xffd96a, 1).fillCircle(0, 0, 20);
-      a.g.lineStyle(3, active ? 0x4c9e2f : 0xa06b12, 1).strokeCircle(0, 0, 20);
-      a.g.lineStyle(2, 0xfff3c4, 0.9).strokeCircle(0, 0, 14);
+      a.g.fillStyle(0x000000, 0.18).fillEllipse(0, 5, 38, 13);
+      a.g.fillStyle(active ? 0x9be86b : 0xffd96a, 1).fillCircle(0, 0, 17);
+      a.g.lineStyle(2.5, active ? 0x4c9e2f : 0xa06b12, 1).strokeCircle(0, 0, 17);
+      a.g.lineStyle(2, 0xfff3c4, 0.9).strokeCircle(0, 0, 12);
       a.icon.setColor(active ? '#1f4a10' : '#5a3d16');
-      a.label.setText(active ? ('祭坛生效 ' + sec + 's') : ('金币祭坛 ' + cost));
+      a.label.setText(active ? (sec + 's') : costShort);
       a.label.setColor(active ? '#7be86b' : '#ffe27a');
       a.activeShown = active;
       if (a.autoBg && a.autoText) {
         const on = !!this.altarAuto;
         a.autoBg.clear();
         a.autoBg.fillStyle(on ? 0x4c9e2f : 0x5c431f, 0.92);
-        a.autoBg.fillRoundedRect(20, -12, 56, 24, 7);
+        a.autoBg.fillRoundedRect(20, -11, 52, 22, 7);
         a.autoBg.lineStyle(2, on ? 0x9be86b : 0xa08a66, 1);
-        a.autoBg.strokeRoundedRect(20, -12, 56, 24, 7);
+        a.autoBg.strokeRoundedRect(20, -11, 52, 22, 7);
         a.autoText.setText(on ? ('自动 ' + Math.max(0, Math.ceil(this.altarAutoTimer)) + 's') : '自动 关');
         a.autoText.setColor(on ? '#eaffdc' : '#cbb894');
       }
     }
   }
 
-  /** 金币买血：5000 金币 +1 生命，无冷却无上限（仅第 10 关） */
+  /** 第 10 关：终点大门旁【+】买血按钮。
+   *  位置在门体右侧、门旁血量牌上方，避开大门/祭坛/开始按钮。 */
+  buildBuyLifeButton() {
+    if (this.levelId !== 10) return;
+    const gate = this.castleGates && this.castleGates[0];
+    if (!gate) return;
+    /* 门 (175,506) 宽 78：右侧 +42px → x≈256；上移到门顶附近 y≈454。
+       门旁血量牌在 (253,494)，+ 按钮底部 471，二者留 9px 间隙。 */
+    const bx = gate.x + gate.gw / 2 + 42;
+    const by = gate.y - 52;
+    /* 剔除【+】按钮正下方的塔位，避免按钮与绿色选塔方格重叠 */
+    this.hotspots = (this.hotspots || []).filter(
+      (h) => Math.hypot(h.x - bx, h.y - by) > 34);
+    const c = this.add.container(bx, by).setDepth(30);
+    const g = this.add.graphics();
+    const plus = this.add.text(0, -1, '+', {
+      fontFamily: TD_FONT_STACK, fontSize: '22px', fontStyle: 'bold',
+      color: '#ffffff', resolution: TD_TEXT_RES
+    }).setOrigin(0.5).setStroke('#8a1c1c', 3);
+    const zone = this.add.zone(0, 0, 46, 46).setInteractive({ useHandCursor: true });
+    zone.setData('ui', true);
+    zone.on('pointerdown', (p) => {
+      if (p && p.event && p.event.stopPropagation) p.event.stopPropagation();
+      this.buyLife();
+    });
+    c.add([g, plus, zone]);
+    this.buyLifeBtn = { x: bx, y: by, container: c, g, plus, zone };
+    this._buyLifeKey = '';
+    this.refreshBuyLifeButton();
+  }
+
+  /** 刷新【+】买血按钮：金币不足置灰；结算后隐藏并禁用点击 */
+  refreshBuyLifeButton() {
+    const b = this.buyLifeBtn;
+    if (!b) return;
+    const ec = this.getEndlessCfg();
+    if (!ec) { b.container.setVisible(false); return; }
+    const visible = this.state !== 'lost' && this.state !== 'won';
+    const cost = (ec.buyLifeCost != null) ? ec.buyLifeCost : 5000;
+    const afford = this.gold >= cost;
+    const key = (visible ? '1' : '0') + (afford ? '1' : '0');
+    if (this._buyLifeKey === key) return;
+    this._buyLifeKey = key;
+    b.container.setVisible(visible);
+    if (b.zone.input) b.zone.input.enabled = visible;
+    b.g.clear();
+    if (!visible) return;
+    b.g.fillStyle(0x000000, 0.18).fillEllipse(0, 5, 36, 12);
+    b.g.fillStyle(afford ? 0xff5a5a : 0x8a8a8a, 1).fillCircle(0, 0, 17);
+    b.g.lineStyle(3, afford ? 0xffffff : 0xcfcfcf, 1).strokeCircle(0, 0, 17);
+    b.g.lineStyle(2, afford ? 0xffd0d0 : 0xbbbbbb, 0.95).strokeCircle(0, 0, 12);
+    b.plus.setColor(afford ? '#ffffff' : '#e0e0e0');
+  }
+
+  /** 金币买血：5000 金币 +1 生命，无冷却无上限（仅第 10 关）。
+   *  飘字从【+】号处向上：红字 + 白描边。 */
   buyLife() {
     const ec = this.getEndlessCfg();
     if (!ec || this.state === 'lost' || this.state === 'won') return false;
     const cost = (ec.buyLifeCost != null) ? ec.buyLifeCost : 5000;
-    if (this.gold < cost) return false;
+    const b = this.buyLifeBtn;
+    const gate = this.castleGates && this.castleGates[0];
+    const bx = b ? b.x : (gate ? gate.x + 80 : this.W / 2);
+    const by = b ? b.y : (gate ? gate.y - 52 : this.H / 2);
+    if (this.gold < cost) {
+      this.floatText(bx, by - 26, '金币不足', 0xff4d4d, {
+        strokeColor: 0xffffff, strokeThickness: 4,
+        fontSize: 16, duration: 900, rise: 38
+      });
+      return false;
+    }
     this.gold -= cost;
     this.lives += 1;
     for (const g of this.castleGates || []) {
       if (g && g.badge) g.badge.setText(String(this.lives));
     }
     this.syncHud();
-    const gate = this.castleGates && this.castleGates[0];
-    if (gate) this.floatText(gate.x, gate.y - 72, '+1 生命', 0xff8a8a);
+    if (typeof TDAudio !== 'undefined') TDAudio.play('buy');
+    this.floatText(bx, by - 26, '-' + cost + '金币', 0xff4d4d, {
+      strokeColor: 0xffffff, strokeThickness: 4,
+      fontSize: 17, duration: 900, rise: 44
+    });
     return true;
   }
 
@@ -5323,8 +5501,10 @@ class GameScene extends Phaser.Scene {
   hideEndlessUi() {
     const p = document.getElementById('seal-panel');
     if (p) p.classList.add('hidden');
-    const b = document.getElementById('btn-buy-life');
-    if (b) b.classList.remove('show');
+    if (this.buyLifeBtn && this.buyLifeBtn.container) {
+      this.buyLifeBtn.container.setVisible(false);
+      if (this.buyLifeBtn.zone.input) this.buyLifeBtn.zone.input.enabled = false;
+    }
     const t = document.getElementById('btn-seal-panel');
     if (t) t.classList.remove('show');
     const msg = document.getElementById('seal-msg');
@@ -5627,16 +5807,8 @@ class GameScene extends Phaser.Scene {
       ? ((this.waveIndex + 1) + ' 波')
       : (Math.min(this.waveIndex + 1, this.levelCfg.waves.list.length) + '/' + this.levelCfg.waves.list.length);
 
-    /* 金币买血按钮（仅第 10 关显示）：价格实时读取 JSON，金币不足置灰 */
-    const buyLifeBtn = document.getElementById('btn-buy-life');
-    if (buyLifeBtn) {
-      const ec = this.getEndlessCfg();
-      if (ec) {
-        const cost = (ec.buyLifeCost != null) ? ec.buyLifeCost : 5000;
-        buyLifeBtn.textContent = '买血 ' + cost;
-        buyLifeBtn.disabled = this.gold < cost;
-      }
-    }
+    /* 终点旁【+】买血按钮：金币/结算状态变化时刷新外观 */
+    if (this.levelId === 10) this.refreshBuyLifeButton();
     /* 解封面板打开时：金币跨过 40 万阈值 → 实时置灰/恢复 */
     if (this.levelId === 10) this.refreshSealAffordability();
 
